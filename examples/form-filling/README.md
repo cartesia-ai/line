@@ -79,7 +79,7 @@ cartesia auth status
 
 ## Remote Deployment
 
-Read the [Cartesia docs](https://docs.cartesia.ai/) to learn how to deploy templates to the Cartesia Line platform.
+Read the [Cartesia docs](https://docs.cartesia.ai/line/) to learn how to deploy templates to the Cartesia Line platform.
 
 ## Architecture
 

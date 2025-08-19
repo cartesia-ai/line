@@ -22,7 +22,7 @@ Build intelligent, low-latency voice agents with background reasoning.
 
 The Line SDK is designed to be used with the Cartesia [Line platform](https://cartesia.ai/line).
 - Create a [Cartesia account](https://play.cartesia.ai).
-- Follow the [quickstart guide](https://docs.cartesia.ai/).
+- Follow the [quickstart guide](https://docs.cartesia.ai/line/start-building/talk-to-your-first-agent).
 
 And you'll be able to make your first voice call in a few minutes.
 
@@ -45,5 +45,5 @@ pip install cartesia-line
 ## Going Deeper
 
 - **More examples**: [examples/](examples/) - See all available examples and patterns
-- **Full API reference**: [docs.cartesia.ai/line](https://docs.cartesia.ai/)
+- **Full API reference**: [docs.cartesia.ai/line](https://docs.cartesia.ai/line/)
 - **Get help**: [Discord community](https://discord.gg/cartesia)

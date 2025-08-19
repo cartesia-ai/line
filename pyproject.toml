@@ -27,7 +27,7 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Typing :: Typed",
 ]
-urls = {Repository = "https://github.com/cartesia-ai/line", Documentation = "https://docs.cartesia.ai/line", Homepage = "https://cartesia.ai/agents"}
+urls = {Repository = "https://github.com/cartesia-ai/line", Documentation = "https://docs.cartesia.ai/line/", Homepage = "https://cartesia.ai/agents"}
 
 
 dependencies = [

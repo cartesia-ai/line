@@ -76,7 +76,7 @@ cartesia auth status
    ```
 
 ## Remote Deployment
-Read the [Cartesia docs](https://docs.cartesia.ai/) to learn how to deploy templates to the Cartesia Line platform.
+Read the [Cartesia docs](https://docs.cartesia.ai/line/) to learn how to deploy templates to the Cartesia Line platform.
 
 ## Ending Calls
 Our basic chat template implements ending the call using LLM Tool Calls. This means that the accuracy of when the agent will attempt to end the call will vary by your chosen LLM's ability to perform tool calls robustly. We accommodate for this by prompting the agent to ask for confirmation before ending the call, but note that the agent's performance will change if you sub out different LLM(s).
