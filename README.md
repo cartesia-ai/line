@@ -20,7 +20,7 @@ Build intelligent, low-latency voice agents with background reasoning.
 
 ## Quickstart (< 5 minutes)
 
-The Line SDK is designed to be used with the Cartesia [Line platform](https://cartesia.ai/line).
+The Line SDK is designed to be used with the Cartesia's voice agent platform [Line](https://cartesia.ai/agents).
 - Create a [Cartesia account](https://play.cartesia.ai).
 - Follow the [quickstart guide](https://docs.cartesia.ai/line/start-building/talk-to-your-first-agent).
 
