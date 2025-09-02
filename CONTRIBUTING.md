@@ -8,7 +8,7 @@ Welcome to the Line Voice Agents SDK repository. This file contains guidelines f
 - **Examples:** `examples/` contains examples of how to use the SDK.
 - **Example Integrations:** `example_integrations/` contains examples of how 3rd party providers manage to integrate with our Line SDK.
 
-  > [!note]
+  > [!NOTE]
   > These examples are developed and maintained by our partners.
 
 
@@ -84,5 +84,5 @@ Our `example_integrations/` folder contains agents developed by our partners tha
   - See our [basic agent README](./examples/basic_chat/README.md) or [form filling README](./examples/form-filling/README.md) for examples
 - Must follow our repositories style guide
 
-  > [!note]
+  > [!NOTE]
   > Partners are responsible for keeping their integration example up to date with Line changes

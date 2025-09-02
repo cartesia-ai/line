@@ -47,7 +47,7 @@ pip install cartesia-line
 - **More examples**: [examples/](examples/) - See all available examples and patterns
 - **3rd party integrations**: [example_integrations/](example_integrations/) - See example integrations for external services
 
-  > [!note]
+  > [!NOTE]
   > While Cartesia approves each example, they are implemented and maintained by our partners.
 - **Full API reference**: [docs.cartesia.ai/line](https://docs.cartesia.ai/line/)
 - **Get help**: [Discord community](https://discord.gg/cartesia)

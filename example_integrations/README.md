@@ -10,7 +10,7 @@ Example integrations demonstrate how to:
 - Implement industry-specific workflows and integrations
 - Showcase partner services and capabilities
 
-> [!note]
+> [!NOTE]
 > While Cartesia approves of these each examples, they are implemented and maintained by our partners.
 
 ## Contributing an Integration
