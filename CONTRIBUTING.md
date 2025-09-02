@@ -81,7 +81,7 @@ Our `example_integrations/` folder contains agents developed by our partners tha
   - You can connect an existing Git repository with the agent code via our [Github Integration](https://docs.cartesia.ai/line/integrations/github) to test the agent
 - Must have a README with clear documentation around the usecase with a link to your API docs
   - README should include Prerequisites, Environment Variables, File Overview, and any other information that might be relevant to modifying or using the example agent
-  - See our [basic agent README](./examples/basic_chat/README.md) or [form filling README](./examples/form-filling/README.md) for examples
+  - See our [basic agent README](./examples/basic_chat/README.md) or [form filling README](./examples/form-filling/README.md) for reference on how to write the README
 - Must follow our repositories style guide
 
   > [!NOTE]
