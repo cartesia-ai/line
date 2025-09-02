@@ -7,7 +7,7 @@ Welcome to the Line Voice Agents SDK repository. This file contains guidelines f
 - **Tests:** `tests/` contains the unit tests with a guide to writing tests below.
 - **Examples:** `examples/` contains examples of how to use the SDK.
 - **Example Integrations:** `example_integrations/` contains examples of how 3rd party providers manage to integrate with our Line SDK.
-  
+
   > [!note]
   > These examples are developed and maintained by our partners.
 
