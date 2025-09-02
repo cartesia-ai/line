@@ -10,17 +10,12 @@ Example integrations demonstrate how to:
 - Implement industry-specific workflows and integrations
 - Showcase partner services and capabilities
 
-*Note: While Cartesia approves of these each examples, they are implemented and maintained by our partners.*
+> [!note]
+> While Cartesia approves of these each examples, they are implemented and maintained by our partners.
 
 ## Contributing an Integration
 
 Interested in adding your own example integration? See our [Contributing Guide](../CONTRIBUTING.md#contributing-to-our-example-integrations) for requirements.
-
-Your integration PR must:
-- Be deployable on the Line platform
-- Include a README with clear documentation and a link to your API docs
-- Follow the repository's style guide
-- Demonstrate a clear use case for your service
 
 ## Getting Help
 
@@ -33,10 +28,14 @@ Your integration PR must:
 Each integration should follow this structure:
 ```
 your_integration_name/
-├── README.md          # Integration-specific documentation
+├── README.md         # Integration-specific documentation
 ├── main.py           # Main agent implementation
 ├── cartesia.toml     # Line platform configuration
 └── requirements.txt  # Dependencies (or pyproject.toml)
 ```
 
 Additional files may be included as needed for your specific integration (additional modules, configuration files, etc.).
+
+## Disclaimer
+
+All example integrations are provided "as is" without warranty of any kind. Cartesia assumes no liability for the use of these examples. All examples are subject to the license of this repository.
