@@ -6,6 +6,8 @@ Welcome to the Line Voice Agents SDK repository. This file contains guidelines f
 - **Source code:** `line/` contains the implementation
 - **Tests:** `tests/` contains the unit tests with a guide to writing tests below.
 - **Examples:** `examples/` contains examples of how to use the SDK.
+- **Example Integrations:** `example_integrations/` contains examples of how 3rd party providers manage to integrate with our Line SDK. 
+  - *Note: These examples are developed and maintained by our partners.*
 
 
 ## Python Version Support
@@ -70,3 +72,9 @@ Reviewers look for the following:
 - Clear PR description and title
 - Unittests covering the new code
 - Consistent style: Use `pre-commit` to run linters and formatters.
+
+## Contributing to Our Example Integrations
+Our `example_integrations/` folder contains agents developed by our partners that utilizes their services. If you're interested in adding your own example integration, your PR must satisfy the following requirements:
+- Must be deployable on the Line platform
+- Must have a README with clear documentation around the usecase with a link to your API docs
+- Must follow our repositories style guide
