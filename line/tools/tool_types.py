@@ -37,3 +37,9 @@ class ToolDefinition(ABC):
     def to_openai_tool(cls) -> Dict[str, object]:
         """Map to OpenAI tool format. https://platform.openai.com/docs/guides/tools?tool-type=function-calling"""
         pass
+
+    @classmethod
+    @abstractmethod
+    def to_anthropic_tool(cls) -> Dict[str, object]:
+        """Map to Anthropic tool format. https://docs.anthropic.com/en/docs/agents-and-tools/tool-use/overview"""
+        pass

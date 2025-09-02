@@ -101,6 +101,24 @@ class EndCallTool(ToolDefinition):
             },
             "strict": True,
         }
+    
+    @classmethod
+    def to_anthropic_tool(cls) -> Dict[str, object]:
+        """Convert to Anthropic tool format"""
+        return {
+            "name": cls.name(),
+            "description": cls.description(),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "goodbye_message": {
+                        "type": "string",
+                        "description": EndCallArgs.model_fields["goodbye_message"].description,
+                    }
+                },
+                "required": ["goodbye_message"],
+            }
+        }
 
 
 async def end_call(

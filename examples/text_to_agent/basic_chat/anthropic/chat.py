@@ -10,7 +10,7 @@ from prompts import get_chat_system_prompt
 from line import ConversationContext, ReasoningNode
 from line.events import AgentResponse, EndCall
 from line.tools.system_tools import EndCallArgs, EndCallTool, end_call
-from utils import convert_messages_to_anthropic, to_anthropic_tool
+from line.utils.anthropic_utils import convert_messages_to_anthropic
 
 
 class ChatNode(ReasoningNode):
@@ -19,11 +19,7 @@ class ChatNode(ReasoningNode):
     Provides simple conversation capabilities without external tools or search.
     """
 
-    def __init__(
-        self,
-        api_key: Optional[str] = None,
-        max_context_length: int = 100
-    ):
+    def __init__(self, api_key: Optional[str] = None, max_context_length: int = 100):
         """Initialize the Voice reasoning node with proven Anthropic configuration.
 
         Args:
@@ -31,19 +27,18 @@ class ChatNode(ReasoningNode):
             max_context_length: Maximum number of conversation turns to keep.
         """
         self.system_prompt = get_chat_system_prompt()
-        logger.info(f"🧠 System prompt: {self.system_prompt}")
         super().__init__(self.system_prompt, max_context_length)
 
         self.tools = []
-        
+
         if not api_key:
             raise ValueError(
                 "Anthropic API key is required. Please set the ANTHROPIC_API_KEY "
                 "environment variable or pass it as a parameter."
             )
-        
+
         self.client = AsyncAnthropic(api_key=api_key)
-        self.tools.append(to_anthropic_tool(EndCallTool))
+        self.tools.append(EndCallTool.to_anthropic_tool())
 
     async def process_context(
         self, context: ConversationContext
@@ -63,7 +58,7 @@ class ChatNode(ReasoningNode):
 
         full_response = ""
         messages = convert_messages_to_anthropic(context.events)
-        
+
         async with self.client.messages.stream(
             model=CHAT_MODEL_ID,
             max_tokens=MAX_TOKENS,
@@ -85,9 +80,13 @@ class ChatNode(ReasoningNode):
                 elif event.type == "content_block_stop":
                     if event.content_block.type == "tool_use":
                         tool_use = event.content_block
-                        logger.info(f"🤖 Tool use complete: {tool_use.name}, input={tool_use.input}")
+                        logger.info(
+                            f"🤖 Tool use complete: {tool_use.name}, input={tool_use.input}"
+                        )
                         if tool_use.name == EndCallTool.name():
-                            goodbye_message = tool_use.input.get("goodbye_message", "Goodbye!")
+                            goodbye_message = tool_use.input.get(
+                                "goodbye_message", "Goodbye!"
+                            )
                             args = EndCallArgs(goodbye_message=goodbye_message)
                             logger.info(
                                 f"🤖 End call tool called. Ending conversation with goodbye message: "
@@ -97,4 +96,6 @@ class ChatNode(ReasoningNode):
                                 yield item
 
         if full_response:
-            logger.info(f'🤖 Agent response: "{full_response}" ({len(full_response)} chars)')
+            logger.info(
+                f'🤖 Agent response: "{full_response}" ({len(full_response)} chars)'
+            )

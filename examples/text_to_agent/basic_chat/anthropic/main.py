@@ -1,5 +1,8 @@
 import os
 
+from dotenv import load_dotenv
+load_dotenv()
+
 from chat import ChatNode
 from loguru import logger
 from prompts import get_initial_message

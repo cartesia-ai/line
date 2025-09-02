@@ -1,16 +1,14 @@
 from typing import Dict, Any, List, Callable
-from line.events import EventInstance, EventType
-from line.tools.system_tools import ToolDefinition
-from line.events import AgentResponse, UserTranscriptionReceived, ToolCall, ToolResult
 
+from line.events import (
+    EventInstance,
+    EventType,
+    AgentResponse,
+    UserTranscriptionReceived,
+    ToolCall,
+    ToolResult,
+)
 
-def to_anthropic_tool(tool: ToolDefinition) -> Dict[str, object]:
-    oai_tool = tool.to_openai_tool()
-    return {
-        "name": tool.name(),
-        "description": tool.description(),
-        "input_schema": oai_tool.get("parameters"),
-    }
 
 def convert_messages_to_anthropic(
     events: List[EventInstance],
