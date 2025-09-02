@@ -78,5 +78,9 @@ Reviewers look for the following:
 ## Contributing to Our Example Integrations
 Our `example_integrations/` folder contains agents developed by our partners that utilizes their services. If you're interested in adding your own example integration, your PR must satisfy the following requirements:
 - Must be deployable on the Line platform
+  - You can connect an existing Git repository with the agent code via our [Github Integration](https://docs.cartesia.ai/line/integrations/github) to test the agent
 - Must have a README with clear documentation around the usecase with a link to your API docs
 - Must follow our repositories style guide
+
+  > [!note]
+  > Partners are responsible for keeping their integration example up to date with Line changes
