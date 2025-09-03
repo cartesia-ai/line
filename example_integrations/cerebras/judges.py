@@ -99,7 +99,7 @@ class JudgeNode(ReasoningNode):
                             }
                          } 
             else:
-                # logger.warning("Node does not include a schema")
+                
                 format_ = None
             
 
@@ -126,25 +126,27 @@ class JudgeNode(ReasoningNode):
                     try:
                         
                         # Parse as JSON to validate structure
-                        leads_data = json.loads(extracted_info)
+                        perf_data = json.loads(extracted_info)
                         
-                        leads_info = EvalInfo.model_validate(leads_data)
-                        # logger.info(f"Report from {self.node_name}")
+                        perf_info = EvalInfo.model_validate(perf_data)
+                        
                         self.text_logger._write('\n[RESPONSE] \n'+latest_response+"\n")
                         self.text_logger._write("-"*len(latest_response)+"\n")
-                        self.text_logger._write(make_table(leads_info.model_dump_json(), self.node_name))
+                        self.text_logger._write(make_table(perf_info.model_dump_json(), self.node_name))
                         self.text_logger._write("-"*len(latest_response)+"\n")
-                        logger.info(f"Evaluation from {self.node_name}:\n{leads_info.model_dump_json()}")
+                        
+                        yield PerfAnalysis(content=f"Evaluation from {self.node_name}:\n{perf_info.model_dump_json()}")
                         
                     except (json.JSONDecodeError, ValueError) as e:
+                        
                         logger.warning(f"Failed to parse evaluation as JSON: {e}")
+                        yield PerfAnalysis(content=f"Unparsed evaluation from {self.node_name}:\n{extracted_info}")
                         
                         
-                        yield AgentResponse(content=f"{extracted_info}")
                 else:
                     logger.info(f"No structured report: {extracted_info}")
 
-                    yield AgentResponse(content=f"{extracted_info}")
+                    yield PerfAnalysis(content=f"Unstructured feedback from {self.node_name}:\n{extracted_info}")
                     
 
             else:
