@@ -71,28 +71,31 @@ async def handle_new_call(system: VoiceAgentSystem, chat_request: CallRequest):
     agent1_bridge = Bridge(agent1_node)
     # ... configure conversation routing
     agent1_bridge.on(UserTranscriptionReceived).map(agent1_node.add_event)
+    agent1_bridge.on(AgentResponse).map(agent1_node.add_event)
     agent1_bridge.on(UserStoppedSpeaking).stream(agent1_node.generate).broadcast()
 
     # Add the judge events to the conversation node
-    conversation_bridge.on(TechnicalAnalysis).map(conversation_node.add_event)
+    conversation_bridge.on(PerfAnalysis).map(conversation_node.add_event)
     
     
     
     agent2_bridge = Bridge(agent2_node)
     agent2_bridge.on(UserTranscriptionReceived).map(agent2_node.add_event)
+    agent2_bridge.on(AgentResponse).map(agent2_node.add_event)
     agent2_bridge.on(UserStoppedSpeaking).stream(agent2_node.generate).broadcast()
 
     # Add the judge events to the conversation node
-    conversation_bridge.on(CommsAnalysis).map(conversation_node.add_event)
+    conversation_bridge.on(PerfAnalysis).map(conversation_node.add_event)
     
     
     
     agent3_bridge = Bridge(agent3_node)
     agent3_bridge.on(UserTranscriptionReceived).map(agent3_node.add_event)
+    agent3_bridge.on(AgentResponse).map(agent3_node.add_event)
     agent3_bridge.on(UserStoppedSpeaking).stream(agent3_node.generate).broadcast()
 
     # Add the judge events to the conversation node
-    conversation_bridge.on(ReasonAnalysis).map(conversation_node.add_event)
+    conversation_bridge.on(PerfAnalysis).map(conversation_node.add_event)
     
 
     
