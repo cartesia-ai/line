@@ -83,26 +83,13 @@ COMPETENCE LEVEL ASSESSMENT:
 INTERVIEW_STARTED = False
 
 
-class TechnicalAnalysis(BaseModel):
+class PerfAnalysis(BaseModel):
     """Performance analysis results from the interview."""
 
     perf_info: dict
     confidence: str = "medium"
     timestamp: str
 
-class CommsAnalysis(BaseModel):
-    """Performance analysis results from the interview."""
-
-    perf_info: dict
-    confidence: str = "medium"
-    timestamp: str
-
-class ReasonAnalysis(BaseModel):
-    """Performance analysis results from the interview."""
-
-    perf_info: dict
-    confidence: str = "medium"
-    timestamp: str
 
 MAX_OUTPUT_TOKENS = 100
 MODEL_ID = 'llama3.3-70b'
