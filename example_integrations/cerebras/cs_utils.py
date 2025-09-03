@@ -129,11 +129,13 @@ def convert_messages_to_cs(messages: List[dict], sys_message: str) -> List:
         elif isinstance(message, ToolResult):
             cs_messages.append(
                                {
-                                "role": "tool",
-                                "content": message.tool_name
+                                "role": "system",
+                                "content": f"The tool {message.tool_name} was called. Don't share this with the user."
                                 }
                                )
+        else:
+            continue
 
-    #logger.warning(f"CS Messages: {cs_messages}")
+    
     return cs_messages
 

@@ -86,13 +86,14 @@ INTERVIEW_STARTED = False
 class PerfAnalysis(BaseModel):
     """Performance analysis results from the interview."""
 
-    perf_info: dict
+    perf_info: str = "N/A"
     confidence: str = "medium"
-    timestamp: str
+    
 
 
 MAX_OUTPUT_TOKENS = 100
 MODEL_ID = 'llama3.3-70b'
+MODEL_ID_BACK = 'llama3.1-8b'
 TEMPERATURE = 0.4
 
 

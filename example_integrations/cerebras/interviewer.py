@@ -83,7 +83,7 @@ class TalkingNode(ReasoningNode):
                     
                     if function_call.name == EndCallTool.name():
                         
-                        goodbye_message = function_call.args.get("goodbye_message", "Goodbye!")
+                        goodbye_message = "It was nice talking to you. Goodbye!"
                         args = EndCallArgs(goodbye_message=goodbye_message)
                         logger.info(
                             f"🤖 End call tool called. Ending conversation with goodbye message: "
@@ -129,7 +129,7 @@ class TalkingNode(ReasoningNode):
 
             #Process the extracted information
             if extracted_info:
-
+                    
                     yield AgentResponse(content=f"{extracted_info}")
                     
 
@@ -139,6 +139,6 @@ class TalkingNode(ReasoningNode):
             
 
         except Exception as e:
-            logger.exception(f"Error during evaluation: {e}")
+            logger.exception(f"Error during interviewer node operation: {e}")
 
         
