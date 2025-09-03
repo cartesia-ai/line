@@ -137,29 +137,3 @@ def convert_messages_to_cs(messages: List[dict], sys_message: str) -> List:
     #logger.warning(f"CS Messages: {cs_messages}")
     return cs_messages
 
-
-def convert_openai_to_cs(tool_schema):
-    """
-    Convert OpenAI tool schema to CS format
-
-    Args:
-        tool_schema: OpenAI tool schema
-
-    Returns:
-        Cerebras-formatted tool schema
-    """
-
-    
-
-    return {
-            "type": "function",
-            "name": tool_schema["name"],
-            "description": tool_schema.get("description", ""),
-            "parameters": {
-                "type": "object",
-                "properties": tool_schema.get("parameters", {}),
-                "required": ["confirmation_message"],
-                "additionalProperties": False,
-            },
-            "strict": True,
-        }
