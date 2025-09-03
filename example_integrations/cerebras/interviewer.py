@@ -1,15 +1,12 @@
-import json, sys
+import json
 from typing import AsyncGenerator
 
-#import types
-from pathlib import Path
 from loguru import logger
-import json
 
-from line.events import AgentResponse
+from line.events import AgentResponse, ToolResult
 from line.nodes.conversation_context import ConversationContext
 from line.nodes.reasoning import ReasoningNode
-from line.tools.system_tools import EndCallTool
+from line.tools.system_tools import EndCallArgs, EndCallTool, end_call
 
 
 from cs_utils import *
@@ -49,7 +46,7 @@ class TalkingNode(ReasoningNode):
         Yields:
             NodeMessage: evaluation results.
         """
-        #logger.info("Starting performance analysis")
+        
 
         if not context.events:
             logger.info("No conversation messages to analyze performance")
@@ -57,9 +54,9 @@ class TalkingNode(ReasoningNode):
         
         
         try:
-            # Convert messages and tools to cs format
+            # Convert messages to cs format
             cs_messages = convert_messages_to_cs(context.events, self.sys_prompt)
-            #logger.debug(f"CS messages: {cs_messages}")
+            
             # Call Cerebras API
             
             stream = await self.client.chat.completions.create(
@@ -74,27 +71,38 @@ class TalkingNode(ReasoningNode):
             extracted_info = None
             
             if stream:
-                #logger.warning(f"choice: {stream.choices}")
+                
                 choice = stream.choices[0].message
                 
 
                 if choice.tool_calls:
+                   
                     function_call = choice.tool_calls[0].function
-                    #logger.info("tools are called")
-                
+                    
+                    yield ToolResult(tool_name=function_call.name)
+                    
+                    if function_call.name == EndCallTool.name():
+                        
+                        goodbye_message = function_call.args.get("goodbye_message", "Goodbye!")
+                        args = EndCallArgs(goodbye_message=goodbye_message)
+                        logger.info(
+                            f"🤖 End call tool called. Ending conversation with goodbye message: "
+                            f"{args.goodbye_message}"
+                        )
+                        async for item in end_call(args):
+                            yield item
+                        
+                        
                     if function_call.name == "start_interview":
-                        # Logging that the model is executing a function named "calculate".
-                        # logger.info(f"Model executing function '{function_call.name}' with arguments {function_call.arguments}")
-
-                        # Parse the arguments from JSON format and perform the requested calculation.
+                                                
                         arguments = json.loads(function_call.arguments)
-                        #logger.info(f"start_interview tool called")
+                        
                         
                         config.INTERVIEW_STARTED = arguments["confirmed"]
-                        logger.warning(f"Interview started: {config.INTERVIEW_STARTED}")
+                        logger.info(f"🤖 Interview started: {config.INTERVIEW_STARTED}")
 
                         # Note: This is the result of executing the model's request (the tool call), not the model's own output.
-                        # logger.error(f"Confirmation for interview: {config.interview_started}")
+                        
                     
                         # Send the result back to the model to fulfill the request.
                         if config.INTERVIEW_STARTED:
@@ -105,7 +113,7 @@ class TalkingNode(ReasoningNode):
                             })
 
                 
-                        # Request the final response from the model, now that it has the calculation result.
+                        # Request the final response from the model, now that it has the result.
                         final_response = await self.client.chat.completions.create(
                                 messages=cs_messages,
                                 model=MODEL_ID,
@@ -116,7 +124,7 @@ class TalkingNode(ReasoningNode):
                         
                 
                 else:    
-                    #logger.info("no tool calling")
+                    
                     extracted_info=stream.choices[0].message.content
 
             #Process the extracted information
