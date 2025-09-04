@@ -78,13 +78,13 @@ class TalkingNode(ReasoningNode):
                 if choice.tool_calls:
                    
                     function_call = choice.tool_calls[0].function
-                    
-                    yield ToolResult(tool_name=function_call.name)
+                    arguments = json.loads(function_call.arguments)
+                    yield ToolResult(tool_name=function_call.name, tool_args=arguments)
                     
                     if function_call.name == EndCallTool.name():
                         
                        
-                        arguments = json.loads(function_call.arguments)
+                        
                         args = EndCallArgs(**arguments)
                         
                         logger.info(
@@ -97,7 +97,7 @@ class TalkingNode(ReasoningNode):
                         
                     if function_call.name == "start_interview":
                                                 
-                        arguments = json.loads(function_call.arguments)
+                        
                         
                         
                         config.INTERVIEW_STARTED = arguments["confirmed"]
