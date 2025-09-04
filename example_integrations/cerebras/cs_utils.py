@@ -58,19 +58,6 @@ interview_schema = {
         }
     }
 
-def start_interview(confirmed: bool) -> bool:
-    """
-    Sets the interview flag to True if the user confirms they are ready.
-    
-    Parameters:
-    - confirmed: Whether the user confirmed readiness.
-
-    Returns:
-    - confirmed
-    """
-    config.INTERVIEW_STARTED = confirmed
-    return confirmed
-
 
 
 def make_table(json_str: str, name_str: str) -> str:
