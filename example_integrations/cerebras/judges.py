@@ -71,9 +71,7 @@ class JudgeNode(ReasoningNode):
             return
         
         
-        if isinstance(context.events[-1], AgentResponse):
-            logger.warning("last message from agent, not user, skipping analysis")
-            return
+        
 
         latest_response = context.get_latest_user_transcript_message()
 
