@@ -1,17 +1,12 @@
 import json
 from typing import AsyncGenerator
-
-
 from loguru import logger
 from pydantic import BaseModel, Field
-
 from line.events import AgentResponse
 from line.nodes.conversation_context import ConversationContext
 from line.nodes.reasoning import ReasoningNode
-
 from report_logger import SimpleLogger
-
-from cs_utils import *
+from cs_utils import convert_messages_to_cs, make_table
 import config
 
 
@@ -67,12 +62,9 @@ class JudgeNode(ReasoningNode):
         
             logger.warning("starting the interview analysis process for current agent")
         else:
-            logger.warning("background agents not working")
+            logger.warning("background agents not activated")
             return
         
-        
-        
-
         latest_response = context.get_latest_user_transcript_message()
 
         if not context.events:
@@ -81,7 +73,6 @@ class JudgeNode(ReasoningNode):
 
         try:
             # Convert messages to cs format
-
             cs_messages = convert_messages_to_cs(context.events, self.sys_prompt) #[:-1]
             
 

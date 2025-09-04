@@ -1,16 +1,11 @@
 import json
 from typing import AsyncGenerator
-
 from loguru import logger
-
 from line.events import AgentResponse, ToolResult
 from line.nodes.conversation_context import ConversationContext
 from line.nodes.reasoning import ReasoningNode
 from line.tools.system_tools import EndCallArgs, EndCallTool, end_call
-
-
-from cs_utils import *
-
+from cs_utils import end_call_schema, interview_schema, convert_messages_to_cs
 import config
 
 
@@ -31,7 +26,6 @@ class TalkingNode(ReasoningNode):
         super().__init__(self.sys_prompt,)
 
         self.client = client
-        self.model_name = 'llama-3.3-70b'
         self.tools = [end_call_schema, interview_schema] 
     
     
@@ -98,9 +92,6 @@ class TalkingNode(ReasoningNode):
                         
                     if function_call.name == "start_interview":
                                                 
-                        
-                        
-                        
                         config.INTERVIEW_STARTED = arguments["confirmed"]
                         logger.info(f"🤖 Interview started: {config.INTERVIEW_STARTED}")
 

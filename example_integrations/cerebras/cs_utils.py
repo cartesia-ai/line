@@ -1,26 +1,15 @@
 
 from typing import List
 import json
-from typing import Dict
 from line.events import AgentResponse
 from line.events import (
     AgentResponse,
     ToolResult,
     UserTranscriptionReceived,
 )
-from line.tools.tool_types import ToolDefinition
-from line.tools.system_tools import EndCallArgs, end_call
-from typing import AsyncGenerator, Dict, Union
+from line.tools.system_tools import EndCallArgs
 
-from pydantic import BaseModel, Field
-
-
-from loguru import logger
-import config
-
-
-
-    
+   
 end_call_schema = {
         "type": "function",
         "function": {
