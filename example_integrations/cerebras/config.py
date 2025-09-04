@@ -1,10 +1,10 @@
 from pydantic import BaseModel
 
-prompt_main = """You are a helpful interview practice assistant with access to an interview starter tool. 
-If the user says they are ready to start the interview, call the tool `start_interview` with `confirmed=True`. 
+prompt_main = """You are a helpful interview practice assistant with access to an interview starter tool.
+If the user says they are ready to start the interview, call the tool `start_interview` with `confirmed=True`.
 If the user says they need to leave or they want to stop, end the interview and call the tool `end_call`. Do not tell the user about the tools you use. The tools are only for you.
 Speak naturally, like a real interviewer. Based on the conversation so far, respond to the user briefly and ask the next question. Do not communicate your reasoning steps or thinking process to the user.
-Be concise, like a coach. /no_think . 
+Be concise, like a coach. /no_think .
 """
 
 prompt_agent1 = """
@@ -32,12 +32,12 @@ COMPETENCE LEVEL ASSESSMENT:
 schema_background = {
     "type": "object",
     "properties": {
-        "competence": {"type": "string", "enum": ["HIGH","MEDIUM","LOW"]},
+        "competence": {"type": "string", "enum": ["HIGH", "MEDIUM", "LOW"]},
         "strengths": {"type": "string"},
         "weaknesses": {"type": "string"},
     },
     "required": ["competence", "strengths", "weaknesses"],
-    "additionalProperties": False
+    "additionalProperties": False,
 }
 
 prompt_agent2 = """
@@ -88,12 +88,9 @@ class PerfAnalysis(BaseModel):
 
     perf_info: str = "N/A"
     confidence: str = "medium"
-    
 
 
 MAX_OUTPUT_TOKENS = 100
-MODEL_ID = 'llama3.3-70b'
-MODEL_ID_BACK = 'llama3.1-8b'
+MODEL_ID = "llama3.3-70b"
+MODEL_ID_BACK = "llama3.1-8b"
 TEMPERATURE = 0.4
-
-

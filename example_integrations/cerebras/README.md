@@ -3,7 +3,7 @@ Let's design a real-time interviewer voice agent integrating Cerebras and Cartes
 <img width="1920" height="1183" alt="cartesia_demo_workflow" src="https://github.com/user-attachments/assets/254ad6ba-76b0-4fdb-8ae5-95c19c821592" />
 
 
-We will guide you step by step on how to implement this workflow using Cartesia and Cerebras API's ! 
+We will guide you step by step on how to implement this workflow using Cartesia and Cerebras API's !
 
 ## Getting started
 First things first, here is what you will need:
@@ -27,7 +27,7 @@ Make sure to add the api keys in your `.env` file or to the API keys section in 
   System prompts, model ID and hyperparameters can be added to the `config.py` file. This file also includes the boolean parameter that determines if the background agents should be activated.
 
 ## Talking Agent
-`interviewer.py` includes the ReasoningNode subclass that is customized to match Cerebras API. The required utility functions are included in the `cs_utils.py`. Please note that you will need to ensure the tool call schema matches the Cerebras Inference API format [here](https://inference-docs.cerebras.ai/capabilities/tool-use). 
+`interviewer.py` includes the ReasoningNode subclass that is customized to match Cerebras API. The required utility functions are included in the `cs_utils.py`. Please note that you will need to ensure the tool call schema matches the Cerebras Inference API format [here](https://inference-docs.cerebras.ai/capabilities/tool-use).
 This agent calls a tool named `start_interview` which sets a flag to trigger the background agents. This is to ensure that the background agents don't evaluate responses from the user that are given prior to the mock interview.
 
 ## Background (Judge) Agents
@@ -42,6 +42,3 @@ The async call handling function `handle_new_call` should include all the nodes 
 
 ## Deploying the agent
 Finally, don't forget to add the `cartesia.toml` file that will install and run your script when deployed on the Agents platform. You can simply clone this repository and add it to your [agents dashboard](https://play.cartesia.ai/agents) along with your API Keys.
-
-
-

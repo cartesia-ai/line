@@ -1,5 +1,6 @@
 from pathlib import Path
 
+
 class SimpleLogger:
     def __init__(self, log_name="report"):
         # Get current working directory and append 'reports'
