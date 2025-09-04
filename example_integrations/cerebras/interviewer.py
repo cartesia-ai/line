@@ -83,8 +83,10 @@ class TalkingNode(ReasoningNode):
                     
                     if function_call.name == EndCallTool.name():
                         
-                        goodbye_message = "It was nice talking to you. Goodbye!"
-                        args = EndCallArgs(goodbye_message=goodbye_message)
+                       
+                        arguments = json.loads(function_call.arguments)
+                        args = EndCallArgs(**arguments)
+                        
                         logger.info(
                             f"🤖 End call tool called. Ending conversation with goodbye message: "
                             f"{args.goodbye_message}"
