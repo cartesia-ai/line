@@ -10,7 +10,8 @@ from line.tools.system_tools import EndCallArgs, EndCallTool, end_call
 
 
 from cs_utils import *
-from config import *
+
+import config
 
 
 
@@ -61,9 +62,9 @@ class TalkingNode(ReasoningNode):
             
             stream = await self.client.chat.completions.create(
                     messages=cs_messages,
-                    model=MODEL_ID,
-                    max_tokens= MAX_OUTPUT_TOKENS,
-                    temperature= TEMPERATURE,
+                    model=config.MODEL_ID,
+                    max_tokens= config.MAX_OUTPUT_TOKENS,
+                    temperature= config.TEMPERATURE,
                     stream=False,
                     tools=self.tools,
                     parallel_tool_calls=True,
@@ -118,7 +119,7 @@ class TalkingNode(ReasoningNode):
                         # Request the final response from the model, now that it has the result.
                         final_response = await self.client.chat.completions.create(
                                 messages=cs_messages,
-                                model=MODEL_ID,
+                                model=config.MODEL_ID,
                                 stream=False,
                                 )
                         
