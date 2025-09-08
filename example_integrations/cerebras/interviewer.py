@@ -85,14 +85,13 @@ class TalkingNode(ReasoningNode):
                         config.INTERVIEW_STARTED = arguments["confirmed"]
                         logger.info(f"🤖 Interview started: {config.INTERVIEW_STARTED}")
 
-                        # Note: This is the result of executing the model's request (the tool call), not the model's own output.
-
                         # Send the result back to the model to fulfill the request.
                         if config.INTERVIEW_STARTED:
                             cs_messages.append(
                                 {
                                     "role": "system",
-                                    "content": "Based on the current conversation context, ask the next question. /no_think ",
+                                    "content": "Based on the current conversation context,\
+                                          ask the next question. /no_think ",
                                 }
                             )
 

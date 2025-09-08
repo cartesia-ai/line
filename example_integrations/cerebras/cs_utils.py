@@ -13,7 +13,8 @@ end_call_schema = {
     "function": {
         "name": "end_call",
         "strict": True,
-        "description": "Ends the call when the user says they need to leave or they want to stop.",
+        "description": "Ends the call when the user says \
+            they need to leave or they want to stop.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -31,13 +32,16 @@ interview_schema = {
     "function": {
         "name": "start_interview",
         "strict": True,
-        "description": "Starts the interview after user confirmation. Call this when the user says they are ready to start the interview.",
+        "description": "Starts the interview after user confirmation. \
+            Call this when the user says they are ready to\
+                  start the interview.",
         "parameters": {
             "type": "object",
             "properties": {
                 "confirmed": {
                     "type": "boolean",
-                    "description": "Set to true if the user confirms they are ready to begin the interview.",
+                    "description": "Set to true if the user confirms they\
+                          are ready to begin the interview.",
                 }
             },
             "required": ["confirmed"],
@@ -87,7 +91,8 @@ def convert_messages_to_cs(messages: List[dict], sys_message: str) -> List:
             cs_messages.append(
                 {
                     "role": "system",
-                    "content": f"The tool {message.tool_name} was called. Don't share this with the user.",
+                    "content": f"The tool {message.tool_name} was called. \
+                        Don't share this with the user.",
                 }
             )
         else:

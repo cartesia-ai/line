@@ -2,8 +2,11 @@ from pydantic import BaseModel
 
 prompt_main = """You are a helpful interview practice assistant with access to an interview starter tool.
 If the user says they are ready to start the interview, call the tool `start_interview` with `confirmed=True`.
-If the user says they need to leave or they want to stop, end the interview and call the tool `end_call`. Do not tell the user about the tools you use. The tools are only for you.
-Speak naturally, like a real interviewer. Based on the conversation so far, respond to the user briefly and ask the next question. Do not communicate your reasoning steps or thinking process to the user.
+If the user says they need to leave or they want to stop, end the interview and call the tool `end_call`.
+Do not tell the user about the tools you use. The tools are only for you.
+Speak naturally, like a real interviewer.
+Based on the conversation so far, respond to the user briefly and ask the next question.
+Do not communicate your reasoning steps or thinking process to the user.
 Be concise, like a coach. /no_think .
 """
 
@@ -50,8 +53,10 @@ RATING GUIDELINES:
 - If information is not mentioned, use empty strings or default values
 - Focus on communication style that would help with follow-up
 - Assess relevance based on engagement and enthusiasm
-- Identify the weaknesses of the interviewer in communication, like unfinished sentences, unprofessional replies, etc.
-- Identify the strengths of the interviewer in communication, like using professional and polite language
+- Identify the weaknesses of the interviewer in communication,\
+      like unfinished sentences, unprofessional replies, etc.
+- Identify the strengths of the interviewer in communication,\
+      like using professional and polite language
 - your assessment should be bullet-points and short
 
 COMPETENCE LEVEL ASSESSMENT:

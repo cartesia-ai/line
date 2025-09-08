@@ -2,20 +2,16 @@ import logging
 import os
 
 from cerebras.cloud.sdk import AsyncCerebras
+from config import PerfAnalysis, prompt_agent1, prompt_agent2, prompt_agent3, prompt_main, schema_background
 from dotenv import load_dotenv
+from interviewer import TalkingNode
+from judges import JudgeNode
+
+from line import Bridge, CallRequest, VoiceAgentApp, VoiceAgentSystem
+from line.events import AgentResponse, UserStartedSpeaking, UserStoppedSpeaking, UserTranscriptionReceived
 
 # Load environment variables from .env file
 load_dotenv()
-
-
-from config import *
-from cs_utils import *
-from interviewer import *
-from judges import *
-
-from line import Bridge, CallRequest, VoiceAgentApp, VoiceAgentSystem
-from line.call_request import CallRequest
-from line.events import UserStartedSpeaking, UserStoppedSpeaking, UserTranscriptionReceived
 
 logger = logging.getLogger(__name__)
 
@@ -94,7 +90,8 @@ async def handle_new_call(system: VoiceAgentSystem, chat_request: CallRequest):
 
     await system.start()
     await system.send_initial_message(
-        "Welcome to the Interview Practice Platform! Please let me know what role you are applying for and when you are ready to begin the interview."
+        "Welcome to the Interview Practice Platform! "
+        "Please let me know what role you are applying for and when you are ready to begin the interview."
     )
     await system.wait_for_shutdown()
 
