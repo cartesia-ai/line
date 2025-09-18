@@ -24,6 +24,7 @@ async def handle_new_call(system: VoiceAgentSystem, call_request: CallRequest):
     system.with_speaking_node(conversation_node, bridge=conversation_bridge)
 
     conversation_bridge.on(UserTranscriptionReceived).map(conversation_node.add_event)
+    conversation_bridge.on(DTMFEvent).map(conversation_node.add_event)  # this is important!
 
     (
         conversation_bridge.on(UserStoppedSpeaking)
@@ -33,9 +34,7 @@ async def handle_new_call(system: VoiceAgentSystem, call_request: CallRequest):
     )
 
     await system.start()
-    await system.send_initial_message(
-        "Hello! I am your voice agent powered by Cartesia. What do you want to build?"
-    )
+    await system.send_initial_message("Hello! Please enter numbers on your phone to add them together")
     await system.wait_for_shutdown()
 
 

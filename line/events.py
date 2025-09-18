@@ -183,6 +183,12 @@ class LogMetric(BaseModel):
     value: Any
 
 
+class DTMFEvent(BaseModel):
+    """DTMF event for tracking DTMF input."""
+
+    button: str
+
+
 class _EventsRegistry:
     """A singleton registry of all events.
 

@@ -16,6 +16,7 @@ from line.events import (
     AgentSpeechSent,
     AgentStartedSpeaking,
     AgentStoppedSpeaking,
+    DTMFEvent,
     UserStartedSpeaking,
     UserStoppedSpeaking,
     UserTranscriptionReceived,
@@ -24,6 +25,8 @@ from line.events import (
 from line.harness_types import (
     AgentSpeechInput,
     AgentStateInput,
+    DTMFInput,
+    DTMFOutput,
     EndCallOutput,
     ErrorOutput,
     InputMessage,
@@ -126,6 +129,7 @@ class ConversationHarness:
         return await self.input_queue.get()
 
     async def _send(self, output: OutputMessage):
+        print(f"🟠🟠🟠 _send: {output}")
         try:
             if not self.shutdown_event.is_set():
                 await self.websocket.send_json(output.model_dump())
@@ -199,6 +203,15 @@ class ConversationHarness:
         logger.debug(f"📈 Logging metric: {name}={value}")
         await self._send(LogMetricOutput(name=name, value=value))
 
+    async def send_dtmf(self, button: str):
+        """
+        Send a DTMF event via WebSocket
+
+        Args:
+            button: The DTMF button to send
+        """
+        await self._send(DTMFOutput(button=button))
+
     async def cleanup(self):
         """
         Clean up resources and stop all tasks
@@ -229,6 +242,7 @@ class ConversationHarness:
 
     def map_to_events(self, message: InputMessage) -> List[Any]:
         """Convert harness-specific message to bus events."""
+        print(f"⛑⛑⛑ map_to_events: {message}")
         if isinstance(message, UserStateInput):
             if message.value == State.SPEAKING:
                 logger.info("🎤 User started speaking")
@@ -249,6 +263,9 @@ class ConversationHarness:
         elif isinstance(message, AgentSpeechInput):
             logger.info(f'🗣️ Agent speech sent: "{message.content}"')
             return [AgentSpeechSent(content=message.content)]
+        elif isinstance(message, DTMFInput):
+            logger.info(f"🔔 DTMF sent: {message.button}")
+            return [DTMFEvent(button=message.button)]
         else:
             # Fallback for unknown types.
             logger.warning(f"Unknown message type: {type(message).__name__} ({message.model_dump_json()})")
