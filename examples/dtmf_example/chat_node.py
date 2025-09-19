@@ -4,14 +4,18 @@ GeminiReasoningNode - Voice-optimized ReasoningNode implementation using proven 
 
 import asyncio
 import random
-from typing import AsyncGenerator, Optional, Union
+from itertools import takewhile
+from typing import Any, AsyncGenerator, Callable, List, Optional, Union
+import weakref
 
 from config import DEFAULT_MODEL_ID, DEFAULT_TEMPERATURE
 from google import genai
 from google.genai import types as gemini_types
 from loguru import logger
 
-from line.events import AgentResponse, DTMFEvent, EndCall
+from line.bridge import Bridge
+from line.bus import Message
+from line.events import AgentResponse, DTMFEvent, DTMFStoppedEvent, EndCall, EventInstance
 from line.nodes.conversation_context import ConversationContext
 from line.nodes.reasoning import ReasoningNode
 from line.tools.system_tools import EndCallArgs, EndCallTool, end_call
@@ -66,6 +70,10 @@ class ChatNode(ReasoningNode):
 
         logger.info(f"GeminiNode initialized with model: {model_id}")
 
+        self.impending_generation_task = None
+        self.conversation_bridge: weakref.ref[Bridge] = None
+        self.most_recent_dtmf_message = None
+
     async def process_context(
         self, context: ConversationContext
     ) -> AsyncGenerator[Union[AgentResponse, EndCall], None]:
@@ -76,10 +84,18 @@ class ChatNode(ReasoningNode):
             AgentResponse: Text chunks from Gemini
             AgentEndCall: end_call Event
         """
+        logger.info(f"💬 Processing context: {context.events}")
+        if self.impending_generation_task:
+            logger.warning(
+                "DTMF trigger is set and future process_context is queued. Skipping this processing context request, as to avoid race condition. "
+            )
+            return
+
         if not context.events:
             logger.info("No messages to process")
             return
 
+        # context.events = maintain_consistent_dtmf_events(context.events)
         messages = convert_messages_to_gemini(context.events, {DTMFEvent: serialize_dtmf_event})
 
         user_message = context.get_latest_user_transcript_message()
@@ -116,6 +132,57 @@ class ChatNode(ReasoningNode):
         if full_response:
             logger.info(f'🤖 Agent response: "{full_response}" ({len(full_response)} chars)')
 
+    async def on_dtmf_event(self, message: Message):
+        logger.info(f"➡️➡️➡️ on_dtmf_event: {message}")
+        event = message.event
+        if not isinstance(event, DTMFEvent):
+            raise ValueError(f"Expected DTMFEvent, got {type(event)=}: {event=}")
+
+        logger.info(f"➡️➡️➡️ received DTMF event {message.event}")
+
+        self.most_recent_dtmf_message = message
+
+        await asyncio.sleep(1.0)
+
+        # wait and see if any other messages has come in. If not, then yield a DTMFStoppedEvent
+        if self.most_recent_dtmf_message.id == message.id:
+            logger.info("👀👀👀 Yielding DTMFStoppedEvent")
+            yield DTMFStoppedEvent()
+
+    def set_bridge(self, bridge: Bridge):
+        self.conversation_bridge = weakref.ref(bridge)
+
+
+async def maintain_consistent_dtmf_events(
+    events: List[EventInstance],
+) -> List[EventInstance]:
+    """
+    There's a race condition that occurs if the user speaks and also sends a DTMF event.
+
+    In this case, we want to ignore the user's speech and focus on the DTMF event.
+
+    To accomplish this, we will remove all other events if we find a DTMF event in the last series of user turns.
+    """
+    most_recent_user_turns = list(takewhile(lambda x: isinstance(x, AgentResponse), reversed(events)))
+
+    if len(most_recent_user_turns) == 0:
+        return events
+
+    dtmf_events = reversed([x for x in most_recent_user_turns if isinstance(x, DTMFEvent)])
+    non_dtmf_events = reversed([x for x in most_recent_user_turns if isinstance(x, AgentResponse)])
+
+    if dtmf_events:
+        logger.warning(
+            f"Detected and removed non-DTMF user turns. This usually occurs if the user speaks and also tries to send DTMF events. {non_dtmf_events=}"
+        )
+        return events[: -len(most_recent_user_turns)] + dtmf_events
+
+    return events
+
+
+def is_dtmf_event(event: gemini_types.ModelContent) -> bool:
+    return event.parts and (event.parts[0].text or "").startswith("dtmf=")
+
 
 async def canned_gemini_response_stream() -> AsyncGenerator[gemini_types.GenerateContentResponse, None]:
     """
@@ -147,4 +214,4 @@ def serialize_dtmf_event(event: DTMFEvent) -> gemini_types.UserContent:
     """
     Serialize the DTMF event to a string for gemini to process
     """
-    return gemini_types.UserContent(parts=[gemini_types.Part.from_text(text="dtmf_button=" + event.button)])
+    return gemini_types.UserContent(parts=[gemini_types.Part.from_text(text="dtmf=" + event.button)])

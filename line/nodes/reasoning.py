@@ -108,7 +108,10 @@ class ReasoningNode(Node):
             ToolResult: Tool execution results.
             EventType: Custom result types (e.g., FormProcessingResult)
         """
+
+        logger.info(f"💬 Trigger generation: {self.conversation_events}")
         if not self.conversation_events:
+            logger.info("No conversation events to process")
             return
 
         # 1. Build standardized conversation context.
@@ -186,7 +189,6 @@ class ReasoningNode(Node):
         Args:
             event: The event to add to the conversation events.
         """
-        print("⚔️⚔️⚔️ added event", event)
         # This is a utility because sometimes we get a BusMessage instead of an EventInstance.
         if isinstance(event, Message):
             event = event.event
@@ -205,6 +207,7 @@ class ReasoningNode(Node):
                 )
                 return
 
+        print("⚔️⚔️⚔️ added event", event)
         self.conversation_events.append(event)
 
     def clear_context(self) -> List[Any]:

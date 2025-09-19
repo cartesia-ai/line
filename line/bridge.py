@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any, Callable, List, Optional, Type, TypeVar, 
 from loguru import logger
 
 from line.bus import Bus, Message
-from line.events import EventInstance, EventsRegistry, EventTypeOrAlias
+from line.events import DTMFEvent, DTMFStoppedEvent, EventInstance, EventsRegistry, EventTypeOrAlias
 from line.routes import RouteBuilder, RouteHandler
 
 if TYPE_CHECKING:
@@ -162,6 +162,11 @@ class Bridge:
 
     async def handle_event(self, message: "Message") -> None:
         """Route incoming event to appropriate handler."""
+        # if type(message.event) == DTMFStoppedEvent:
+        #     import pdb
+
+        #     pdb.set_trace()
+
         # Check authorization first - empty set means open access.
         if self.authorized_nodes and message.source not in self.authorized_nodes:
             return

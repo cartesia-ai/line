@@ -1,6 +1,6 @@
 import os
 
-from chat_node import ChatNode
+from chat_node import ChatNode, DTMFStoppedEvent
 from config import SYSTEM_PROMPT
 from google import genai
 
@@ -24,7 +24,9 @@ async def handle_new_call(system: VoiceAgentSystem, call_request: CallRequest):
     system.with_speaking_node(conversation_node, bridge=conversation_bridge)
 
     conversation_bridge.on(UserTranscriptionReceived).map(conversation_node.add_event)
-    conversation_bridge.on(DTMFEvent).map(conversation_node.add_event)  # this is important!
+    conversation_bridge.on(DTMFEvent).map(conversation_node.add_event)
+    conversation_bridge.on(DTMFEvent).map(conversation_node.on_dtmf_event).broadcast()
+    conversation_bridge.on(DTMFStoppedEvent).map(conversation_node.generate).broadcast()
 
     (
         conversation_bridge.on(UserStoppedSpeaking)
@@ -33,6 +35,7 @@ async def handle_new_call(system: VoiceAgentSystem, call_request: CallRequest):
         .broadcast()
     )
 
+    conversation_node.set_bridge(conversation_bridge)
     await system.start()
     await system.send_initial_message("Hello! Please enter numbers on your phone to add them together")
     await system.wait_for_shutdown()

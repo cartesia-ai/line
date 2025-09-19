@@ -5,7 +5,7 @@ from config import SYSTEM_PROMPT
 from google import genai
 
 from line import Bridge, CallRequest, VoiceAgentApp, VoiceAgentSystem
-from line.events import DTMFEvent, UserStartedSpeaking, UserStoppedSpeaking, UserTranscriptionReceived
+from line.events import UserStartedSpeaking, UserStoppedSpeaking, UserTranscriptionReceived
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 if GEMINI_API_KEY:

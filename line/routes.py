@@ -18,7 +18,7 @@ import weakref
 from loguru import logger
 
 from line.bus import Message
-from line.events import EventType
+from line.events import DTMFEvent, DTMFStoppedEvent, EventType
 from line.utils.aio import await_tasks_safe
 
 if TYPE_CHECKING:
@@ -353,6 +353,11 @@ class RouteHandler:
             None: if the route is suspended or has no operations.
             Any: Output result of the route.
         """
+        # if type(message.event) == DTMFStoppedEvent:
+        #     import pdb
+
+        #     pdb.set_trace()
+
         if self.route_config.state == RouteState.SUSPENDED or len(self.route_config.operations) == 0:
             return None
 
