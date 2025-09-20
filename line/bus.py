@@ -34,7 +34,7 @@ from pydantic import BaseModel, Field
 if TYPE_CHECKING:
     from line.bridge import Bridge
 
-from line.events import AgentHandoff, Authorize, ToolCall
+from line.events import AgentHandoff, Authorize, DTMFStoppedEvent, ToolCall, UserStoppedSpeaking
 
 
 class Message(BaseModel):
@@ -252,7 +252,7 @@ class Bus:
             :meth:`call` - For responses
             :meth:`request` - For specific agents
         """
-        logger.debug(f"Bus: Broadcasting message: {message}")
+        logger.info(f"Bus: Broadcasting message: {message}")
         await self._queue_message(message)
 
     # ================================================================
@@ -268,7 +268,7 @@ class Bus:
         """
         try:
             await self.message_queue.put(message)
-            logger.debug(f"Bus (_queue_message): Message queued: {message}")
+            logger.info(f"Bus (_queue_message): Message queued: {message}")
         except asyncio.QueueFull:
             logger.error("Bus message queue is full, dropping message")
 
@@ -330,9 +330,9 @@ class Bus:
             while self.running:
                 try:
                     # Timeout allows checking shutdown flag periodically.
-                    # logger.debug(f"Bus: Waiting for message in the _message_router")
+                    # logger.info(f"Bus: Waiting for message in the _message_router")
                     message = await asyncio.wait_for(self.message_queue.get(), timeout=1.0)
-                    logger.debug(f"Bus: Message received: {message}")
+                    logger.info(f"Bus: Message received: {message}")
 
                     # Delegate to specific routing logic based on pattern.
                     await self._route_message(message)
@@ -350,7 +350,7 @@ class Bus:
 
     async def _route_message(self, message: Message) -> None:
         """Route message to bridges based on direct or broadcast pattern."""
-        logger.debug(f"Bus: Routing message: {message}")
+        logger.info(f"Bus: Routing message: {message}")
         try:
             # Handle agent handoff events or transfer_to_* tool calls directly.
             # TODO: Consider adding certain types of events as being high priority to handle.

@@ -353,10 +353,11 @@ class RouteHandler:
             None: if the route is suspended or has no operations.
             Any: Output result of the route.
         """
-        # if type(message.event) == DTMFStoppedEvent:
-        #     import pdb
+        print(f"RouteHandler {self}: Handling message: {message}")
+        if type(message.event) == DTMFStoppedEvent:
+            import pdb
 
-        #     pdb.set_trace()
+            pdb.set_trace()
 
         if self.route_config.state == RouteState.SUSPENDED or len(self.route_config.operations) == 0:
             return None
@@ -530,6 +531,7 @@ class RouteHandler:
 
     async def _process_operations(self, data: Any, operations: List[dict]) -> Any:
         """Process data through a sequence of operations."""
+        print(f"RouteHandler {self}: Processing operations: {operations} for {data=}")
         if not operations:
             return data
 

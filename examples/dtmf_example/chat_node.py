@@ -72,6 +72,7 @@ class ChatNode(ReasoningNode):
 
         self.impending_generation_task = None
         self.conversation_bridge: weakref.ref[Bridge] = None
+
         self.most_recent_dtmf_message = None
 
     async def process_context(
@@ -84,7 +85,6 @@ class ChatNode(ReasoningNode):
             AgentResponse: Text chunks from Gemini
             AgentEndCall: end_call Event
         """
-        logger.info(f"💬 Processing context: {context.events}")
         if self.impending_generation_task:
             logger.warning(
                 "DTMF trigger is set and future process_context is queued. Skipping this processing context request, as to avoid race condition. "
@@ -133,21 +133,21 @@ class ChatNode(ReasoningNode):
             logger.info(f'🤖 Agent response: "{full_response}" ({len(full_response)} chars)')
 
     async def on_dtmf_event(self, message: Message):
-        logger.info(f"➡️➡️➡️ on_dtmf_event: {message}")
         event = message.event
         if not isinstance(event, DTMFEvent):
             raise ValueError(f"Expected DTMFEvent, got {type(event)=}: {event=}")
 
-        logger.info(f"➡️➡️➡️ received DTMF event {message.event}")
+        logger.info("➡️➡️➡️ received DTMF event")
 
         self.most_recent_dtmf_message = message
-
         await asyncio.sleep(1.0)
-
-        # wait and see if any other messages has come in. If not, then yield a DTMFStoppedEvent
         if self.most_recent_dtmf_message.id == message.id:
-            logger.info("👀👀👀 Yielding DTMFStoppedEvent")
-            yield DTMFStoppedEvent()
+            logger.info("👀👀👀 Publishing DTMFStoppedEvent")
+            message = Message(source=self.id, event=DTMFStoppedEvent())
+            await self.conversation_bridge().bus.broadcast(message)
+            return
+
+        logger.info("🫥🫥🫥 No DTMFStoppedEvent published")
 
     def set_bridge(self, bridge: Bridge):
         self.conversation_bridge = weakref.ref(bridge)
