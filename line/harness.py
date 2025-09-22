@@ -241,7 +241,6 @@ class ConversationHarness:
 
     def map_to_events(self, message: InputMessage) -> List[Any]:
         """Convert harness-specific message to bus events."""
-        print(f"⛑⛑⛑ map_to_events: {message}")
         if isinstance(message, UserStateInput):
             if message.value == State.SPEAKING:
                 logger.info("🎤 User started speaking")

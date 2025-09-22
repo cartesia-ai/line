@@ -5,7 +5,8 @@ GeminiReasoningNode - Voice-optimized ReasoningNode implementation using proven 
 import asyncio
 import random
 from itertools import takewhile
-from typing import Any, AsyncGenerator, Callable, List, Optional, Union
+import re
+from typing import Any, AsyncGenerator, Callable, Generator, List, Optional, Union
 import weakref
 
 from config import DEFAULT_MODEL_ID, DEFAULT_TEMPERATURE
@@ -112,6 +113,15 @@ class ChatNode(ReasoningNode):
                 config=self.generation_config,
             )
 
+        # Confirm user pressed buttons
+        dtmf_events = get_pressed_dtmf_button_from_context(context)
+        if len(dtmf_events) > 0:
+            buttons = [event.button for event in dtmf_events]
+            yield AgentResponse(content=f"You pressed {buttons}.")
+            for button in buttons:
+                yield DTMFEvent(button=button)
+
+        # Process LLM content
         async for msg in stream:
             if msg.text:
                 full_response += msg.text
@@ -149,8 +159,25 @@ class ChatNode(ReasoningNode):
         self.conversation_bridge = weakref.ref(bridge)
 
 
-def is_dtmf_event(event: gemini_types.ModelContent) -> bool:
-    return event.parts and (event.parts[0].text or "").startswith("dtmf=")
+def get_pressed_dtmf_button_from_context(context: ConversationContext) -> List[DTMFEvent]:
+    """
+    Gets the most recent DTMF event from the context
+    """
+    i = len(context.events) - 1
+
+    dtmf_events: List[DTMFEvent] = []
+
+    # Start from the end and then scan until you hit an Agent Response
+    while i >= 0:
+        event = context.events[i]
+        if isinstance(event, DTMFEvent):
+            dtmf_events.append(event)
+        i -= 1
+
+        if isinstance(event, AgentResponse):
+            break
+
+    return list(reversed(dtmf_events))
 
 
 async def canned_gemini_response_stream() -> AsyncGenerator[gemini_types.GenerateContentResponse, None]:
