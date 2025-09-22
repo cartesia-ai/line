@@ -143,8 +143,8 @@ class ChatNode(ReasoningNode):
         await asyncio.sleep(1.0)
         if self.most_recent_dtmf_message.id == message.id:
             logger.info("👀👀👀 Publishing DTMFStoppedEvent")
-            message = Message(source=self.id, event=DTMFStoppedEvent())
-            await self.conversation_bridge().bus.broadcast(message)
+            return DTMFStoppedEvent()
+            # await self.conversation_bridge().bus.broadcast(message)
             return
 
         logger.info("🫥🫥🫥 No DTMFStoppedEvent published")

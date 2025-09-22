@@ -354,10 +354,10 @@ class RouteHandler:
             Any: Output result of the route.
         """
         print(f"RouteHandler {self}: Handling message: {message}")
-        if type(message.event) == DTMFStoppedEvent:
-            import pdb
+        # if type(message.event) == DTMFStoppedEvent:
+        #     import pdb
 
-            pdb.set_trace()
+        #     pdb.set_trace()
 
         if self.route_config.state == RouteState.SUSPENDED or len(self.route_config.operations) == 0:
             return None
