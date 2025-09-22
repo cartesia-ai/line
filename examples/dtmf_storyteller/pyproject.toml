@@ -25,5 +25,5 @@ packages = ["."]
 [tool.uv]
 dev-dependencies = []
 
-[tool.uv.sources]
-cartesia-line = { path = "../../", editable = true }
+# [tool.uv.sources]
+# cartesia-line = { path = "../../", editable = true }
