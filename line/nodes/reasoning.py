@@ -186,7 +186,6 @@ class ReasoningNode(Node):
         Args:
             event: The event to add to the conversation events.
         """
-        print("⚔️⚔️⚔️ added event", event)
         # This is a utility because sometimes we get a BusMessage instead of an EventInstance.
         if isinstance(event, Message):
             event = event.event

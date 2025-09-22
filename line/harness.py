@@ -129,7 +129,6 @@ class ConversationHarness:
         return await self.input_queue.get()
 
     async def _send(self, output: OutputMessage):
-        print(f"🟠🟠🟠 _send: {output}")
         try:
             if not self.shutdown_event.is_set():
                 await self.websocket.send_json(output.model_dump())

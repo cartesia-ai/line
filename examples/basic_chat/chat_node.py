@@ -76,7 +76,6 @@ class ChatNode(ReasoningNode):
             AgentResponse: Text chunks from Gemini
             AgentEndCall: end_call Event
         """
-
         if not context.events:
             logger.info("No messages to process")
             return
