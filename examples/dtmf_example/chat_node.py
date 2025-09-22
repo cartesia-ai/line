@@ -137,17 +137,13 @@ class ChatNode(ReasoningNode):
         if not isinstance(event, DTMFEvent):
             raise ValueError(f"Expected DTMFEvent, got {type(event)=}: {event=}")
 
-        logger.info("➡️➡️➡️ received DTMF event")
-
         self.most_recent_dtmf_message = message
         await asyncio.sleep(1.0)
         if self.most_recent_dtmf_message.id == message.id:
-            logger.info("👀👀👀 Publishing DTMFStoppedEvent")
+            logger.info("Publishing DTMFStoppedEvent as there was no other DTMF event queued.")
             return DTMFStoppedEvent()
-            # await self.conversation_bridge().bus.broadcast(message)
-            return
 
-        logger.info("🫥🫥🫥 No DTMFStoppedEvent published")
+        logger.info("Did not publish DTMFStoppedEvent as there was another DTMF event queued.")
 
     def set_bridge(self, bridge: Bridge):
         self.conversation_bridge = weakref.ref(bridge)
