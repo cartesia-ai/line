@@ -35,7 +35,7 @@ async def handle_new_call(system: VoiceAgentSystem, call_request: CallRequest):
     await system.start()
     await system.send_initial_message(
         "Hello! I am your voice agent powered by Cartesia. What do you want to build?"
-    )  # noqa: E501
+    )
     await system.wait_for_shutdown()
 
 
