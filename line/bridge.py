@@ -14,12 +14,9 @@ from loguru import logger
 
 from line.bus import Bus, Message
 from line.events import (
-    DTMFEvent,
-    DTMFStoppedEvent,
     EventInstance,
     EventsRegistry,
     EventTypeOrAlias,
-    UserStoppedSpeaking,
 )
 from line.routes import RouteBuilder, RouteHandler
 
