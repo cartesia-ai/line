@@ -3,7 +3,7 @@ Utility functions for converting agent tools and messages to Gemini format
 """
 
 import json
-from typing import Any, Callable, Dict, List, Union
+from typing import Any, Callable, Dict, List
 import warnings
 
 from google.genai import types
@@ -24,9 +24,9 @@ warnings.filterwarnings("ignore", message="unclosed", category=ResourceWarning)
 
 def convert_messages_to_gemini(
     events: List[EventInstance],
-    handlers: Dict[EventType, Callable[[EventInstance], Union[types.ModelContent, types.UserContent]]] = None,
+    handlers: Dict[EventType, Callable[[EventInstance], Dict[str, Any]]] = None,
     text_events_only: bool = False,
-) -> List[Union[types.ModelContent, types.UserContent]]:
+) -> List[Dict[str, Any]]:
     """
     Convert conversation events to Gemini format.
 

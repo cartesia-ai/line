@@ -169,15 +169,12 @@ class Bridge:
 
     async def handle_event(self, message: "Message") -> None:
         """Route incoming event to appropriate handler."""
-
         # Check authorization first - empty set means open access.
         if self.authorized_nodes and message.source not in self.authorized_nodes:
             return
 
-        all_handlers: List[RouteHandler] = self._find_matching_routes(message.event)
-        handlers = [handler for handler in all_handlers if handler.should_process_message(message)]
-
-        print(f"Bridge {self.node_id}: Handling event: {message} for {handlers=}, {all_handlers=}")
+        handlers: List[RouteHandler] = self._find_matching_routes(message.event)
+        handlers = [handler for handler in handlers if handler.should_process_message(message)]
         if not handlers:
             return
 

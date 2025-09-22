@@ -23,6 +23,7 @@ async def handle_new_call(system: VoiceAgentSystem, call_request: CallRequest):
     conversation_bridge = Bridge(conversation_node)
     system.with_speaking_node(conversation_node, bridge=conversation_bridge)
 
+    # Setup events
     conversation_bridge.on(UserTranscriptionReceived).map(conversation_node.add_event)
     conversation_bridge.on(DTMFEvent).map(conversation_node.add_event)
     conversation_bridge.on(DTMFEvent).map(conversation_node.on_dtmf_event).broadcast()
@@ -30,7 +31,6 @@ async def handle_new_call(system: VoiceAgentSystem, call_request: CallRequest):
     (
         conversation_bridge.on(DTMFStoppedEvent)
         .interrupt_on(UserStartedSpeaking, handler=conversation_node.on_interrupt_generate)
-        # .interrupt_on(DTMFEvent, handler=conversation_node.on_interrupt_generate)
         .stream(conversation_node.generate)
         .broadcast()
     )
@@ -38,7 +38,7 @@ async def handle_new_call(system: VoiceAgentSystem, call_request: CallRequest):
     (
         conversation_bridge.on(UserStoppedSpeaking)
         .interrupt_on(UserStartedSpeaking, handler=conversation_node.on_interrupt_generate)
-        # .interrupt_on(DTMFEvent, handler=conversation_node.on_interrupt_generate)
+        .interrupt_on(DTMFEvent, handler=conversation_node.on_interrupt_generate)
         .stream(conversation_node.generate)
         .broadcast()
     )
@@ -46,7 +46,7 @@ async def handle_new_call(system: VoiceAgentSystem, call_request: CallRequest):
     conversation_node.set_bridge(conversation_bridge)
 
     await system.start()
-    await system.send_initial_message("Hello! Please enter numbers on your phone to add them together")
+    await system.send_initial_message("Hello! Press any button on the keypard or say 'start story'.")
     await system.wait_for_shutdown()
 
 
