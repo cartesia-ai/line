@@ -71,9 +71,6 @@ class ChatNode(ReasoningNode):
 
         logger.info(f"GeminiNode initialized with model: {model_id}")
 
-        self.impending_generation_task = None
-        self.conversation_bridge: weakref.ref[Bridge] = None
-
         self.most_recent_dtmf_message = None
 
     async def process_context(
@@ -86,17 +83,10 @@ class ChatNode(ReasoningNode):
             AgentResponse: Text chunks from Gemini
             AgentEndCall: end_call Event
         """
-        if self.impending_generation_task:
-            logger.warning(
-                "DTMF trigger is set and future process_context is queued. Skipping this processing context request, as to avoid race condition. "
-            )
-            return
-
         if not context.events:
             logger.info("No messages to process")
             return
 
-        # context.events = maintain_consistent_dtmf_events(context.events)
         messages = convert_messages_to_gemini(context.events, {DTMFEvent: serialize_dtmf_event})
 
         user_message = context.get_latest_user_transcript_message()
@@ -114,7 +104,7 @@ class ChatNode(ReasoningNode):
             )
 
         # Confirm user pressed buttons
-        dtmf_events = get_pressed_dtmf_button_from_context(context)
+        dtmf_events = get_dtmf_button_presses(context)
         if len(dtmf_events) > 0:
             buttons = [event.button for event in dtmf_events]
             yield AgentResponse(content=f"You pressed {buttons}.")
@@ -155,11 +145,8 @@ class ChatNode(ReasoningNode):
 
         logger.info("Did not publish DTMFStoppedEvent as there was another DTMF event queued.")
 
-    def set_bridge(self, bridge: Bridge):
-        self.conversation_bridge = weakref.ref(bridge)
 
-
-def get_pressed_dtmf_button_from_context(context: ConversationContext) -> List[DTMFEvent]:
+def get_dtmf_button_presses(context: ConversationContext) -> List[DTMFEvent]:
     """
     Gets the most recent DTMF event from the context
     """
