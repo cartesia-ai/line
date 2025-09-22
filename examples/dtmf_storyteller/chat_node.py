@@ -4,19 +4,15 @@ GeminiReasoningNode - Voice-optimized ReasoningNode implementation using proven 
 
 import asyncio
 import random
-from itertools import takewhile
-import re
-from typing import Any, AsyncGenerator, Callable, Generator, List, Optional, Union
-import weakref
+from typing import AsyncGenerator, List, Optional, Union
 
 from config import DEFAULT_MODEL_ID, DEFAULT_TEMPERATURE
 from google import genai
 from google.genai import types as gemini_types
 from loguru import logger
 
-from line.bridge import Bridge
 from line.bus import Message
-from line.events import AgentResponse, DTMFEvent, DTMFStoppedEvent, EndCall, EventInstance
+from line.events import AgentResponse, DTMFEvent, DTMFStoppedEvent, EndCall
 from line.nodes.conversation_context import ConversationContext
 from line.nodes.reasoning import ReasoningNode
 from line.tools.system_tools import EndCallArgs, EndCallTool, end_call
