@@ -149,33 +149,6 @@ class ChatNode(ReasoningNode):
         self.conversation_bridge = weakref.ref(bridge)
 
 
-async def maintain_consistent_dtmf_events(
-    events: List[EventInstance],
-) -> List[EventInstance]:
-    """
-    There's a race condition that occurs if the user speaks and also sends a DTMF event.
-
-    In this case, we want to ignore the user's speech and focus on the DTMF event.
-
-    To accomplish this, we will remove all other events if we find a DTMF event in the last series of user turns.
-    """
-    most_recent_user_turns = list(takewhile(lambda x: isinstance(x, AgentResponse), reversed(events)))
-
-    if len(most_recent_user_turns) == 0:
-        return events
-
-    dtmf_events = reversed([x for x in most_recent_user_turns if isinstance(x, DTMFEvent)])
-    non_dtmf_events = reversed([x for x in most_recent_user_turns if isinstance(x, AgentResponse)])
-
-    if dtmf_events:
-        logger.warning(
-            f"Detected and removed non-DTMF user turns. This usually occurs if the user speaks and also tries to send DTMF events. {non_dtmf_events=}"
-        )
-        return events[: -len(most_recent_user_turns)] + dtmf_events
-
-    return events
-
-
 def is_dtmf_event(event: gemini_types.ModelContent) -> bool:
     return event.parts and (event.parts[0].text or "").startswith("dtmf=")
 
