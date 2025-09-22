@@ -129,7 +129,10 @@ class DTMFToolCall(ToolDefinition):
 
     @classmethod
     def description(cls) -> str:
-        return "Send a DTMF tone to the user. Use this when you find the appropriate selection and the voice system asks you to press a button"
+        return (
+            "Send a DTMF tone to the user. Use this when you find the "
+            "appropriate selection and the voice system asks you to press a button"
+        )
 
     @classmethod
     def parameters_description(cls) -> str:

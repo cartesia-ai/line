@@ -43,8 +43,6 @@ async def handle_new_call(system: VoiceAgentSystem, call_request: CallRequest):
         .broadcast()
     )
 
-    conversation_node.set_bridge(conversation_bridge)
-
     await system.start()
     await system.send_initial_message(
         "Hello! Press any button on the keypard or say 'start story'."  # noqa: E501
