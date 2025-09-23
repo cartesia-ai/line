@@ -38,6 +38,8 @@ __all__ = [
     "AgentSpeechSent",
     "UserUnknownInputReceived",
     "LogMetric",
+    "DTMFEvent",
+    "DTMFStoppedEvent",
 ]
 
 
@@ -181,6 +183,16 @@ class LogMetric(BaseModel):
 
     name: str
     value: Any
+
+
+class DTMFEvent(BaseModel):
+    """DTMF event for tracking DTMF input."""
+
+    button: str
+
+
+class DTMFStoppedEvent(BaseModel):
+    """DTMF stopped event for tracking DTMF input."""
 
 
 class _EventsRegistry:

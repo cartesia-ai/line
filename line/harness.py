@@ -16,6 +16,7 @@ from line.events import (
     AgentSpeechSent,
     AgentStartedSpeaking,
     AgentStoppedSpeaking,
+    DTMFEvent,
     UserStartedSpeaking,
     UserStoppedSpeaking,
     UserTranscriptionReceived,
@@ -24,6 +25,8 @@ from line.events import (
 from line.harness_types import (
     AgentSpeechInput,
     AgentStateInput,
+    DTMFInput,
+    DTMFOutput,
     EndCallOutput,
     ErrorOutput,
     InputMessage,
@@ -199,6 +202,15 @@ class ConversationHarness:
         logger.debug(f"📈 Logging metric: {name}={value}")
         await self._send(LogMetricOutput(name=name, value=value))
 
+    async def send_dtmf(self, button: str):
+        """
+        Send a DTMF event via WebSocket
+
+        Args:
+            button: The DTMF button to send
+        """
+        await self._send(DTMFOutput(button=button))
+
     async def cleanup(self):
         """
         Clean up resources and stop all tasks
@@ -249,6 +261,9 @@ class ConversationHarness:
         elif isinstance(message, AgentSpeechInput):
             logger.info(f'🗣️ Agent speech sent: "{message.content}"')
             return [AgentSpeechSent(content=message.content)]
+        elif isinstance(message, DTMFInput):
+            logger.info(f"🔔 DTMF sent: {message.button}")
+            return [DTMFEvent(button=message.button)]
         else:
             # Fallback for unknown types.
             logger.warning(f"Unknown message type: {type(message).__name__} ({message.model_dump_json()})")

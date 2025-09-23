@@ -118,3 +118,77 @@ async def end_call(
 
     # End the call
     yield EndCall()
+
+
+class DTMFToolCall(ToolDefinition):
+    """Arguments for the dtmf_tool_call tool."""
+
+    @classmethod
+    def name(cls) -> str:
+        return "dtmf_tool_call"
+
+    @classmethod
+    def description(cls) -> str:
+        return (
+            "Send a DTMF tone to the user. Use this when you find the "
+            "appropriate selection and the voice system asks you to press a button"
+        )
+
+    @classmethod
+    def parameters_description(cls) -> str:
+        return "The DTMF button to send"
+
+    @classmethod
+    def to_gemini_tool(cls) -> "gemini_types.Tool":
+        """Convert to Gemini tool format"""
+        return gemini_types.Tool(
+            function_declarations=[
+                gemini_types.FunctionDeclaration(
+                    name=cls.name(),
+                    description=cls.description(),
+                    parameters={
+                        "type": "object",
+                        "properties": {
+                            "button": {
+                                "type": "string",
+                                "description": cls.parameters_description(),
+                                "enum": ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "*", "#"],
+                            }
+                        },
+                        "required": ["button"],
+                        "additionalProperties": False,
+                        "strict": True,
+                    },
+                )
+            ]
+        )
+
+    @classmethod
+    def to_openai_tool(cls) -> Dict[str, object]:
+        """Convert to OpenAI tool format for Responses API.
+
+        Note: This returns the format expected by OpenAI's Responses API,
+        not the Chat Completions API format.
+        """
+        return {
+            "type": "function",
+            "name": cls.name(),
+            "description": cls.description(),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "button": {
+                        "type": "string",
+                        "enum": ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "*", "#"],
+                        "description": cls.parameters_description(),
+                    },
+                },
+                "required": ["button"],
+                "additionalProperties": False,
+                "strict": True,
+            },
+        }
+
+
+class DTMFToolCallTool(ToolDefinition):
+    """DTMF tool call system tool definition."""

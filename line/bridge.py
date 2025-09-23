@@ -13,7 +13,11 @@ from typing import TYPE_CHECKING, Any, Callable, List, Optional, Type, TypeVar, 
 from loguru import logger
 
 from line.bus import Bus, Message
-from line.events import EventInstance, EventsRegistry, EventTypeOrAlias
+from line.events import (
+    EventInstance,
+    EventsRegistry,
+    EventTypeOrAlias,
+)
 from line.routes import RouteBuilder, RouteHandler
 
 if TYPE_CHECKING:
