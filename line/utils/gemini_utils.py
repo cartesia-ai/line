@@ -11,8 +11,6 @@ from loguru import logger
 
 from line.events import (
     AgentResponse,
-    DTMFInputEvent,
-    DTMFOutputEvent,
     EventInstance,
     EventType,
     ToolResult,
