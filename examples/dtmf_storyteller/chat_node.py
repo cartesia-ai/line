@@ -117,11 +117,7 @@ class ChatNode(ReasoningNode):
         async for msg in stream:
             if msg.text:
                 full_response += msg.text
-                logger.info(f"🤖 Raw response: {msg.text}")
-                response = re.sub(
-                    r"dtmf=([#0-9]*)", "", msg.text
-                )  # artifact of how we serialize and deserialize DTMF events. strip it out
-                yield AgentResponse(content=response)
+                yield AgentResponse(content=msg.text)
 
             if msg.function_calls:
                 for function_call in msg.function_calls:
@@ -207,11 +203,11 @@ def serialize_dtmf_input_event(event: DTMFInputEvent) -> gemini_types.UserConten
     """
     Serialize the DTMF event to a string for gemini to process
     """
-    return gemini_types.UserContent(parts=[gemini_types.Part.from_text(text="dtmf=" + event.button)])
+    return gemini_types.UserContent(parts=[gemini_types.Part.from_text(text=event.button)])
 
 
 def serialize_dtmf_output_event(event: DTMFOutputEvent) -> gemini_types.ModelContent:
     """
     Serialize the DTMF event to a string for gemini to process
     """
-    return gemini_types.ModelContent(parts=[gemini_types.Part.from_text(text="dtmf=" + event.button)])
+    return gemini_types.ModelContent(parts=[gemini_types.Part.from_text(text="")])
