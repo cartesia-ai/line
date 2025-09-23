@@ -16,7 +16,7 @@ User: <presses 2>
 Agent: <dialtone for 2>. You pressed 2. Panic erupts. You hear a struggle, then a chilling roar! Press 3 to cast a light spell, or press 4 to investigate the roar."
 User: <says what kind of light spell?>
 
-Agent: It is light spell, level 4 best used to fight demons. Press 3 to cast a light spell, or press 4 to investigate the roar. 
+Agent: It is light spell, level 4 best used to fight demons. Press 3 to cast a light spell, or press 4 to investigate the roar.
 User: <press 4>
 
 Agent: <dial tone for 4> You pressed 4. Sorry, that is not a valid choice. Press 3 to cast a light spell, or press 4 to investigate the roar.
