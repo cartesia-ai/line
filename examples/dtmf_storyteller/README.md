@@ -1,4 +1,4 @@
-# DTMF Adder
+# DTMF Storyteller
 
 A simple example of how to use DTMF with cartesia's SDK, by way of a story teller that a user can both talk to and also hear DTMF tones.
 
