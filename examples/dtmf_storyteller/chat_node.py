@@ -4,7 +4,6 @@ GeminiReasoningNode - Voice-optimized ReasoningNode implementation using proven 
 
 import asyncio
 import random
-import re
 from typing import AsyncGenerator, List, Optional, Union
 
 from config import DEFAULT_MODEL_ID, DEFAULT_TEMPERATURE

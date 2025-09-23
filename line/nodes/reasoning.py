@@ -19,8 +19,6 @@ from line.bus import Message
 from line.events import (
     AgentGenerationComplete,
     AgentResponse,
-    DTMFInputEvent,
-    DTMFOutputEvent,
     EventInstance,
     EventType,
     ToolCall,
