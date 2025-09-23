@@ -5,7 +5,12 @@ from config import SYSTEM_PROMPT
 from google import genai
 
 from line import Bridge, CallRequest, VoiceAgentApp, VoiceAgentSystem
-from line.events import DTMFEvent, UserStartedSpeaking, UserStoppedSpeaking, UserTranscriptionReceived
+from line.events import (
+    DTMFInputEvent,
+    UserStartedSpeaking,
+    UserStoppedSpeaking,
+    UserTranscriptionReceived,
+)
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 if GEMINI_API_KEY:
@@ -25,8 +30,8 @@ async def handle_new_call(system: VoiceAgentSystem, call_request: CallRequest):
 
     # Setup events
     conversation_bridge.on(UserTranscriptionReceived).map(conversation_node.add_event)
-    conversation_bridge.on(DTMFEvent).map(conversation_node.add_event)
-    conversation_bridge.on(DTMFEvent).map(conversation_node.on_dtmf_event).broadcast()
+    conversation_bridge.on(DTMFInputEvent).map(conversation_node.add_event)
+    conversation_bridge.on(DTMFInputEvent).map(conversation_node.on_dtmf_event).broadcast()
 
     (
         conversation_bridge.on(DTMFStoppedEvent)
@@ -38,7 +43,7 @@ async def handle_new_call(system: VoiceAgentSystem, call_request: CallRequest):
     (
         conversation_bridge.on(UserStoppedSpeaking)
         .interrupt_on(UserStartedSpeaking, handler=conversation_node.on_interrupt_generate)
-        .interrupt_on(DTMFEvent, handler=conversation_node.on_interrupt_generate)
+        .interrupt_on(DTMFInputEvent, handler=conversation_node.on_interrupt_generate)
         .stream(conversation_node.generate)
         .broadcast()
     )

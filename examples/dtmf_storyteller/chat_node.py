@@ -4,6 +4,7 @@ GeminiReasoningNode - Voice-optimized ReasoningNode implementation using proven 
 
 import asyncio
 import random
+import re
 from typing import AsyncGenerator, List, Optional, Union
 
 from config import DEFAULT_MODEL_ID, DEFAULT_TEMPERATURE
@@ -12,7 +13,7 @@ from google.genai import types as gemini_types
 from loguru import logger
 
 from line.bus import Message
-from line.events import AgentResponse, DTMFEvent, DTMFStoppedEvent, EndCall
+from line.events import AgentResponse, DTMFInputEvent, DTMFOutputEvent, DTMFStoppedEvent, EndCall
 from line.nodes.conversation_context import ConversationContext
 from line.nodes.reasoning import ReasoningNode
 from line.tools.system_tools import EndCallArgs, EndCallTool, end_call
@@ -83,7 +84,13 @@ class ChatNode(ReasoningNode):
             logger.info("No messages to process")
             return
 
-        messages = convert_messages_to_gemini(context.events, {DTMFEvent: serialize_dtmf_event})
+        messages = convert_messages_to_gemini(
+            context.events,
+            {
+                DTMFInputEvent: serialize_dtmf_input_event,
+                DTMFOutputEvent: serialize_dtmf_output_event,
+            },
+        )
 
         user_message = context.get_latest_user_transcript_message()
         if user_message:
@@ -102,16 +109,19 @@ class ChatNode(ReasoningNode):
         # Confirm user pressed buttons
         dtmf_events = get_dtmf_button_presses(context)
         if len(dtmf_events) > 0:
-            buttons = [event.button for event in dtmf_events]
-            yield AgentResponse(content=f"You pressed {buttons}.")
+            buttons = "".join([event.button for event in dtmf_events])
             for button in buttons:
-                yield DTMFEvent(button=button)
+                yield DTMFOutputEvent(button=button)
 
         # Process LLM content
         async for msg in stream:
             if msg.text:
                 full_response += msg.text
-                yield AgentResponse(content=msg.text)
+                logger.info(f"🤖 Raw response: {msg.text}")
+                response = re.sub(
+                    r"dtmf=([#0-9]*)", "", msg.text
+                )  # artifact of how we serialize and deserialize DTMF events. strip it out
+                yield AgentResponse(content=response)
 
             if msg.function_calls:
                 for function_call in msg.function_calls:
@@ -130,30 +140,34 @@ class ChatNode(ReasoningNode):
 
     async def on_dtmf_event(self, message: Message):
         event = message.event
-        if not isinstance(event, DTMFEvent):
-            raise ValueError(f"Expected DTMFEvent, got {type(event)=}: {event=}")
+        if not isinstance(event, DTMFInputEvent):
+            raise ValueError(f"Expected DTMFEventInput, got {type(event)=}: {event=}")
 
         self.most_recent_dtmf_message = message
         await asyncio.sleep(1.0)
         if self.most_recent_dtmf_message.id == message.id:
-            logger.info("Publishing DTMFStoppedEvent as there was no other DTMF event queued.")
+            logger.info(
+                f"Publishing DTMFStoppedEvent as there was no other DTMF event queued. button pressed: {message.event.button}"
+            )
             return DTMFStoppedEvent()
 
-        logger.info("Did not publish DTMFStoppedEvent as there was another DTMF event queued.")
+        logger.info(
+            f"Did not publish DTMFStoppedEvent as there was another DTMF event queued. button pressed: {message.event.button}"
+        )
 
 
-def get_dtmf_button_presses(context: ConversationContext) -> List[DTMFEvent]:
+def get_dtmf_button_presses(context: ConversationContext) -> List[DTMFInputEvent]:
     """
     Gets the most recent DTMF event from the context
     """
     i = len(context.events) - 1
 
-    dtmf_events: List[DTMFEvent] = []
+    dtmf_events: List[DTMFInputEvent] = []
 
     # Start from the end and then scan until you hit an Agent Response
     while i >= 0:
         event = context.events[i]
-        if isinstance(event, DTMFEvent):
+        if isinstance(event, DTMFInputEvent):
             dtmf_events.append(event)
         i -= 1
 
@@ -189,8 +203,15 @@ async def canned_gemini_response_stream() -> AsyncGenerator[gemini_types.Generat
     yield response
 
 
-def serialize_dtmf_event(event: DTMFEvent) -> gemini_types.UserContent:
+def serialize_dtmf_input_event(event: DTMFInputEvent) -> gemini_types.UserContent:
     """
     Serialize the DTMF event to a string for gemini to process
     """
     return gemini_types.UserContent(parts=[gemini_types.Part.from_text(text="dtmf=" + event.button)])
+
+
+def serialize_dtmf_output_event(event: DTMFOutputEvent) -> gemini_types.ModelContent:
+    """
+    Serialize the DTMF event to a string for gemini to process
+    """
+    return gemini_types.ModelContent(parts=[gemini_types.Part.from_text(text="dtmf=" + event.button)])

@@ -16,7 +16,7 @@ from line.events import (
     AgentSpeechSent,
     AgentStartedSpeaking,
     AgentStoppedSpeaking,
-    DTMFEvent,
+    DTMFInputEvent,
     UserStartedSpeaking,
     UserStoppedSpeaking,
     UserTranscriptionReceived,
@@ -262,8 +262,8 @@ class ConversationHarness:
             logger.info(f'🗣️ Agent speech sent: "{message.content}"')
             return [AgentSpeechSent(content=message.content)]
         elif isinstance(message, DTMFInput):
-            logger.info(f"🔔 DTMF sent: {message.button}")
-            return [DTMFEvent(button=message.button)]
+            logger.info(f"🔔 DTMF received: {message.button}")
+            return [DTMFInputEvent(button=message.button)]
         else:
             # Fallback for unknown types.
             logger.warning(f"Unknown message type: {type(message).__name__} ({message.model_dump_json()})")
