@@ -44,7 +44,7 @@ from line.events import (
     AgentError,
     AgentResponse,
     Authorize,
-    DTMFEvent,
+    DTMFOutputEvent,
     EndCall,
     EventType,
     LogMetric,
@@ -114,7 +114,7 @@ def create_user_bridge(harness: "ConversationHarness", authorized_node: str) -> 
 
     async def send_dtmf(message: Message):
         """Send DTMF event to harness."""
-        event: DTMFEvent = message.event
+        event: DTMFOutputEvent = message.event
         return await harness.send_dtmf(event.button)
 
     bridge = (
@@ -138,7 +138,7 @@ def create_user_bridge(harness: "ConversationHarness", authorized_node: str) -> 
         .map(send_transfer_call)
         .on(LogMetric)
         .map(send_log_metric)
-        .on(DTMFEvent)
+        .on(DTMFOutputEvent)
         .map(send_dtmf)
     )
 
