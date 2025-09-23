@@ -26,6 +26,7 @@ Agent: <diatone for 3> You pressed 3. As you investigate a roar, you see a shado
 User: ...
 ```
 
+Note: sometimes, gemini is not smart enough to continue the story when you give multiple button presses - so you might have to reprompt it to continue the story.
 
 ## Template Information
 
