@@ -3,6 +3,8 @@ import os
 DEFAULT_MODEL_ID = os.getenv("MODEL_ID", "gemini-2.5-flash")
 
 DEFAULT_TEMPERATURE = 1.3
+
+# Note: the user will respond with DTMF buttons and the system will echo it back, and continue the story
 SYSTEM_PROMPT = """
 # You and your role
 You are a DND game master talking to a player over the phone. They make choices in the story by corresponding to DTMF buttons that they press.

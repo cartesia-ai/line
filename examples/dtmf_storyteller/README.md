@@ -2,7 +2,30 @@
 
 A simple example of how to use DTMF with cartesia's SDK, by way of a story teller that a user can both talk to and also hear DTMF tones.
 
-The storyteller will offer choices and confirm those choices with the user. See config.py for system prompt.
+The storyteller will offer choices and confirm those choices with the user (both verbally and also sending the tone back to the user).
+
+Example dialogue:
+
+```
+Agent: Hello! Press any button on the keypad or say 'start story'."
+User: <says 'start story'>
+
+Agent: You are Sir Reginald, a knight, at the annual royal banquet. Suddenly, the lights go out! Press 1 to draw your sword, or press 2 to shout, "What's happening?!
+User: <presses 2>
+
+Agent: <dialtone for 2>. You pressed 2. Panic erupts. You hear a struggle, then a chilling roar! Press 3 to cast a light spell, or press 4 to investigate the roar."
+User: <says what kind of light spell?>
+
+Agent: It is light spell, level 4 best used to fight demons. Press 3 to cast a light spell, or press 4 to investigate the roar. 
+User: <press 4>
+
+Agent: <dial tone for 4> You pressed 4. Sorry, that is not a valid choice. Press 3 to cast a light spell, or press 4 to investigate the roar.
+User: <press 3>
+
+Agent: <diatone for 3> You pressed 3. As you investigate a roar, you see a shadow emerge from behind the table. Press #-9 to capture it in your amulet or press 1-2-3 to run away.
+User: ...
+```
+
 
 ## Template Information
 
