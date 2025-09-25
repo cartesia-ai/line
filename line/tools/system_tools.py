@@ -182,6 +182,8 @@ class DTMFToolCall(ToolDefinition):
                     },
                 },
                 "required": ["button"],
+                "additionalProperties": False,
+                "strict": True,
             },
         }
 
