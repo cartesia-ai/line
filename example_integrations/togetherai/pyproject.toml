@@ -1,0 +1,26 @@
+[project]
+name = "together-ai-customer-service"
+version = "0.1.0"
+description = "A customer service agent using Together AI API with Cartesia Line"
+requires-python = ">=3.10"
+dependencies = [
+    "cartesia-line",
+    "openai>=1.0.0",
+    "python-dotenv>=1.0.0",
+    "loguru>=0.7.0",
+    "aiohttp>=3.12.0",
+    "uvicorn==0.35.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["."]
+
+[tool.uv]
+dev-dependencies = []

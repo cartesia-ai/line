@@ -1,0 +1,10 @@
+[agent]
+name = "Together AI Customer Service"
+description = "AI customer service agent powered by Together AI"
+
+[agent.runtime]
+python_version = "3.10"
+main_module = "main"
+
+[agent.environment]
+TOGETHER_API_KEY = "$TOGETHER_API_KEY"
