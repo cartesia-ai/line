@@ -21,7 +21,6 @@ import pytest
 
 from line.evals.conversation_runner import ConversationRunner
 from line.evals.turn import AgentTurn, UserTurn
-from line.nodes.conversation_context import ConversationContext
 
 
 @pytest.mark.asyncio
