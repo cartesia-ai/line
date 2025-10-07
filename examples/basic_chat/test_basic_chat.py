@@ -2,7 +2,7 @@
 Run this via
 
 ```
-uv pip install -e ".[dev]"
+uv sync --extra dev
 uv run pytest test_basic_chat.py
 ```
 

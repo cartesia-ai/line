@@ -14,6 +14,10 @@ Vibe checking an agent is rather painful, especially if the scenarios are rather
 You can simply write tests and run them with
 
 ```
+# Installs dev pytest dependencies
+uv sync --extra dev
+
+# Run all pytests
 uv run pytest
 ```
 
@@ -21,7 +25,7 @@ uv run pytest
 
 One way to improve your robustness is to run with multiple counts automatically load balanced across all available workers (usually the number of cores you have on your machine):
 ```
-uv run pytest line/tests/test_similar_utils.py --count 8 -n auto
+uv run pytest tests/test_similarity_utils.py   --count 8 -n auto
 ```
 
 Or you can run certain tests
