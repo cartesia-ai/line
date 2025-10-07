@@ -11,7 +11,6 @@ from typing import Any, Dict, List, Literal, Optional, Union
 from pydantic import BaseModel, Field
 
 from line.evals.similarity_utils import is_similar_dict, is_similar_text
-from line.evals.types import AgentTurn, UserTurn
 from line.events import (
     AgentResponse,
     DTMFOutputEvent,
