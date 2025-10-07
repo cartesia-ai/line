@@ -43,11 +43,15 @@ dependencies = [
 dev = [
     "pytest",
     "pytest-asyncio",
+    "pytest-cov",
+    "pytest-xdist==3.8.0",
+    "pytest-repeat==0.9.4",
     "pre-commit",
     "ruff==0.12.8",
-    "pytest-cov",
     "google-genai>=1.26.0,<2",
 ]
+
+
 gemini = [
     "google-genai>=1.26.0,<2; python_version>='3.9'",
     "aiohttp>=3.12.0",
