@@ -143,15 +143,15 @@ class ConversationHarness:
         await self._send(EndCallOutput())
         logger.info("End call message sent")
 
-    async def transfer_call(self, destination: str = ""):
+    async def transfer_call(self, target_phone_number: str = ""):
         """
         Send transfer_call message
 
         Args:
-            destination: Optional destination for call transfer
+            target_phone_number: Optional target phone number for call transfer
         """
-        await self._send(TransferOutput(target_phone_number=destination))
-        logger.info(f"Transfer call message sent to {destination}")
+        await self._send(TransferOutput(target_phone_number=target_phone_number))
+        logger.info(f"Transfer call message sent to {target_phone_number}")
         self.shutdown_event.set()
 
     async def send_message(self, message: str):

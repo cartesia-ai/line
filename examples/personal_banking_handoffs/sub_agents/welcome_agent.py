@@ -16,14 +16,19 @@ from google.genai.types import (
     Tool,
 )
 from loguru import logger
+from line.harness_types import TransferOutput
+from line.tools.system_tools import TransferToolCall
 from prompts import make_voice_system_prompt
 
-from line.events import AgentResponse, ToolCall
+from line.events import AgentResponse, ToolCall, TransferCall
 
 from .sub_agent import SubAgent
 
 # Welcome agent LLM settings
 WELCOME_MODEL_ID = "gemini-2.5-flash"
+
+# To test this, replace this with your number
+REPRESENTATIVE_PHONE_NUMBER = "+18005551234"
 
 # Welcome agent prompt
 WELCOME_PROMPT = f"""
@@ -55,6 +60,10 @@ You: [Call handoff_to_transaction immediately - no text response]
 **Unclear Requests:**
 Customer: "I need help"
 You: [Call handoff_to_faq for general assistance - no text response]
+
+**Transfer**
+Customer: "I need to speak with a representative"
+You: transfer_tool
 """
 
 # Initial welcome message
@@ -69,6 +78,7 @@ class WelcomeAgent(SubAgent):
     2. Analyzes customer intent from initial request
     3. Routes to FAQ agent for general questions
     4. Routes to verification/transaction flow for banking needs
+    5. Allows the user to perform a cold transfer to a representative if they say 'speak with a representative'
     """
 
     def __init__(self, context: BankContext):
@@ -80,6 +90,8 @@ class WelcomeAgent(SubAgent):
         super().__init__(context)
         self.client = Client()
         self.system_prompt = WELCOME_PROMPT
+
+        self._transfer_tool_call = TransferToolCall(target_phone_numbers=[REPRESENTATIVE_PHONE_NUMBER])
 
         self.generation_config = GenerateContentConfig(
             system_instruction=make_voice_system_prompt(self.system_prompt),
@@ -95,6 +107,7 @@ class WelcomeAgent(SubAgent):
                             name="handoff_to_transaction",
                             description="Route customer to banking services for account access, transactions, balances, transfers, or fraud reports.",
                         ),
+                        self._transfer_tool_call.to_gemini_tool().function_declarations[0],
                     ]
                 ),
             ],
@@ -147,4 +160,9 @@ class WelcomeAgent(SubAgent):
         if response.function_calls:
             for function_call in response.function_calls:
                 logger.info(f"👋 Welcome agent routing via: {function_call.name}")
-                yield ToolCall(tool_name=function_call.name)
+
+                if function_call.name == self._transfer_tool_call.name():
+                    logger.info(f"Doing a cold transfer to: {function_call.args['target_phone_number']}")
+                    yield TransferCall(target_phone_number=function_call.args["target_phone_number"])
+                else:
+                    yield ToolCall(tool_name=function_call.name)

@@ -134,8 +134,7 @@ class AgentError(BaseModel):
 class TransferCall(BaseModel):
     """Transfer call to destination."""
 
-    destination: str
-    reason: Optional[str] = None
+    target_phone_number: str
 
 
 class AgentHandoff(BaseModel):
