@@ -6,7 +6,7 @@ similarity checking using AI models.
 """
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional  # noqa: F401
+from typing import Dict, List, Optional, Union  # noqa: F401
 
 from google.genai import Client
 from google.genai.types import GenerateContentConfig
@@ -154,7 +154,7 @@ def is_similar_via_single_text_comparison(a: str, b: str) -> SimilarityResult:
     - "Now, what's your Name?" vs "Thank you, what's your name?" → YES
     - "Hello" vs "Goodbye" → NO: Opposite greetings with different meanings
     - "one    two three  four" versus "1234" → YES
-    """
+    """  # noqa: E501
 
     config = GenerateContentConfig(
         temperature=0.1,  # Low temperature for consistent results
@@ -179,7 +179,7 @@ def is_similar_via_single_text_comparison(a: str, b: str) -> SimilarityResult:
         )
 
 
-def is_similar_text(a: List[str] | str, b: List[str] | str) -> SimilarityResult:
+def is_similar_text(a: Union[List[str], str], b: Union[List[str], str]) -> SimilarityResult:
     """Given two texts that are lists, check that at least one element from a is similar to one element from b.
 
     Args:
@@ -188,7 +188,7 @@ def is_similar_text(a: List[str] | str, b: List[str] | str) -> SimilarityResult:
 
     Returns:
         SimilarityResult indicating if the lists are similar
-    """
+    """  # noqa: E501
     a = [a] if isinstance(a, str) else a
     b = [b] if isinstance(b, str) else b
 
