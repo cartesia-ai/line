@@ -3,6 +3,7 @@
 from line.bridge import Bridge
 from line.bus import Bus, Message
 from line.call_request import CallRequest, PreCallResult
+from line.evals import AgentTurn, ConversationRunner, Turn, UserTurn
 from line.nodes.conversation_context import ConversationContext
 
 # Reasoning components
@@ -26,4 +27,9 @@ __all__ = [
     "VoiceAgentApp",
     "VoiceAgentSystem",
     "register_observability_event",
+    "AgentTurn",
+    "ConversationRunner",
+    "Turn",
+    "UserTurn",
+    "SimilarityUtils",
 ]
