@@ -70,7 +70,7 @@ async def test_basic_chat_can_end_call():
         AgentTurn(
             text="*",
             telephony_events=[EndCall()],
-        ),  # Opener is same every time
+        ),
     ]
 
     test_conv = ConversationRunner(conversation_node, expected_conversation)

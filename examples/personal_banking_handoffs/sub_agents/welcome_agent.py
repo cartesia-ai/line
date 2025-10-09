@@ -16,11 +16,10 @@ from google.genai.types import (
     Tool,
 )
 from loguru import logger
-from line.harness_types import TransferOutput
-from line.tools.system_tools import TransferToolCall
 from prompts import make_voice_system_prompt
 
 from line.events import AgentResponse, ToolCall, TransferCall
+from line.tools.system_tools import TransferToolCall
 
 from .sub_agent import SubAgent
 

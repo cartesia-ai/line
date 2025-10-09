@@ -7,10 +7,7 @@ uv run pytest tests/test_cold_transfers.py
 ```
 """
 
-import os
-
 from chat_node import ChatNode
-from google import genai
 import pytest
 
 from line.evals.conversation_runner import ConversationRunner

@@ -177,7 +177,7 @@ class Turn(BaseModel):
                 )
 
         if self.telephony_events != other.telephony_events:
-            return f"telephony_events mismatch: expected {other.telephony_events} to match {self.telephony_events}"
+            return f"telephony_events mismatch: expected {other.telephony_events} to match {self.telephony_events}"  # noqa: E501
 
         return None
 
