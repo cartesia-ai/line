@@ -16,7 +16,7 @@ from line.events import TransferCall
 
 
 @pytest.mark.asyncio
-async def test_basic_chat():
+async def test_cold_transfer():
     """
     Test a simple conversation
     """
