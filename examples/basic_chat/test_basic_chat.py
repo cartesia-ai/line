@@ -21,6 +21,7 @@ import pytest
 
 from line.evals.conversation_runner import ConversationRunner
 from line.evals.turn import AgentTurn, UserTurn
+from line.events import EndCall
 
 
 @pytest.mark.asyncio
@@ -44,6 +45,32 @@ async def test_basic_chat():
         ),  # Opener is same every time
         UserTurn(text="What do you like better: apples or oranges?"),
         AgentTurn(text=["<mentions apples>", "<mentions oranges>"]),
+    ]
+
+    test_conv = ConversationRunner(conversation_node, expected_conversation)
+    await test_conv.run()
+
+
+@pytest.mark.asyncio
+async def test_basic_chat_can_end_call():
+    """
+    Test a simple conversation
+    """
+    gemini_client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+
+    conversation_node = ChatNode(
+        system_prompt=SYSTEM_PROMPT,
+        gemini_client=gemini_client,
+    )
+
+    expected_conversation = [
+        UserTurn(
+            text="Goodbye",
+        ),
+        AgentTurn(
+            text="*",
+            telephony_events=[EndCall()],
+        ),
     ]
 
     test_conv = ConversationRunner(conversation_node, expected_conversation)

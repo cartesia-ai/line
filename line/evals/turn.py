@@ -17,6 +17,7 @@ from line.events import (
     EndCall,
     EventInstance,
     ToolResult,
+    TransferCall,
     UserTranscriptionReceived,
 )
 from line.events import (
@@ -38,7 +39,7 @@ class Turn(BaseModel):
     role: Literal["user", "assistant"]
     text: Union[List[str], str] = ""
     tool_calls: List[ToolCall] = Field(default_factory=list)
-    dtmf_output: list[DTMFOutputEvent] = Field(default_factory=list)
+    telephony_events: list[Union[DTMFOutputEvent, TransferCall, EndCall]] = Field(default_factory=list)
 
     @property
     def is_user(self) -> bool:
@@ -98,7 +99,7 @@ class Turn(BaseModel):
 
         # Track tool calls and their results
         tool_call_map = {}
-        dtmf_output = []
+        telephony_events = []
 
         for event in events:
             if isinstance(event, UserTranscriptionReceived):
@@ -110,9 +111,6 @@ class Turn(BaseModel):
             elif isinstance(event, EventToolCall):
                 role = "assistant"
                 tool_call_map[event.tool_name] = ToolCall(name=event.tool_name, arguments=event.tool_args)
-            elif isinstance(event, EndCall):
-                role = "assistant"
-                tool_call_map["end_call"] = ToolCall(name="end_call", arguments={})
             elif isinstance(event, ToolResult):
                 role = "assistant"
                 if event.tool_name in tool_call_map:
@@ -124,14 +122,18 @@ class Turn(BaseModel):
                         arguments=event.tool_args,
                         result=event.result,
                     )
-            elif isinstance(event, DTMFOutputEvent):
+            elif (
+                isinstance(event, DTMFOutputEvent)
+                or isinstance(event, TransferCall)
+                or isinstance(event, EndCall)
+            ):
                 role = "assistant"
-                dtmf_output.append(event)
+                telephony_events.append(event)
 
         tool_calls = list(tool_call_map.values())
         text = text.strip()
 
-        return cls(role=role, text=text, tool_calls=tool_calls, dtmf_output=dtmf_output)
+        return cls(role=role, text=text, tool_calls=tool_calls, telephony_events=telephony_events)
 
     def is_similar(self, other: "Turn") -> Optional[str]:
         """Check if this turn is similar to another turn.
@@ -174,8 +176,8 @@ class Turn(BaseModel):
                     f"expected {other_tool.result}, got {self_tool.result}"
                 )
 
-        if self.dtmf_output != other.dtmf_output:
-            return f"DTMF output mismatch: expected {other.dtmf_output} to match {self.dtmf_output}"
+        if self.telephony_events != other.telephony_events:
+            return f"telephony_events mismatch: expected {other.telephony_events} to match {self.telephony_events}"  # noqa: E501
 
         return None
 
