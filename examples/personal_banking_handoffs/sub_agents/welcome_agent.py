@@ -26,8 +26,8 @@ from .sub_agent import SubAgent
 # Welcome agent LLM settings
 WELCOME_MODEL_ID = "gemini-2.5-flash"
 
-# To test this, replace this with your number
-REPRESENTATIVE_PHONE_NUMBER = "+18005551234"
+# To test this, replace this the number you want to transfer to (e.g. a coworker's, if you're calling from your own)
+REPRESENTATIVE_PHONE_NUMBER = "+15165190480"
 
 # Welcome agent prompt
 WELCOME_PROMPT = f"""
