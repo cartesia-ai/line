@@ -185,6 +185,13 @@ class LogMetric(BaseModel):
     value: Any
 
 
+class LogEvent(BaseModel):
+    """Log event for tracking events."""
+
+    event: str
+    metadata: Optional[Dict[str, object]] = None
+
+
 class DTMFInputEvent(BaseModel):
     """DTMF event for tracking DTMF input."""
 
