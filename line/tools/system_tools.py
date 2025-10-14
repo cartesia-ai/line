@@ -1,11 +1,12 @@
 """System tool definitions for Cartesia Voice Agents SDK."""
 
-from typing import AsyncGenerator, Dict, Union
+from typing import AsyncGenerator, Dict, List, Optional, Union
 
 from pydantic import BaseModel, Field
 
 from line.events import AgentResponse, EndCall
 from line.tools.tool_types import ToolDefinition
+from line.utils.str import is_e164_phone_number
 
 try:
     from google.genai import types as gemini_types
@@ -156,8 +157,6 @@ class DTMFToolCall(ToolDefinition):
                             }
                         },
                         "required": ["button"],
-                        "additionalProperties": False,
-                        "strict": True,
                     },
                 )
             ]
@@ -190,5 +189,71 @@ class DTMFToolCall(ToolDefinition):
         }
 
 
-class DTMFToolCallTool(ToolDefinition):
-    """DTMF tool call system tool definition."""
+class TransferToolCall(ToolDefinition):  # noqa: F811
+    """Arguments for the transfer_tool_call tool."""
+
+    def __init__(self, target_phone_numbers: List[str], description: Optional[str] = None):
+        for destination in target_phone_numbers:
+            if not is_e164_phone_number(destination):
+                raise ValueError(f"Invalid destination phone number. {destination=}")
+
+        self.target_phone_numbers = target_phone_numbers
+        self._description = description
+
+    @classmethod
+    def name(cls) -> str:
+        return "transfer_tool"
+
+    def description(self) -> str:
+        return self._description or "Initiates a transfer of the call to the destination phone number."
+
+    @classmethod
+    def parameters_description(cls) -> str:
+        return "The destination phone number to transfer the call to"
+
+    def to_gemini_tool(self) -> "gemini_types.Tool":
+        """Convert to Gemini tool format"""
+        return gemini_types.Tool(
+            function_declarations=[
+                gemini_types.FunctionDeclaration(
+                    name=self.name(),
+                    description=self.description(),
+                    parameters={
+                        "type": "object",
+                        "properties": {
+                            "target_phone_number": {
+                                "type": "string",
+                                "description": self.parameters_description(),
+                                "enum": self.target_phone_numbers,
+                            }
+                        },
+                        "required": ["target_phone_number"],
+                    },
+                )
+            ]
+        )
+
+    def to_openai_tool(self) -> Dict[str, object]:
+        """Convert to OpenAI tool format for Responses API.
+
+        Note: This returns the format expected by OpenAI's Responses API,
+        not the Chat Completions API format.
+        """
+        return {
+            "type": "function",
+            "name": self.name(),
+            "description": self.description(),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "target_phone_number": {
+                        "type": "string",
+                        "enum": self.target_phone_numbers,
+                        "description": self.parameters_description(),
+                    },
+                },
+                "required": ["target_phone_number"],
+                "additionalProperties": False,
+                "strict": True,
+            },
+        }
