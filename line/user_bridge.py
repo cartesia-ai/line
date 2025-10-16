@@ -47,6 +47,7 @@ from line.events import (
     DTMFOutputEvent,
     EndCall,
     EventType,
+    LogEvent,
     LogMetric,
     ToolCall,
     ToolResult,
@@ -107,6 +108,11 @@ def create_user_bridge(harness: "ConversationHarness", authorized_node: str) -> 
         event: TransferCall = message.event
         return await harness.transfer_call(event.target_phone_number)
 
+    async def send_log_event(message: Message):
+        """Log event via harness."""
+        event: LogEvent = message.event
+        return await harness.log_event(event.event, event.metadata)
+
     async def send_log_metric(message: Message):
         """Log metric via harness."""
         event: LogMetric = message.event
@@ -138,6 +144,8 @@ def create_user_bridge(harness: "ConversationHarness", authorized_node: str) -> 
         .map(send_transfer_call)
         .on(LogMetric)
         .map(send_log_metric)
+        .on(LogEvent)
+        .map(send_log_event)
         .on(DTMFOutputEvent)
         .map(send_dtmf)
     )
