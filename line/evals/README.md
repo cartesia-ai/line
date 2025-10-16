@@ -37,8 +37,8 @@ uv run pytest line/tests/test_*
 ## Usage Example
 
 ```python
-from eval.conversation_runner import ConversationRunner
-from eval.turn import AgentTurn, ToolCall, UserTurn
+from line.evals.conversation_runner import ConversationRunner
+from line.evals.turn import AgentTurn, ToolCall, UserTurn
 
 reasoning_node = ExampleWeatherNode()
 
