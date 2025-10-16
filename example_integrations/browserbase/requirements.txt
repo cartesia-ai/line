@@ -1,0 +1,8 @@
+cartesia-line
+aiohttp>=3.12.0
+google-genai>=1.26.0; python_version>='3.9'
+loguru>=0.7.0
+python-dotenv>=1.0.0
+PyYAML>=6.0.0
+stagehand>=0.1.0
+pydantic>=2.0.0
