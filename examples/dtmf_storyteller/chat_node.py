@@ -110,7 +110,8 @@ class ChatNode(ReasoningNode):
         if len(dtmf_events) > 0:
             buttons = "".join([event.button for event in dtmf_events])
             for button in buttons:
-                yield DTMFOutputEvent(button=button)
+                if button.strip():
+                    yield DTMFOutputEvent(button=button)
 
         # Process LLM content
         async for msg in stream:
