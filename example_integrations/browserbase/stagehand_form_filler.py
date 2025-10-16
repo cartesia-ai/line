@@ -263,9 +263,9 @@ class StagehandFormFiller:
         Returns:
             None.
         """
-        if self.stagehand and self.page:
+        if self.stagehand or self.page:
             try:
-                await self.page.close()
+                await self.stagehand.close()
                 logger.info("Browser closed")
             except Exception as e:
                 logger.error(f"Error closing browser: {e}")
