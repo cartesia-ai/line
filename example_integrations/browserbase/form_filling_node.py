@@ -90,7 +90,6 @@ class FormFillingNode(ReasoningNode):
         temperature: float = DEFAULT_TEMPERATURE,
         max_context_length: int = 15,
         max_output_tokens: int = 1000,
-        headless: bool = False,
     ):
         """Initialize the Form Filling node with Stagehand integration.
 
@@ -102,7 +101,6 @@ class FormFillingNode(ReasoningNode):
             temperature: Temperature for generation.
             max_context_length: Maximum conversation context length.
             max_output_tokens: Maximum tokens for generation.
-            headless: Run browser in headless mode.
         """
         super().__init__(system_prompt=system_prompt, max_context_length=max_context_length)
 
@@ -112,7 +110,6 @@ class FormFillingNode(ReasoningNode):
 
         # Browser automation
         self.form_url = form_url
-        self.headless = headless
         self.stagehand_filler: Optional[StagehandFormFiller] = None
 
         # Form state
@@ -185,7 +182,7 @@ class FormFillingNode(ReasoningNode):
         self.browser_initializing = True
         try:
             logger.info("Initializing browser and analyzing form")
-            self.stagehand_filler = StagehandFormFiller(form_url=self.form_url, headless=self.headless)
+            self.stagehand_filler = StagehandFormFiller(form_url=self.form_url)
             await self.stagehand_filler.initialize()
 
             logger.info("Browser ready, form can now be filled")

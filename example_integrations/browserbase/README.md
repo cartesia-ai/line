@@ -2,6 +2,8 @@
 
 This project demonstrates an advanced voice agent that conducts phone questionnaires while automatically filling out web forms in real-time using Stagehand browser automation.
 
+Here's what the system architecture looks like:
+
 ![Workflow](workflow_diagram.png)
 
 ## Features
@@ -32,14 +34,14 @@ Voice Call (Cartesia) → Form Filling Node → Records Answer
 First things first, here is what you will need:
 - A [Cartesia](https://play.cartesia.ai/agents) account and API key
 - A [Gemini API Key](https://aistudio.google.com/apikey)
-- A [Browserbase API Key](https://www.browserbase.com/) (optional, for cloud browser automation)
+- A [Browserbase API Key and Project ID](https://www.browserbase.com/overview) 
 
 Make sure to add the API keys in your `.env` file or to the API keys section in your Cartesia account.
 
 - Required packages:
   ```bash
   cartesia-line
-  stagehand>=0.1.0
+  stagehand>=0.5.4
   google-genai>=1.26.0
   python-dotenv>=1.0.0
   PyYAML>=6.0.0
@@ -58,7 +60,8 @@ pip install -r requirements.txt
 2. Set up environment variables - create a `.env` file:
 ```bash
 GEMINI_API_KEY=your_gemini_api_key_here
-BROWSERBASE_API_KEY=your_browserbase_api_key_here  # Optional
+BROWSERBASE_API_KEY=your_browserbase_api_key_here
+BROWSERBASE_PROJECT_ID=your_browserbase_project_id_here
 ```
 
 3. Run the agent:
@@ -78,10 +81,10 @@ ReasoningNode subclass customized for voice-optimized form filling. Integrates S
 Browser automation manager that handles all web interactions. Opens and controls web forms, maps conversation data to form fields using AI, transforms voice answers to form-compatible formats, and handles form submission. Supports different field types (text, select, checkbox, etc.).
 
 ### `config.py`
-System configuration file including system prompts, model IDs, hyperparameters, and boolean flags for features like enabling/disabling browser automation and headless mode.
+System configuration file including system prompts, model IDs, and temperature
 
 ### `config.toml`
-Additional configuration for questionnaire structure and application-specific settings.
+Your Cartesia Line agent id.
 
 ## Configuration
 
@@ -90,10 +93,8 @@ The system can be configured through multiple files:
 - **`config.py`**: System prompts, model IDs (Gemini model selection), hyperparameters, and boolean flags for features
 - **`config.toml`** / **YAML files**: Questionnaire structure and questions flow
 - **`cartesia.toml`**: Deployment configuration for Cartesia platform (installs dependencies and runs the script)
-- **Environment variables**:
+- **Variables**:
   - `FORM_URL`: Target web form to fill
-  - `headless`: Run browser in background (True) or visible (False) - currently set to True for production use
-  - `enable_browser`: Toggle browser automation on/off
 
 ## Example Flow
 
@@ -136,7 +137,6 @@ Test with different scenarios:
 
 ## Production Considerations
 
-- Set `headless=True` for production (currently configured this way)
 - Configure proper error logging
 - Add retry logic for form submission
 - Implement form validation checks

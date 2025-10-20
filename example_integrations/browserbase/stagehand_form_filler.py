@@ -125,9 +125,8 @@ class FormFieldMapping:
 class StagehandFormFiller:
     """Manages browser automation for filling forms using Stagehand"""
 
-    def __init__(self, form_url: str, headless: bool = False):
+    def __init__(self, form_url: str):
         self.form_url = form_url
-        self.headless = headless
         self.stagehand: Optional[Stagehand] = None
         self.page = None
         self.is_initialized = False
