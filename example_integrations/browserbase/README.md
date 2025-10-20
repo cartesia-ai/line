@@ -34,7 +34,7 @@ Voice Call (Cartesia) → Form Filling Node → Records Answer
 First things first, here is what you will need:
 - A [Cartesia](https://play.cartesia.ai/agents) account and API key
 - A [Gemini API Key](https://aistudio.google.com/apikey)
-- A [Browserbase API Key and Project ID](https://www.browserbase.com/overview) 
+- A [Browserbase API Key and Project ID](https://www.browserbase.com/overview)
 
 Make sure to add the API keys in your `.env` file or to the API keys section in your Cartesia account.
 
