@@ -257,7 +257,7 @@ class ConversationHarness:
                 return [UserStoppedSpeaking()]
         elif isinstance(message, TranscriptionInput):
             logger.info(f'📝 User said: "{message.content}"')
-            return [UserTranscriptionReceived(content=message.content)]
+            return [UserTranscriptionReceived(content=message.content, language=message.language)]
         elif isinstance(message, AgentStateInput):
             if message.value == State.SPEAKING:
                 logger.info("🎤 Agent started speaking")

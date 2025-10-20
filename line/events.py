@@ -165,6 +165,7 @@ class UserTranscriptionReceived(BaseModel):
     """User transcription received event."""
 
     content: str
+    language: Optional[str] = None
 
 
 class AgentSpeechSent(BaseModel):
@@ -209,6 +210,7 @@ class ConfigOutputEvent(BaseModel):
     stt: Dict[str, Any] = None
     vad: Dict[str, Any] = None
     background_audio: Dict[str, Any] = None
+
 
 class _EventsRegistry:
     """A singleton registry of all events.

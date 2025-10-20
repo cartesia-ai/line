@@ -47,7 +47,11 @@ def convert_messages_to_openai(
         if isinstance(event, AgentResponse):
             openai_messages.append({"role": "assistant", "content": event.content})
         elif isinstance(event, UserTranscriptionReceived):
-            openai_messages.append({"role": "user", "content": event.content})
+            if event.language:
+                content = f"({event.language}) {event.content}"
+            else:
+                content = event.content
+            openai_messages.append({"role": "user", "content": content})
         elif isinstance(event, ToolCall):
             if event.raw_response:
                 openai_messages.append(event.raw_response)
