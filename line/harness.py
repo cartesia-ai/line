@@ -25,6 +25,7 @@ from line.events import (
 from line.harness_types import (
     AgentSpeechInput,
     AgentStateInput,
+    ConfigOutput,
     DTMFInput,
     DTMFOutput,
     EndCallOutput,
@@ -184,6 +185,12 @@ class ConversationHarness:
                 id=tool_call_id,
             )
         )
+
+    async def update_config(
+        self, tts: Dict[str, Any], stt: Dict[str, Any], vad: Dict[str, Any], background_audio: Dict[str, Any]
+    ):
+        """Send a config update via WebSocket with connection state checking"""
+        await self._send(ConfigOutput(tts=tts, stt=stt, vad=vad, background_audio=background_audio))
 
     async def log_event(self, event: str, metadata: Optional[Dict[str, Any]] = None):
         """

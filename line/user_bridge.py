@@ -44,6 +44,7 @@ from line.events import (
     AgentError,
     AgentResponse,
     Authorize,
+    ConfigOutputEvent,
     DTMFOutputEvent,
     EndCall,
     EventType,
@@ -117,6 +118,11 @@ def create_user_bridge(harness: "ConversationHarness", authorized_node: str) -> 
         event: DTMFOutputEvent = message.event
         return await harness.send_dtmf(event.button)
 
+    async def send_config(message: Message):
+        """Send config update to harness."""
+        event: ConfigOutputEvent = message.event
+        return await harness.update_config(event.tts, event.stt, event.vad, event.background_audio)
+
     bridge = (
         Bridge(harness)
         .with_input_routing(harness)  # Enable WebSocket → bus event routing
@@ -140,6 +146,8 @@ def create_user_bridge(harness: "ConversationHarness", authorized_node: str) -> 
         .map(send_log_metric)
         .on(DTMFOutputEvent)
         .map(send_dtmf)
+        .on(ConfigOutputEvent)
+        .map(send_config)
     )
 
     # Add authorization handler after creation.
