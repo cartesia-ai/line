@@ -11,6 +11,7 @@ from pydantic import BaseModel
 
 class TranscriptionInput(BaseModel):
     content: str
+    language: Optional[str] = None
     type: Literal["message"] = "message"
 
 
