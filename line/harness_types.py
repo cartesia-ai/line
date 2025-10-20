@@ -1,4 +1,4 @@
-from typing import Dict, Literal, Optional, Union
+from typing import Any, Dict, Literal, Optional, Union
 
 from pydantic import BaseModel
 
@@ -97,6 +97,14 @@ class LogMetricOutput(BaseModel):
     value: object
 
 
+class ConfigOutput(BaseModel):
+    type: Literal["config"] = "config"
+    tts: Optional[Dict[str, Any]] = None
+    stt: Optional[Dict[str, Any]] = None
+    vad: Optional[Dict[str, Any]] = None
+    background_audio: Optional[Dict[str, Any]] = None
+
+
 OutputMessage = Union[
     ErrorOutput,
     DTMFOutput,
@@ -106,4 +114,5 @@ OutputMessage = Union[
     EndCallOutput,
     LogEventOutput,
     LogMetricOutput,
+    ConfigOutput,
 ]
