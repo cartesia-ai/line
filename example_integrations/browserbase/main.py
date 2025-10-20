@@ -11,7 +11,7 @@ from config import SYSTEM_PROMPT
 from form_filling_node import FormFillingNode
 from google import genai
 
-from line import Bridge, VoiceAgentApp, VoiceAgentSystem
+from line import Bridge, CallRequest, VoiceAgentApp, VoiceAgentSystem
 from line.events import UserStartedSpeaking, UserStoppedSpeaking, UserTranscriptionReceived
 
 # Target form URL - the actual web form to fill
@@ -21,7 +21,7 @@ FORM_URL = "https://forms.fillout.com/t/rff6XZTSApus"
 gemini_client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
 
-async def handle_new_call(system: VoiceAgentSystem) -> None:
+async def handle_new_call(system: VoiceAgentSystem, call_request: CallRequest) -> None:
     """Handle incoming voice calls with real-time web form filling.
 
     This agent will:
@@ -35,7 +35,9 @@ async def handle_new_call(system: VoiceAgentSystem) -> None:
     """
 
     # Create form filling node with browser automation
-    form_node = FormFillingNode(system_prompt=SYSTEM_PROMPT, gemini_client=gemini_client, form_url=FORM_URL)
+    form_node = FormFillingNode(
+        system_prompt=SYSTEM_PROMPT, gemini_client=gemini_client, form_url=FORM_URL
+    )
 
     # Set up bridge for event handling
     form_bridge = Bridge(form_node)
