@@ -35,9 +35,7 @@ async def handle_new_call(system: VoiceAgentSystem, call_request: CallRequest) -
     """
 
     # Create form filling node with browser automation
-    form_node = FormFillingNode(
-        system_prompt=SYSTEM_PROMPT, gemini_client=gemini_client, form_url=FORM_URL
-    )
+    form_node = FormFillingNode(system_prompt=SYSTEM_PROMPT, gemini_client=gemini_client, form_url=FORM_URL)
 
     # Set up bridge for event handling
     form_bridge = Bridge(form_node)

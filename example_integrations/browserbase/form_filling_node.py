@@ -126,7 +126,7 @@ class FormFillingNode(ReasoningNode):
         enhanced_prompt = (
             system_prompt
             + """
-        
+
         You are conducting a voice conversation to help fill out a web
         form. As you collect information, it's being entered into an
         actual online form in real-time. Ask natural questions to gather
@@ -417,10 +417,10 @@ class FormFillingNode(ReasoningNode):
 
         # Add context about current question
         question_context = f"""
-        
+
         Current form field: {current_question.field_name}
         Question: {current_question.question}
-        
+
         Listen to the user's response and use the record_form_field
         tool to save it. Then acknowledge their answer naturally.
         """
