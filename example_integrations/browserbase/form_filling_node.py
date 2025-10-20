@@ -42,7 +42,7 @@ class RecordFormFieldTool:
         return "Record a value for a form field that needs to be filled"
 
     @staticmethod
-    def parameters() -> dict:
+    def parameters() -> Dict:
         return RecordFormFieldArgs.model_json_schema()
 
     @staticmethod
