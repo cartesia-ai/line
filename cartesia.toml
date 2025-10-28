@@ -1,0 +1,8 @@
+[app]
+name = "line"
+
+[build]
+cmd = "echo 'No build cmd specified'"
+
+[run]
+cmd = "echo 'No run cmd specified'"

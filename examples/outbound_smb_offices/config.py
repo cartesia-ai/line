@@ -7,7 +7,7 @@ DEFAULT_MODEL_ID = os.getenv("MODEL_ID", "gemini-2.5-flash")
 DEFAULT_TEMPERATURE = 0.3
 
 # Remember to change me every time you restart ngrok
-NGROK_URL = "https://879279f0825d.ngrok-free.app"
+NGROK_URL = "https://98bc06b79f8b.ngrok-free.app"
 
 
 # Note: the user will respond with DTMF buttons and the system will echo it back, and continue the story
