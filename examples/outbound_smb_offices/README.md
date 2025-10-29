@@ -1,4 +1,4 @@
-# SMB Business Data Collection
+# SMB Business Outbound Agent
 
 This is an example of a voice agent that outbounds small business to ask a series of questions from them.
 
@@ -21,7 +21,7 @@ When you call a small business, one of three things will happen:
 
 This example also features a callback to an external URL to determine the call parameters (config_service.py).
 
-![System diagram](smb_outbound_system_diagram.jpeg)
+<img src="smb_outbound_system_diagram.jpeg" alt="System diagram" width="600">
 
 To test this template:
 
@@ -79,7 +79,7 @@ uv run config_service.py
 
     iv. Note that if a number is not found, the existing service is configured to return a default configuration.
 
-7. When you are satisfied, deploy your agent
+7. When you are satisfied with your agent, deploy your agent
 
 ```
 cartesia init               # Select create a new agent
