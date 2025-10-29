@@ -6,7 +6,7 @@ from config_service import BusinessDetails
 from google import genai
 
 from line.evals.conversation_runner import ConversationRunner
-from line.evals.turn import AgentTurn, ToolCall, UserTurn
+from line.evals.turn import AgentTurn, UserTurn
 from line.events import EndCall
 
 

@@ -95,4 +95,3 @@ carteisa call +1XXXXXXXXXX
 ```
 
 When you speak with it, it should address you with the configuration you set in step 3
-

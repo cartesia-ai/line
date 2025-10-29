@@ -87,7 +87,9 @@ def log_aiter_func(message=None, show_each=False):
                 displayed_timings = iter_timings if show_each else []
 
                 logger.info(
-                    f"[END ITER] {log_message}. items_yielded_count={item_count}, total_time={total_duration:.2f}s, time_to_first_item={time_to_first_item}, iter_timings={displayed_timings}"
+                    f"[END ITER] {log_message}. items_yielded_count={item_count},"
+                    + f" total_time={total_duration:.2f}s, time_to_first_item={time_to_first_item},"
+                    + f" iter_timings={displayed_timings}"
                 )
 
         return wrapper
