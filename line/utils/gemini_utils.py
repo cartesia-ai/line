@@ -11,6 +11,8 @@ from loguru import logger
 
 from line.events import (
     AgentResponse,
+    DTMFInputEvent,
+    DTMFOutputEvent,
     EventInstance,
     EventType,
     ToolResult,
@@ -65,6 +67,10 @@ def convert_messages_to_gemini(
             gemini_messages.append(types.ModelContent(parts=[types.Part.from_text(text=event.content)]))
         elif isinstance(event, UserTranscriptionReceived):
             gemini_messages.append(types.UserContent(parts=[types.Part.from_text(text=event.content)]))
+        elif isinstance(event, DTMFInputEvent):
+            gemini_messages.append(types.UserContent(parts=[types.Part.from_text(text=event.button)]))
+        elif isinstance(event, DTMFOutputEvent):
+            gemini_messages.append(types.ModelContent(parts=[types.Part.from_text(text=event.button)]))
         elif isinstance(event, ToolResult):
             # Gemini 400s if a ToolResult is the first message in the context, so don't add it:
             if not gemini_messages:

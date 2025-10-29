@@ -83,13 +83,7 @@ class ChatNode(ReasoningNode):
             logger.info("No messages to process")
             return
 
-        messages = convert_messages_to_gemini(
-            context.events,
-            {
-                DTMFInputEvent: serialize_dtmf_input_event,
-                DTMFOutputEvent: serialize_dtmf_output_event,
-            },
-        )
+        messages = convert_messages_to_gemini(context.events)
 
         user_message = context.get_latest_user_transcript_message()
         if user_message:
