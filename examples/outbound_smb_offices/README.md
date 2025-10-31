@@ -41,7 +41,7 @@ ngrok http http://localhost:8001
 ```
 # cat config.py
 ...
-NGROK_URL = "https://879279f0825d.ngrok-free.app" # note that this may change when you restart the service
+CONFIG_URL = "https://your-domain.com/callback"
 ...
 ```
 
@@ -74,7 +74,7 @@ uv run config_service.py
     iii. You should see config_service.py receive a request
 
     ```
-    INFO:     136.24.71.118:0 - "POST /details HTTP/1.1" 200 OK
+    INFO:     10.12.34.567:0 - "POST /details HTTP/1.1" 200 OK
     ```
 
     iv. Note that if a number is not found, the existing service is configured to return a default configuration.
@@ -91,7 +91,7 @@ cartesia env set GEMINI_API_KEY=$GEMINI_API_KEY     # sets the gemini api key
 
 8. Test your agent with your phone number
 ```
-carteisa call +1XXXXXXXXXX
+cartesia call +1XXXXXXXXXX
 ```
 
 When you speak with it, it should address you with the configuration you set in step 3

@@ -2,7 +2,7 @@ from asyncio.log import logger
 import os
 
 from chat_node import ChatNode
-from config import NGROK_URL, get_system_prompt
+from config import CONFIG_URL, get_system_prompt
 from config_service import BusinessDetails
 from google import genai
 import requests
@@ -34,7 +34,7 @@ async def pre_call_handler(_call_request: CallRequest) -> PreCallResult:
 
 
 async def get_details(to_number: str) -> BusinessDetails:
-    response = requests.post(f"{NGROK_URL}/details", json={"to": to_number})
+    response = requests.post(f"{CONFIG_URL}/details", json={"to": to_number})
     if response.status_code != 200:
         raise Exception(
             f"Failed to get provider for {to_number}, response: {response.text}, response code: {response.status_code}"
@@ -45,7 +45,8 @@ async def get_details(to_number: str) -> BusinessDetails:
 
 
 async def handle_new_call(system: VoiceAgentSystem, call_request: CallRequest):
-    to_number = call_request.to if call_request.to != "unknown" else "+16316823553"
+    # call_request.to will be None if the call originated from a non-phone service (e.g. webdialier in the cartesia playground)
+    to_number = call_request.to if call_request.to != "unknown" else "+15551234567"
 
     details = await get_details(to_number)
 

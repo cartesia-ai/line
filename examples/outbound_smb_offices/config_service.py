@@ -7,7 +7,7 @@ uv run config_service.py
 # Test
 curl -iX POST http://localhost:8001/provider \
     -H "Content-Type: application/json" \
-    -d '{"to": "+17173030505"}'
+    -d '{"to": "+155573030505"}'
 """
 
 from collections.abc import Generator
@@ -72,7 +72,7 @@ async def get_details(request: CallRequestPartial) -> BusinessDetails:
         return BusinessDetails(
             name="Jane Doe",
             address="143 Main St, Anytown",
-            phone_number="+14086121089",
+            phone_number="+15551234567",
         )
 
         raise HTTPException(
