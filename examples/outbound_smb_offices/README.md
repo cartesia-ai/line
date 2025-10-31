@@ -30,13 +30,13 @@ To test this template:
 export GEMINI_API_KEY=<your-gemini-api-key>
 ```
 
-2. Start engrok
+2. Start ngrok
 
 ```
 ngrok http http://localhost:8001
 ```
 
-3. Modify the ngrok url in config.py
+3. Modify the ngrok url in config.py (note: we use ngrok for testing and development, but you can use your own route in production)
 
 ```
 # cat config.py
