@@ -54,11 +54,13 @@ escalation_schema = {
 # Global state
 ESCALATION_DETECTED = False
 
+
 class EscalationAlert(BaseModel):
     """Escalation alert from background monitoring."""
-    
+
     escalation_info: str = "N/A"
     urgency: str = "medium"
+
 
 # Together AI Configuration
 MAX_OUTPUT_TOKENS = 150
@@ -68,10 +70,27 @@ TEMPERATURE = 0.3
 
 # Mock data for knowledge base
 KNOWLEDGE_BASE = {
-    "login": "To reset your password, go to Settings > Account > Reset Password. Enter your email and check for reset instructions.",
-    "billing": "Billing issues can be resolved by contacting our billing department at billing@techcorp.com or through your account dashboard.",
-    "technical": "For technical issues, first try restarting the application. If that doesn't work, check our troubleshooting guide.",
-    "refund": "Refund requests must be submitted within 30 days of purchase. Contact billing@techcorp.com with your order number.",
-    "account": "Account-related questions can be resolved through your user dashboard or by contacting support.",
-    "installation": "Installation issues are often resolved by running the installer as administrator and ensuring system requirements are met."
+    "login": (
+        "To reset your password, go to Settings > Account > Reset Password. "
+        "Enter your email and check for reset instructions."
+    ),
+    "billing": (
+        "Billing issues can be resolved by contacting our billing department at "
+        "billing@techcorp.com or through your account dashboard."
+    ),
+    "technical": (
+        "For technical issues, first try restarting the application. "
+        "If that doesn't work, check our troubleshooting guide."
+    ),
+    "refund": (
+        "Refund requests must be submitted within 30 days of purchase. "
+        "Contact billing@techcorp.com with your order number."
+    ),
+    "account": (
+        "Account-related questions can be resolved through your user dashboard or by contacting support."
+    ),
+    "installation": (
+        "Installation issues are often resolved by running the installer as administrator "
+        "and ensuring system requirements are met."
+    ),
 }

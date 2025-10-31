@@ -1,11 +1,11 @@
 import logging
 import os
 
-from openai import AsyncOpenAI
-from config import EscalationAlert, prompt_main, prompt_escalation, escalation_schema
-from dotenv import load_dotenv
+from config import EscalationAlert, escalation_schema, prompt_escalation, prompt_main
 from customer_service_node import CustomerServiceNode
+from dotenv import load_dotenv
 from escalation_node import EscalationNode
+from openai import AsyncOpenAI
 
 from line import Bridge, CallRequest, VoiceAgentApp, VoiceAgentSystem
 from line.events import AgentResponse, UserStartedSpeaking, UserStoppedSpeaking, UserTranscriptionReceived
@@ -25,20 +25,20 @@ together_client = AsyncOpenAI(
 async def handle_new_call(system: VoiceAgentSystem, chat_request: CallRequest):
     """
     Handle new customer service call with main agent and background escalation monitoring.
-    
+
     Args:
         system: Voice agent system
         chat_request: Incoming call request
     """
-    
+
     # Main customer service agent (authorized to speak)
     service_node = CustomerServiceNode(system_prompt=prompt_main, client=together_client)
     service_bridge = Bridge(service_node)
-    
+
     # Configure main conversation routing
     system.with_speaking_node(service_node, service_bridge)
     service_bridge.on(UserTranscriptionReceived).map(service_node.add_event)
-    
+
     # Handle user speech with interruption support
     (
         service_bridge.on(UserStoppedSpeaking)
@@ -54,21 +54,22 @@ async def handle_new_call(system: VoiceAgentSystem, chat_request: CallRequest):
         node_schema=escalation_schema,
         node_name="Escalation Monitor",
     )
-    
+
     escalation_bridge = Bridge(escalation_node)
-    
+
     # Configure escalation monitoring
     escalation_bridge.on(UserTranscriptionReceived).map(escalation_node.add_event)
     escalation_bridge.on(AgentResponse).map(escalation_node.add_event)
     escalation_bridge.on(UserStoppedSpeaking).stream(escalation_node.generate).broadcast()
-    
+
     # Route escalation alerts back to main service node
     service_bridge.on(EscalationAlert).map(service_node.add_event)
 
     # Register both nodes in the system
     (
-        system.with_speaking_node(service_node, service_bridge)  # Can speak to customer
-        .with_node(escalation_node, escalation_bridge)  # Background monitoring only
+        system.with_speaking_node(service_node, service_bridge).with_node(  # Can speak to customer
+            escalation_node, escalation_bridge
+        )  # Background monitoring only
     )
 
     # Start the system and send greeting

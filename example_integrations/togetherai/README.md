@@ -28,7 +28,7 @@ A real-time customer service voice agent integrating Together AI models with Car
 
 ### **Customer Service Capabilities**
 - **Knowledge Base Search**: Automated lookup of common solutions
-- **Support Ticket Creation**: Generate tickets for complex issues  
+- **Support Ticket Creation**: Generate tickets for complex issues
 - **Human Escalation**: Intelligent handoff to human agents
 - **Issue Classification**: Automatic routing based on problem type
 
@@ -77,7 +77,7 @@ A real-time customer service voice agent integrating Together AI models with Car
 - Manages knowledge base searches and ticket creation
 - Coordinates human escalation when needed
 
-**EscalationNode** (`escalation_node.py`) 
+**EscalationNode** (`escalation_node.py`)
 - Background monitoring using zai-org/GLM-4.5-Air-FP8 for efficiency
 - Analyzes conversation patterns for escalation triggers
 - Provides structured escalation recommendations
@@ -100,7 +100,7 @@ A real-time customer service voice agent integrating Together AI models with Car
 
 ### **Escalation Triggers**
 - Customer expresses frustration multiple times
-- Issue remains unresolved after several attempts  
+- Issue remains unresolved after several attempts
 - Explicit request for human assistance
 - Technical complexity beyond automation
 - Account security or billing concerns
@@ -134,10 +134,10 @@ KNOWLEDGE_BASE = {
 }
 ```
 
-### **Escalation Criteria**  
+### **Escalation Criteria**
 Modify `prompt_escalation` in `config.py` to adjust escalation sensitivity:
 - Frustration thresholds
-- Complexity indicators  
+- Complexity indicators
 - Keywords for automatic escalation
 
 ### **Customer Service Tools**
@@ -154,7 +154,7 @@ Extend `openai_utils.py` to add new capabilities:
 - Agent: Searches knowledge base → Provides password reset instructions
 
 **Ticket Creation:**
-- Customer: "My software keeps crashing with error code 503"  
+- Customer: "My software keeps crashing with error code 503"
 - Agent: Creates high-priority technical support ticket
 
 **Human Escalation:**
@@ -172,6 +172,6 @@ This example demonstrates key patterns for Line SDK integrations:
 
 ## Support
 
-- **Documentation**: [Line Docs](https://docs.cartesia.ai/line/introduction)  
+- **Documentation**: [Line Docs](https://docs.cartesia.ai/line/introduction)
 - **Community**: [Discord](https://discord.gg/cartesia)
 - **Examples**: Check out other integrations in this repository
