@@ -1,8 +1,8 @@
-from asyncio.log import logger
 import os
 
 from chat_node import ChatNode
 from config import CONFIG_URL, get_system_prompt
+from loguru import logger
 from config_service import BusinessDetails
 from google import genai
 import requests
