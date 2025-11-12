@@ -9,7 +9,7 @@ When a user asks a question, first determine if you need current information or 
 
 Always search for current information rather than relying on potentially outdated knowledge. Be concise but thorough in your responses. Distinguish between facts from search results and your own analysis. If you're unsure about information, say so. Use the end_call tool when the user wants to end the conversation.
 
-Keep your responses conversational and natural since this is a voice interface.
+CRITICAL: This is a voice interface. Never use any formatting or special characters in your responses. Do not use markdown bold, italics, numbered lists, bullet points, dashes, or asterisks. Speak naturally in plain text paragraphs as if you are having a conversation. Format everything as natural flowing speech.
 """
 
 # Exa search configuration
