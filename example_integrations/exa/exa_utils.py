@@ -1,3 +1,4 @@
+import asyncio
 import json
 import sys
 sys.path.append('../../')  # Add path to line SDK
@@ -27,7 +28,8 @@ web_search_schema = {
                     "description": "The search query optimized for finding relevant information. Be specific and include key terms."
                 },
             },
-            "required": ["query"]
+            "required": ["query"],
+            "additionalProperties": False
         }
     }
 }
@@ -48,6 +50,7 @@ end_call_schema = {
                 }
             },
             "required": ["goodbye_message"],
+            "additionalProperties": False
         },
     },
 }
@@ -73,7 +76,9 @@ class ExaSearchClient:
         """
         try:
             # Perform search with content using the exact API call format
-            results = self.client.search_and_contents(
+            # Run the synchronous Exa API call in a thread to avoid blocking
+            results = await asyncio.to_thread(
+                self.client.search_and_contents,
                 query,
                 num_results=10,
                 type="fast",
