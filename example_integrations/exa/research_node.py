@@ -71,6 +71,9 @@ class ResearchNode(ReasoningNode):
 
             # Handle tool calls
             if message.tool_calls:
+                # Collect all search results before generating response
+                has_search = False
+
                 for tool_call in message.tool_calls:
                     function_name = tool_call.function.name
                     arguments = json.loads(tool_call.function.arguments)
@@ -79,6 +82,7 @@ class ResearchNode(ReasoningNode):
                     yield ToolResult(tool_name=function_name, tool_args=arguments, tool_call_id=tool_call.id)
 
                     if function_name == "web_search":
+                        has_search = True
                         # Perform web search
                         search_query = arguments.get("query", "")
 
@@ -91,7 +95,7 @@ class ResearchNode(ReasoningNode):
                             error_msg = search_results["error"]
                             logger.error(f"Search failed: {error_msg}")
 
-                            # Continue with error message
+                            # Add error message
                             openai_messages.append(
                                 {
                                     "role": "system",
@@ -120,18 +124,6 @@ class ResearchNode(ReasoningNode):
                                 }
                             )
 
-                        # Generate response with search results
-                        final_response = await self.openai_client.chat.completions.create(
-                            model="gpt-4o-mini",
-                            messages=openai_messages,
-                            max_tokens=config.MAX_OUTPUT_TOKENS,
-                            temperature=config.TEMPERATURE,
-                        )
-
-                        final_content = final_response.choices[0].message.content
-                        if final_content:
-                            yield AgentResponse(content=final_content)
-
                     elif function_name == EndCallTool.name():
                         # Handle end call
                         args = EndCallArgs(**arguments)
@@ -139,6 +131,19 @@ class ResearchNode(ReasoningNode):
 
                         async for item in end_call(args):
                             yield item
+
+                # Generate ONE final response after ALL searches are complete
+                if has_search:
+                    final_response = await self.openai_client.chat.completions.create(
+                        model="gpt-4o-mini",
+                        messages=openai_messages,
+                        max_tokens=config.MAX_OUTPUT_TOKENS,
+                        temperature=config.TEMPERATURE,
+                    )
+
+                    final_content = final_response.choices[0].message.content
+                    if final_content:
+                        yield AgentResponse(content=final_content)
 
             else:
                 # No tool calls, just return the response
