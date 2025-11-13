@@ -16,6 +16,7 @@ from line.events import (
     AgentSpeechSent,
     AgentStartedSpeaking,
     AgentStoppedSpeaking,
+    DTMFInputEvent,
     UserStartedSpeaking,
     UserStoppedSpeaking,
     UserTranscriptionReceived,
@@ -24,6 +25,8 @@ from line.events import (
 from line.harness_types import (
     AgentSpeechInput,
     AgentStateInput,
+    DTMFInput,
+    DTMFOutput,
     EndCallOutput,
     ErrorOutput,
     InputMessage,
@@ -140,15 +143,15 @@ class ConversationHarness:
         await self._send(EndCallOutput())
         logger.info("End call message sent")
 
-    async def transfer_call(self, destination: str = ""):
+    async def transfer_call(self, target_phone_number: str = ""):
         """
         Send transfer_call message
 
         Args:
-            destination: Optional destination for call transfer
+            target_phone_number: Optional target phone number for call transfer
         """
-        await self._send(TransferOutput(target_phone_number=destination))
-        logger.info(f"Transfer call message sent to {destination}")
+        await self._send(TransferOutput(target_phone_number=target_phone_number))
+        logger.info(f"Transfer call message sent to {target_phone_number}")
         self.shutdown_event.set()
 
     async def send_message(self, message: str):
@@ -198,6 +201,15 @@ class ConversationHarness:
         """
         logger.debug(f"📈 Logging metric: {name}={value}")
         await self._send(LogMetricOutput(name=name, value=value))
+
+    async def send_dtmf(self, button: str):
+        """
+        Send a DTMF event via WebSocket
+
+        Args:
+            button: The DTMF button to send
+        """
+        await self._send(DTMFOutput(button=button))
 
     async def cleanup(self):
         """
@@ -249,6 +261,9 @@ class ConversationHarness:
         elif isinstance(message, AgentSpeechInput):
             logger.info(f'🗣️ Agent speech sent: "{message.content}"')
             return [AgentSpeechSent(content=message.content)]
+        elif isinstance(message, DTMFInput):
+            logger.info(f"🔔 DTMF received: {message.button}")
+            return [DTMFInputEvent(button=message.button)]
         else:
             # Fallback for unknown types.
             logger.warning(f"Unknown message type: {type(message).__name__} ({message.model_dump_json()})")

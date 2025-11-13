@@ -10,6 +10,8 @@ dependencies = [
     "loguru>=0.7.0",
     "aiohttp>=3.12.0",
     "uvicorn==0.35.0",
+    "fastapi>=0.104.0",
+    "pydantic-partial==0.9.0",
 ]
 
 [build-system]
@@ -22,12 +24,17 @@ allow-direct-references = true
 [tool.hatch.build.targets.wheel]
 packages = ["."]
 
-[project.optional-dependencies]
-dev = [
-    "pytest",
-    "pytest-asyncio",
-    "pytest-cov",
+[tool.uv]
+dev-dependencies = [
+    "pytest==8.4.2",
+    "pytest-asyncio==1.2.0",
+    "pytest-cov==7.0.0",
     "pytest-xdist==3.8.0",
-    "pytest-repeat==0.9.4",
-    "google-genai>=1.26.0,<2",
+    "pytest-repeat==0.9.4"
 ]
+
+# [tool.uv.sources]
+# cartesia-line = { path = "../../", editable = true }
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"

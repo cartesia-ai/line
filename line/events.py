@@ -38,6 +38,9 @@ __all__ = [
     "AgentSpeechSent",
     "UserUnknownInputReceived",
     "LogMetric",
+    "DTMFInputEvent",
+    "DTMFOutputEvent",
+    "DTMFStoppedEvent",
 ]
 
 
@@ -131,8 +134,7 @@ class AgentError(BaseModel):
 class TransferCall(BaseModel):
     """Transfer call to destination."""
 
-    destination: str
-    reason: Optional[str] = None
+    target_phone_number: str
 
 
 class AgentHandoff(BaseModel):
@@ -181,6 +183,22 @@ class LogMetric(BaseModel):
 
     name: str
     value: Any
+
+
+class DTMFInputEvent(BaseModel):
+    """DTMF event for tracking DTMF input."""
+
+    button: str
+
+
+class DTMFOutputEvent(BaseModel):
+    """DTMF event for tracking DTMF input."""
+
+    button: str
+
+
+class DTMFStoppedEvent(BaseModel):
+    """DTMF stopped event for tracking DTMF input."""
 
 
 class _EventsRegistry:

@@ -22,12 +22,8 @@ allow-direct-references = true
 [tool.hatch.build.targets.wheel]
 packages = ["."]
 
-[project.optional-dependencies]
-dev = [
-    "pytest",
-    "pytest-asyncio",
-    "pytest-cov",
-    "pytest-xdist==3.8.0",
-    "pytest-repeat==0.9.4",
-    "google-genai>=1.26.0,<2",
-]
+[tool.uv]
+dev-dependencies = []
+
+# [tool.uv.sources]
+# cartesia-line = { path = "../../", editable = true }
