@@ -61,7 +61,7 @@ result = exa.search_and_contents(
     "query",
     num_results=10,
     type="fast",
-    livecrawl="never", 
+    livecrawl="never",
     text={
         "max_characters": 1000
     }
@@ -74,7 +74,7 @@ result = exa.search_and_contents(
    ```bash
    # Copy the example file
    cp .env.example .env
-   
+
    # Edit .env with your actual API keys
    # OPENAI_API_KEY=your-openai-key-here
    # EXA_API_KEY=your-exa-key-here
@@ -84,7 +84,7 @@ result = exa.search_and_contents(
    ```bash
    python3 main.py
    ```
-   
+
    The `.env` file will automatically load your API keys!
 
 3. **Test with voice**:
