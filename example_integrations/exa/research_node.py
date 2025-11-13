@@ -73,6 +73,7 @@ class ResearchNode(ReasoningNode):
             if message.tool_calls:
                 # Collect all search results before generating response
                 has_search = False
+                call_ended = False
 
                 for tool_call in message.tool_calls:
                     function_name = tool_call.function.name
@@ -125,15 +126,19 @@ class ResearchNode(ReasoningNode):
                             )
 
                     elif function_name == EndCallTool.name():
-                        # Handle end call
+                        # Handle end call - this should terminate the conversation
+                        call_ended = True
                         args = EndCallArgs(**arguments)
                         logger.info(f"🤖 End call requested: {args.goodbye_message}")
 
                         async for item in end_call(args):
                             yield item
+                        # Return early - do not generate any more responses after call ends
+                        return
 
                 # Generate ONE final response after ALL searches are complete
-                if has_search:
+                # Only if call hasn't ended
+                if has_search and not call_ended:
                     final_response = await self.openai_client.chat.completions.create(
                         model="gpt-4o-mini",
                         messages=openai_messages,
