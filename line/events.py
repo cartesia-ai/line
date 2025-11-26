@@ -143,7 +143,7 @@ class TransferCall(BaseModel):
     """
 
     target_phone_number: str
-    timeout: Optional[int] = 10
+    timeout_s: Optional[int] = 30
 
 
 class AgentHandoff(BaseModel):
