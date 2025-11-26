@@ -137,7 +137,9 @@ class TransferCall(BaseModel):
     2. The agent will wait for a timeout period (so the second leg has the opportunity to connect)
     3. Afterwards, the agent harness will begin shutdown
 
-    If the second leg has not connected by the timeout period, #3 will terminate the call.
+    For twilio clients:
+    - If the second leg has not connected by the timeout period, #3 will terminate the call for all parties.
+    - If the second leg connects, once #3 occurs, the agent will shut down and the transferred call continues.
     """
 
     target_phone_number: str
