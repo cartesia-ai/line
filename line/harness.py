@@ -151,8 +151,10 @@ class ConversationHarness:
             target_phone_number: Optional target phone number for call transfer
         """
         await self._send(TransferOutput(target_phone_number=target_phone_number))
-        logger.info(f"Transfer call message sent to {target_phone_number}")
-        logger.info(f"Waiting {timeout_s} seconds before shutting down.")
+        logger.info(
+            f"Transfer call message sent to {target_phone_number}. "
+            + f"Waiting {timeout_s} seconds before shutting down."
+        )
         await asyncio.sleep(timeout_s)
         logger.info("Initiating shutdown...")
         self.shutdown_event.set()
