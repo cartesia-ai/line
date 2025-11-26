@@ -143,7 +143,7 @@ class ConversationHarness:
         await self._send(EndCallOutput())
         logger.info("End call message sent")
 
-    async def transfer_call(self, target_phone_number: str = ""):
+    async def transfer_call(self, target_phone_number: str, timeout_s: int):
         """
         Send transfer_call message
 
@@ -151,7 +151,12 @@ class ConversationHarness:
             target_phone_number: Optional target phone number for call transfer
         """
         await self._send(TransferOutput(target_phone_number=target_phone_number))
-        logger.info(f"Transfer call message sent to {target_phone_number}")
+        logger.info(
+            f"Transfer request sent. Waiting {timeout_s} seconds before"
+            + f"gracefully shutting down the agent. {target_phone_number=}"
+        )
+        await asyncio.sleep(timeout_s)
+        logger.info("Initiating shutdown...")
         self.shutdown_event.set()
 
     async def send_message(self, message: str):
