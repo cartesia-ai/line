@@ -152,8 +152,8 @@ class ConversationHarness:
         """
         await self._send(TransferOutput(target_phone_number=target_phone_number))
         logger.info(
-            f"Transfer call message sent to {target_phone_number}. "
-            + f"Waiting {timeout_s} seconds before shutting down."
+            f"Transfer request sent. Waiting {timeout_s} seconds before"
+            + f"gracefully shutting down the agent. {target_phone_number=}"
         )
         await asyncio.sleep(timeout_s)
         logger.info("Initiating shutdown...")
