@@ -132,9 +132,16 @@ class AgentError(BaseModel):
 
 
 class TransferCall(BaseModel):
-    """Transfer call to destination."""
+    """Initiate transfer call to destination. When that happens:
+    1. A transfer request will be sent
+    2. The agent will wait for a timeout period (so the second leg has the opportunity to connect)
+    3. Afterwards, the agent harness will begin shutdown
+
+    If the second leg has not connected by the timeout period, #3 will terminate the call.
+    """
 
     target_phone_number: str
+    timeout: Optional[int] = 10
 
 
 class AgentHandoff(BaseModel):

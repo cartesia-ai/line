@@ -105,7 +105,7 @@ def create_user_bridge(harness: "ConversationHarness", authorized_node: str) -> 
     async def send_transfer_call(message: Message):
         """Transfer call to destination."""
         event: TransferCall = message.event
-        return await harness.transfer_call(event.target_phone_number)
+        return await harness.transfer_call(event.target_phone_number, event.timeout)
 
     async def send_log_metric(message: Message):
         """Log metric via harness."""
