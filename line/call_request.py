@@ -22,8 +22,7 @@ class CallRequest(BaseModel):
     agent_call_id: str  # Agent call ID for logging and correlation
     system_prompt: str  # System prompt to define the agent's role and behavior
     initial_message: Optional[str] = Field(
-        default=DEFAULT_INITIAL_MESSAGE,
-        description="Initial message for the agent to start the call with"
+        default=DEFAULT_INITIAL_MESSAGE, description="Initial message for the agent to start the call with"
     )
     metadata: Optional[Dict[str, Any]] = None
 
