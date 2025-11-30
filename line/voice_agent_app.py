@@ -42,12 +42,16 @@ class VoiceAgentApp:
         # Parse JSON body
         body = await request.json()
 
+        logger.debug(f"Received call request for call_id: {body.get('call_id')}")
+
         # Create initial CallRequest
         call_request = CallRequest(
             call_id=body.get("call_id", "unknown"),
             from_=body.get("from_", "unknown"),
             to=body.get("to", "unknown"),
             agent_call_id=body.get("agent_call_id", body.get("call_id", "unknown")),
+            system_prompt=body.get("system_prompt", ""),
+            initial_message=body.get("initial_message", ""),
             metadata=body.get("metadata", {}),
         )
 
@@ -74,6 +78,8 @@ class VoiceAgentApp:
             "call_id": call_request.call_id,
             "from": call_request.from_,
             "to": call_request.to,
+            "system_prompt": call_request.system_prompt,
+            "initial_message": call_request.initial_message,
             "agent_call_id": call_request.agent_call_id,
             "metadata": json.dumps(call_request.metadata),  # JSON encode metadata
         }
@@ -119,6 +125,8 @@ class VoiceAgentApp:
             from_=query_params.get("from", "unknown"),
             to=query_params.get("to", "unknown"),
             agent_call_id=query_params.get("agent_call_id", "unknown"),
+            system_prompt=query_params.get("system_prompt", ""),
+            initial_message=query_params.get("initial_message", ""),
             metadata=metadata,
         )
 
