@@ -42,8 +42,6 @@ class VoiceAgentApp:
         # Parse JSON body
         body = await request.json()
 
-        logger.debug(f"Received call request for call_id: {body.get('call_id')}")
-
         # Create initial CallRequest
         call_request = CallRequest(
             call_id=body.get("call_id", "unknown"),
