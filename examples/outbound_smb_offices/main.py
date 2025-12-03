@@ -25,7 +25,7 @@ else:
 async def pre_call_handler(_call_request: CallRequest) -> PreCallResult:
     """Configure voice settings before starting the call."""
     # Find more voices here: https://play.cartesia.ai/voices
-    tts_config = {"tts": {"model": "sonic-3-preview"}}
+    tts_config = {"tts": {"model": "sonic-3"}}
 
     return PreCallResult(
         metadata={},
