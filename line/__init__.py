@@ -2,7 +2,7 @@
 # Bus system
 from line.bridge import Bridge
 from line.bus import Bus, Message
-from line.call_request import CallRequest, CallRequestAgent, PreCallResult
+from line.call_request import AgentConfig, CallRequest, PreCallResult
 from line.nodes.conversation_context import ConversationContext
 
 # Reasoning components
@@ -17,7 +17,7 @@ __all__ = [
     "Bus",
     "Message",
     "CallRequest",
-    "CallRequestAgent",
+    "AgentConfig",
     "ConversationContext",
     "Node",
     "PreCallResult",
