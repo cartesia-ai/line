@@ -16,7 +16,13 @@ class AgentConfig(BaseModel):
     """Agent information for the call."""
 
     system_prompt: str  # System prompt to define the agent's role and behavior
-    introduction: Optional[str] = Field(default=DEFAULT_INITIAL_MESSAGE, description="Introduction message for the agent to start the call with")
+    introduction: Optional[str] = Field(
+        default=DEFAULT_INITIAL_MESSAGE,
+        description=(
+            "Introduction message for the agent to start "
+            "the call with"
+        ),
+    )
 
 class CallRequest(BaseModel):
     """Request body for the /chats endpoint."""
