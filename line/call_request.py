@@ -12,7 +12,7 @@ class PreCallResult(BaseModel):
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Metadata to include with the call")
     config: Dict[str, Any] = Field(default_factory=dict, description="Configuration for the call")
 
-class CallRequestAgent(BaseModel):
+class AgentConfig(BaseModel):
     """Agent information for the call."""
 
     system_prompt: str  # System prompt to define the agent's role and behavior
@@ -25,7 +25,7 @@ class CallRequest(BaseModel):
     from_: str = Field(alias="from")  # Using from_ to avoid Python keyword conflict
     to: str
     agent_call_id: str  # Agent call ID for logging and correlation
-    agent: CallRequestAgent
+    agent: AgentConfig
     metadata: Optional[Dict[str, Any]] = None
 
     model_config = ConfigDict(

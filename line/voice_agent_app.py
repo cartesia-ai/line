@@ -9,7 +9,7 @@ from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconn
 from loguru import logger
 import uvicorn
 
-from line.call_request import CallRequest, CallRequestAgent, PreCallResult
+from line.call_request import AgentConfig, CallRequest, PreCallResult
 from line.voice_agent_system import VoiceAgentSystem
 
 # Load environment variables from .env file
@@ -48,7 +48,7 @@ class VoiceAgentApp:
             from_=body.get("from_", "unknown"),
             to=body.get("to", "unknown"),
             agent_call_id=body.get("agent_call_id", body.get("call_id", "unknown")),
-            agent=CallRequestAgent(
+            agent=AgentConfig(
                 system_prompt=body.get("agent", {}).get("system_prompt", ""),
                 introduction=body.get("agent", {}).get("introduction", ""),
             ),
@@ -133,7 +133,7 @@ class VoiceAgentApp:
             from_=query_params.get("from", "unknown"),
             to=query_params.get("to", "unknown"),
             agent_call_id=query_params.get("agent_call_id", "unknown"),
-            agent=CallRequestAgent(
+            agent=AgentConfig(
                 system_prompt=agent_data.get("system_prompt", ""),
                 introduction=agent_data.get("introduction", ""),
             ),
