@@ -12,17 +12,16 @@ class PreCallResult(BaseModel):
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Metadata to include with the call")
     config: Dict[str, Any] = Field(default_factory=dict, description="Configuration for the call")
 
+
 class AgentConfig(BaseModel):
     """Agent information for the call."""
 
     system_prompt: str  # System prompt to define the agent's role and behavior
     introduction: Optional[str] = Field(
         default=DEFAULT_INITIAL_MESSAGE,
-        description=(
-            "Introduction message for the agent to start "
-            "the call with"
-        ),
+        description=("Introduction message for the agent to start the call with"),
     )
+
 
 class CallRequest(BaseModel):
     """Request body for the /chats endpoint."""
