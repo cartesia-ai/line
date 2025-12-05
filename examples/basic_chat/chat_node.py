@@ -1,143 +1,170 @@
 """
-GeminiReasoningNode - Voice-optimized ReasoningNode implementation using proven Gemini logic
+ChatNode - Voice-optimized ReasoningNode implementation using OpenAI
 """
 
-import asyncio
-import random
-from typing import AsyncGenerator, Optional, Union
+import json
+from typing import AsyncGenerator, Union
 
-from config import DEFAULT_MODEL_ID, DEFAULT_TEMPERATURE
-from google import genai
-from google.genai import types as gemini_types
+from line import Message
+from line.utils.log_aiter import log_aiter_func
+
+from context import TimeZoneInfo, find_availability
+from config import CHAT_MODEL_ID
 from loguru import logger
+from openai import AsyncOpenAI, pydantic_function_tool
+from openai._streaming import AsyncStream
+from openai.types.responses import (
+    ResponseFunctionToolCall,
+    ResponseOutputItemDoneEvent,
+    ResponseStreamEvent,
+    ResponseTextDeltaEvent,
+)
 
-from line.events import AgentResponse, EndCall
+from line.events import AgentResponse, EndCall, ToolCall, ToolResult
 from line.nodes.conversation_context import ConversationContext
 from line.nodes.reasoning import ReasoningNode
 from line.tools.system_tools import EndCallArgs, EndCallTool, end_call
-from line.utils.gemini_utils import convert_messages_to_gemini
+from line.utils.openai_utils import convert_messages_to_openai
 
+tool = pydantic_function_tool(TimeZoneInfo, name='find_agent_availability', description="Find the times when licensed agent is available to make a callback")
 
 class ChatNode(ReasoningNode):
     """
-    Voice-optimized ReasoningNode using template method pattern with Gemini streaming.
+    Voice-optimized ReasoningNode using template method pattern with OpenAI Responses API.
     - Uses ReasoningNode's template method generate() for consistent flow
-    - Implements process_context() for Gemini streaming
+    - Implements process_context() for OpenAI streaming
     - Integrates with end_call tool
     """
 
     def __init__(
         self,
+        openai_client: AsyncOpenAI,
         system_prompt: str,
-        gemini_client: Optional[genai.Client] = None,
-        model_id: str = DEFAULT_MODEL_ID,
-        temperature: float = DEFAULT_TEMPERATURE,
         max_context_length: int = 100,
-        max_output_tokens: int = 1000,
     ):
         """
-        Initialize the Voice reasoning node with proven Gemini configuration
+        Initialize the Voice reasoning node with OpenAI configuration
 
         Args:
             system_prompt: System prompt for the LLM
-            gemini_client: Google Gemini client instance.
-                If not provided, a canned (dummy) response will be streamed.
-            model_id: Gemini model ID to use
-            temperature: Temperature for generation
             max_context_length: Maximum number of conversation turns to keep
         """
         super().__init__(system_prompt=system_prompt, max_context_length=max_context_length)
 
-        self.client = gemini_client
-        self.model_id = model_id
-        self.temperature = temperature
+        # Initialize OpenAI client
+        self.client = openai_client
 
-        # Interruption support
-        self.stop_generation_event = None
+        logger.info(f"ChatNode initialized with OpenAI model: {CHAT_MODEL_ID}")
 
-        # Create generation config using utility function
-        self.generation_config = gemini_types.GenerateContentConfig(
-            system_instruction=self.system_prompt,
-            temperature=self.temperature,
-            tools=[EndCallTool.to_gemini_tool()],
-            max_output_tokens=max_output_tokens,
-            thinking_config=gemini_types.ThinkingConfig(thinking_budget=0),
+
+    async def warmup(self) -> AsyncGenerator[Union[AgentResponse, EndCall], None]:
+        resp = self.client.responses.create(
+            model='gpt-4.1',
+            instructions="say hello",
+            input="",
+            temperature=0.3,
+            service_tier="priority",
         )
+        yield resp
 
-        logger.info(f"GeminiNode initialized with model: {model_id}")
+    def clean_tools_context(self, context: ConversationContext) -> None:
+        # only check tool calls with raw_response, since only those are passed to OpenAI
+        to_check = [ev for ev in context.events if isinstance(ev, ToolCall) and ev.raw_response]
+        if not to_check:
+            return
+
+        result_call_ids = [ev.tool_call_id for ev in context.events if isinstance(ev, ToolResult)]
+        for ev in to_check:
+            if ev.tool_call_id not in result_call_ids:
+                # nuke the raw response, which will cause the tool call to not be passed to OpenAI
+                # this is important, because otherwise OpenAI will fail the call due to unresolved tool call
+                ev.raw_response.clear()
 
     async def process_context(
         self, context: ConversationContext
-    ) -> AsyncGenerator[Union[AgentResponse, EndCall], None]:
+    ) -> AsyncGenerator[Union[AgentResponse, EndCall, ToolCall, ToolResult], None]:
         """
-        Process the conversation context and yield responses from Gemini.
+        Process the conversation context and yield responses from OpenAI.
 
         Yields:
-            AgentResponse: Text chunks from Gemini
-            AgentEndCall: end_call Event
+            AgentResponse: Text chunks from OpenAI
+            EndCall: end_call Event
         """
-        if not context.events:
-            logger.info("No messages to process")
-            return
-
-        messages = convert_messages_to_gemini(context.events)
+        self.clean_tools_context(context)
+        # Convert context events to OpenAI format
+        messages = convert_messages_to_openai(context.events)
+        # logger.info(f'MESSAGES: {messages}')
 
         user_message = context.get_latest_user_transcript_message()
         if user_message:
             logger.info(f'🧠 Processing user message: "{user_message}"')
 
-        full_response = ""
-        if not self.client:
-            stream = canned_gemini_response_stream()
-        else:
-            stream = await self.client.aio.models.generate_content_stream(
-                model=self.model_id,
-                contents=messages,
-                config=self.generation_config,
-            )
+        # Ensure we have at least one user message for context
+        if not any(msg.get("role") == "user" for msg in messages):
+            logger.warning("No user message found in conversation")
+            return
 
-        async for msg in stream:
-            if msg.text:
-                full_response += msg.text
-                yield AgentResponse(content=msg.text)
+        # Make the streaming request using Responses API with optimizations
+        stream: AsyncStream[ResponseStreamEvent]
+        async with self.client.responses.stream(
+            model='gpt-4.1',
+            instructions=self.system_prompt,
+            input=messages,
+            tools=[EndCallTool.to_openai_tool(), tool],
+            #reasoning={"effort": "low"},
+            text={"verbosity": "medium"},
+            temperature=0.3,
+            service_tier="priority",
+        ) as stream:
 
-            if msg.function_calls:
-                for function_call in msg.function_calls:
-                    if function_call.name == EndCallTool.name():
-                        goodbye_message = function_call.args.get("goodbye_message", "Goodbye!")
-                        args = EndCallArgs(goodbye_message=goodbye_message)
+            full_response = ""
+            ended = False
+            output_index: None | int = None
+            async for event in stream:
+                if isinstance(event, ResponseTextDeltaEvent):
+                    if output_index is None:
+                        output_index = event.output_index
+                    elif output_index != event.output_index:
+                        # we only take text deltas from the first output item of text type
+                        continue
+                    full_response += event.delta
+                    yield AgentResponse(content=event.delta)
+
+                if isinstance(event, ResponseOutputItemDoneEvent) and isinstance(
+                    event.item, ResponseFunctionToolCall
+                ):
+                    if event.item.name == EndCallTool.name():
+                        args = json.loads(event.item.arguments)
+                        if output_index is not None:
+                            # LLM has already generated some text, so we will ignore the end call message
+                            args["goodbye_message"] = "" if "goodbye" in full_response.lower() else "Goodbye!"
+                        end_call_args = EndCallArgs(goodbye_message=args.get("goodbye_message", "Goodbye!"))
                         logger.info(
                             f"🤖 End call tool called. Ending conversation with goodbye message: "
-                            f"{args.goodbye_message}"
+                            f"{end_call_args.goodbye_message}"
                         )
-                        async for item in end_call(args):
+                        async for item in end_call(end_call_args):
                             yield item
+                        ended = True
+                    elif event.item.name == tool['function']['name']:
+                        args = json.loads(event.item.arguments)
+                        if output_index is None:
+                            # If LLM has already generated text response, it probably says something like "wait until I..."
+                            # and therefore there is no need for us to say anything else.
+                            # However, if LLM has not generated any text, then we say the canned phrase:
+                            yield AgentResponse(content="Just a moment while I check the agent availability...")
+                        yield ToolCall(tool_name=event.item.name, tool_args=args, tool_call_id=event.item.call_id, raw_response=event.item.model_dump())
+                        availability = find_availability(TimeZoneInfo(**args))
+                        yield ToolResult(tool_name=event.item.name, tool_args=args, result=availability, tool_call_id=event.item.call_id)
 
-        if full_response:
-            logger.info(f'🤖 Agent response: "{full_response}" ({len(full_response)} chars)')
 
+            if not ended and "goodbye" in full_response.lower():
+                yield EndCall()
 
-async def canned_gemini_response_stream() -> AsyncGenerator[gemini_types.GenerateContentResponse, None]:
-    """
-    Stream a canned response from Gemini.
+            if full_response:
+                logger.info(f'🤖 Agent response: "{full_response}" ({len(full_response)} chars)')
 
-    This is to support running this example without a Gemini API key.
-    """
-    # Random messages about missing API key
-    api_key_messages = [
-        "I am a silly AI assistant because you didn't provide a Gemini API key. Add it to your environment variables.",
-        "My brain is offline because I am missing a Gemini API key! Add the key to your environment variables.",
-        "I'm like a car without keys - can't go anywhere. Add your Gemini API key for intelligence.",
-    ]
-
-    # Select a random message
-    message = random.choice(api_key_messages)
-
-    # Create the response structure
-    part = gemini_types.Part(text=message)
-    content = gemini_types.Content(parts=[part], role="model")
-    candidate = gemini_types.Candidate(content=content, finish_reason="STOP")
-    response = gemini_types.GenerateContentResponse(candidates=[candidate])
-
-    await asyncio.sleep(0.005)
-    yield response
+    def on_interrupt_generate(self, message: Message) -> None:
+        """Handle interrupt event."""
+        logger.info(f'on interrupt generate was called: {message}, events: {self.conversation_events}')
+        super().on_interrupt_generate(message)
