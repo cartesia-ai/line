@@ -5,7 +5,7 @@ from config import SYSTEM_PROMPT
 from google import genai
 
 from line import Bridge, CallRequest, VoiceAgentApp, VoiceAgentSystem
-from line.events import UserStartedSpeaking, UserStoppedSpeaking, UserTranscriptionReceived
+from line.events import UserStartedSpeaking, UserStoppedSpeaking, UserTranscriptionReceived, AgentSpeechSent
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 if GEMINI_API_KEY:
@@ -24,17 +24,18 @@ async def handle_new_call(system: VoiceAgentSystem, call_request: CallRequest):
     system.with_speaking_node(conversation_node, bridge=conversation_bridge)
 
     conversation_bridge.on(UserTranscriptionReceived).map(conversation_node.add_event)
+    conversation_bridge.on(AgentSpeechSent).map(conversation_node.add_event)
 
     (
         conversation_bridge.on(UserStoppedSpeaking)
-        .interrupt_on(UserStartedSpeaking, handler=conversation_node.on_interrupt_generate)
-        .stream(conversation_node.generate)
-        .broadcast()
+            .interrupt_on(UserStartedSpeaking, handler=conversation_node.on_interrupt_generate)
+            .stream(conversation_node.generate)
+            .broadcast()
     )
 
     await system.start()
     await system.send_initial_message(
-        "Hello! I am your voice agent powered by Cartesia. What do you want to build?"
+        "Hello! I am your voice agent powered by Cartesia. Shall I tell you a story?"
     )
     await system.wait_for_shutdown()
 

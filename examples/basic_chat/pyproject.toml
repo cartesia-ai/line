@@ -31,3 +31,6 @@ dev = [
     "pytest-repeat==0.9.4",
     "google-genai>=1.26.0,<2",
 ]
+
+[tool.uv.sources]
+cartesia-line= { path = "../..", editable = true }
