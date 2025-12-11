@@ -15,9 +15,6 @@ else:
 
 
 async def handle_new_call(system: VoiceAgentSystem, call_request: CallRequest):
-    print(
-        "Starting new call", call_request, call_request.agent.system_prompt, call_request.agent.introduction
-    )
     # Main conversation node
     conversation_node = ChatNode(
         system_prompt=call_request.agent.system_prompt or SYSTEM_PROMPT,
