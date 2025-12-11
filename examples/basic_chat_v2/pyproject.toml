@@ -23,8 +23,6 @@ allow-direct-references = true
 [tool.hatch.build.targets.wheel]
 packages = ["."]
 
-[tool.uv.sources]
-cartesia-line = { path = "../../", editable = true }
 
 [project.optional-dependencies]
 dev = [
