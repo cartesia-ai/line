@@ -2,6 +2,7 @@ from typing import Any, Dict, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
+
 class PreCallResult(BaseModel):
     """Result from pre_call_handler containing metadata and config."""
 

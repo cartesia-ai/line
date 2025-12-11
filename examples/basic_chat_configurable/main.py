@@ -3,6 +3,7 @@ import os
 from chat_node import ChatNode
 from config import INITIAL_MESSAGE, SYSTEM_PROMPT
 from google import genai
+from loguru import logger
 
 from line import Bridge, CallRequest, VoiceAgentApp, VoiceAgentSystem
 from line.events import UserStartedSpeaking, UserStoppedSpeaking, UserTranscriptionReceived
@@ -17,7 +18,7 @@ else:
 async def handle_new_call(system: VoiceAgentSystem, call_request: CallRequest):
     logger.info(
         f"Starting new call for {call_request.call_id}. "
-        f"Call request: { {k: v for k, v in call_request.__dict__.items() if k != 'agent'}}, "
+        f"Call request: { {k: v for k, v in call_request.__dict__.items() if k != 'agent'} }, "
         f"agent.system_prompt: {call_request.agent.system_prompt[:100] if getattr(call_request.agent, 'system_prompt', None) else None}, "
         f"agent.introduction: {call_request.agent.introduction[:100] if getattr(call_request.agent, 'introduction', None) else None}. "
     )
