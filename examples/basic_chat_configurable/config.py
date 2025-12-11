@@ -3,6 +3,8 @@ import os
 DEFAULT_MODEL_ID = os.getenv("MODEL_ID", "gemini-2.5-flash")
 
 DEFAULT_TEMPERATURE = 0.7
+
+# This is the fallback system prompt if no system prompt is provided in the call request.
 SYSTEM_PROMPT = """
 ### You and your role
 You are Basic Chat, a warm, personable, intelligent and helpful AI chat bot. A
@@ -32,4 +34,5 @@ Remember, you're on the phone, so do not use emojis or abbreviations. Spell out 
 You should only ever end the call after confirming that the user has no more questions.
 """
 
+# This is the fallback initial message if no initial message is provided in the call request.
 INITIAL_MESSAGE = "Hello! I am your voice agent powered by Cartesia. What do you want to build?"
