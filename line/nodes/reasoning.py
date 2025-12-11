@@ -19,6 +19,7 @@ from line.bus import Message
 from line.events import (
     AgentGenerationComplete,
     AgentResponse,
+    AgentSpeechSent,
     EventInstance,
     EventType,
     ToolCall,
@@ -196,7 +197,7 @@ class ReasoningNode(Node):
 
         # Merge the content of the same consecutive events for AgentResponse and UserTranscriptionReceived.
         # This allows us to easily build and send the conversation context to the LM.
-        mergeable_events = (AgentResponse, UserTranscriptionReceived)
+        mergeable_events = (AgentResponse, AgentSpeechSent, UserTranscriptionReceived)
         for event_type in mergeable_events:
             if isinstance(event, event_type) and isinstance(self.conversation_events[-1], event_type):
                 self.conversation_events[-1] = event_type(
