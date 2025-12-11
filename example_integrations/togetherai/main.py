@@ -1,7 +1,7 @@
 import logging
 import os
 
-from config import EscalationAlert, escalation_schema, prompt_escalation, prompt_main
+from config import CallState, EscalationAlert, escalation_schema, prompt_escalation, prompt_main
 from customer_service_node import CustomerServiceNode
 from dotenv import load_dotenv
 from escalation_node import EscalationNode
@@ -30,9 +30,13 @@ async def handle_new_call(system: VoiceAgentSystem, chat_request: CallRequest):
         system: Voice agent system
         chat_request: Incoming call request
     """
+    # Create per-call shared state
+    call_state = CallState()
 
     # Main customer service agent (authorized to speak)
-    service_node = CustomerServiceNode(system_prompt=prompt_main, client=together_client)
+    service_node = CustomerServiceNode(
+        system_prompt=prompt_main, client=together_client, call_state=call_state
+    )
     service_bridge = Bridge(service_node)
 
     # Configure main conversation routing
@@ -51,6 +55,7 @@ async def handle_new_call(system: VoiceAgentSystem, chat_request: CallRequest):
     escalation_node = EscalationNode(
         system_prompt=prompt_escalation,
         client=together_client,
+        call_state=call_state,
         node_schema=escalation_schema,
         node_name="Escalation Monitor",
     )

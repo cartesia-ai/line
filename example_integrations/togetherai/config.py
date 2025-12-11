@@ -51,8 +51,11 @@ escalation_schema = {
     "additionalProperties": False,
 }
 
-# Global state
-ESCALATION_DETECTED = False
+class CallState:
+    """Per-call shared state between nodes. Create one instance per call."""
+
+    def __init__(self):
+        self.escalation_detected = False
 
 
 class EscalationAlert(BaseModel):

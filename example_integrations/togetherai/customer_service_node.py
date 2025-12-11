@@ -31,11 +31,13 @@ class CustomerServiceNode(ReasoningNode):
         self,
         system_prompt: str,
         client,
+        call_state: "config.CallState",
     ):
         self.sys_prompt = system_prompt
         super().__init__(self.sys_prompt)
 
         self.client = client
+        self.call_state = call_state
         self.tools = [
             end_call_schema,
             search_knowledge_base_schema,
@@ -132,8 +134,8 @@ class CustomerServiceNode(ReasoningNode):
                         result = escalate_to_human_agent(reason, urgency)
                         logger.info(f"👨‍💼 Escalating to human: {reason} ({urgency})")
 
-                        # Set global escalation flag
-                        config.ESCALATION_DETECTED = True
+                        # Set per-call escalation flag
+                        self.call_state.escalation_detected = True
 
                         yield AgentResponse(content=result)
 

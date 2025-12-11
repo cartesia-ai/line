@@ -26,11 +26,19 @@ class EscalationNode(ReasoningNode):
     Analyzes conversation patterns to detect when human intervention is needed.
     """
 
-    def __init__(self, system_prompt: str, client, node_schema=None, node_name="Escalation Monitor"):
+    def __init__(
+        self,
+        system_prompt: str,
+        client,
+        call_state: "config.CallState",
+        node_schema=None,
+        node_name="Escalation Monitor",
+    ):
         self.sys_prompt = system_prompt
         super().__init__(self.sys_prompt)
 
         self.client = client
+        self.call_state = call_state
         self.model_name = config.MODEL_ID_ESCALATION
         self.node_name = node_name
         self.schema = node_schema
@@ -47,8 +55,8 @@ class EscalationNode(ReasoningNode):
             EscalationAlert: Escalation analysis results.
         """
 
-        # Skip if escalation already detected
-        if config.ESCALATION_DETECTED:
+        # Skip if escalation already detected for this call
+        if self.call_state.escalation_detected:
             logger.info("Escalation already in progress, skipping analysis")
             return
 
