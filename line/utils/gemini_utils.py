@@ -66,7 +66,11 @@ def convert_messages_to_gemini(
         elif isinstance(event, AgentResponse):
             gemini_messages.append(types.ModelContent(parts=[types.Part.from_text(text=event.content)]))
         elif isinstance(event, UserTranscriptionReceived):
-            gemini_messages.append(types.UserContent(parts=[types.Part.from_text(text=event.content)]))
+            if event.language:
+                content = f"({event.language}) {event.content}"
+            else:
+                content = event.content
+            gemini_messages.append(types.UserContent(parts=[types.Part.from_text(text=content)]))
         elif isinstance(event, DTMFInputEvent):
             gemini_messages.append(types.UserContent(parts=[types.Part.from_text(text=event.button)]))
         elif isinstance(event, DTMFOutputEvent):

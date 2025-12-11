@@ -41,6 +41,7 @@ __all__ = [
     "DTMFInputEvent",
     "DTMFOutputEvent",
     "DTMFStoppedEvent",
+    "ConfigOutputEvent",
 ]
 
 
@@ -173,6 +174,7 @@ class UserTranscriptionReceived(BaseModel):
     """User transcription received event."""
 
     content: str
+    language: Optional[str] = None
 
 
 class AgentSpeechSent(BaseModel):
@@ -208,6 +210,15 @@ class DTMFOutputEvent(BaseModel):
 
 class DTMFStoppedEvent(BaseModel):
     """DTMF stopped event for tracking DTMF input."""
+
+
+class ConfigOutputEvent(BaseModel):
+    """Config output event for updating the config mid-conversation."""
+
+    tts: Dict[str, Any] = None
+    stt: Dict[str, Any] = None
+    vad: Dict[str, Any] = None
+    background_audio: Dict[str, Any] = None
 
 
 class _EventsRegistry:

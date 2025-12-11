@@ -25,6 +25,7 @@ from line.events import (
 from line.harness_types import (
     AgentSpeechInput,
     AgentStateInput,
+    ConfigOutput,
     DTMFInput,
     DTMFOutput,
     EndCallOutput,
@@ -185,6 +186,12 @@ class ConversationHarness:
             )
         )
 
+    async def update_config(
+        self, tts: Dict[str, Any], stt: Dict[str, Any], vad: Dict[str, Any], background_audio: Dict[str, Any]
+    ):
+        """Send a config update via WebSocket with connection state checking"""
+        await self._send(ConfigOutput(tts=tts, stt=stt, vad=vad, background_audio=background_audio))
+
     async def log_event(self, event: str, metadata: Optional[Dict[str, Any]] = None):
         """
         Send a log event via WebSocket
@@ -255,7 +262,7 @@ class ConversationHarness:
                 return [UserStoppedSpeaking()]
         elif isinstance(message, TranscriptionInput):
             logger.info(f'📝 User said: "{message.content}"')
-            return [UserTranscriptionReceived(content=message.content)]
+            return [UserTranscriptionReceived(content=message.content, language=message.language)]
         elif isinstance(message, AgentStateInput):
             if message.value == State.SPEAKING:
                 logger.info("🎤 Agent started speaking")

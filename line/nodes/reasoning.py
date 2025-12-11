@@ -196,12 +196,17 @@ class ReasoningNode(Node):
 
         # Merge the content of the same consecutive events for AgentResponse and UserTranscriptionReceived.
         # This allows us to easily build and send the conversation context to the LM.
-        mergeable_events = (AgentResponse, UserTranscriptionReceived)
-        for event_type in mergeable_events:
-            if isinstance(event, event_type) and isinstance(self.conversation_events[-1], event_type):
-                self.conversation_events[-1] = event_type(
-                    content=self.conversation_events[-1].content + event.content
-                )
+        # The keys are the event types that can be merged, and the values are the attributes that must be
+        # equal for the events to be merged.
+        mergeable_events_to_required_attrs = {
+            UserTranscriptionReceived: ["language"],
+            AgentResponse: [],
+        }
+        last_event = self.conversation_events[-1]
+        if type(event) is type(last_event) and type(event) in mergeable_events_to_required_attrs:
+            required_attrs = mergeable_events_to_required_attrs[type(event)]
+            if all(getattr(event, attr) == getattr(last_event, attr) for attr in required_attrs):
+                last_event.content += event.content
                 return
 
         self.conversation_events.append(event)
