@@ -60,27 +60,12 @@ class ConversationContext:
         """Add metadata for specialized processing."""
         self.metadata[key] = value
 
-    def get_committed_turns(self) -> list[Union[UserTranscriptionReceived, AgentResponse]]:
+    def get_committed_transcript(self) -> list[Union[UserTranscriptionReceived, AgentResponse]]:
         """Get all committed transcript messages from the conversation events."""
-        pending_turns = []
         committed_turns = []
         for event in self.events:
             if isinstance(event, UserTranscriptionReceived):
                 committed_turns.append(event)
-            elif isinstance(event, AgentResponse):
-                pending_turns.append(event)
             elif isinstance(event, AgentSpeechSent):
-                committed_text = event.content
-                while len(pending_turns) > 0 and len(committed_text) > 0:
-                    pending_turn = pending_turns.pop(0)
-                    if len(pending_turn.content) <= len(committed_text):
-                        committed_turns.append(pending_turn)
-                        committed_text = committed_text.replace(pending_turn.content, "", 1)
-                    else:
-                        committed_turn = AgentResponse(content=committed_text)
-                        committed_turns.append(committed_turn)
-                        pending_turns.insert(
-                            0, AgentResponse(content=pending_turn.content[len(committed_text) :])
-                        )
-                        committed_text = ""
+                committed_turns.append(AgentResponse(content=event.content))
         return committed_turns
