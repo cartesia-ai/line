@@ -124,7 +124,7 @@ class VoiceAgentApp:
             try:
                 agent_data = json.loads(query_params["agent"])
             except (json.JSONDecodeError, TypeError):
-                logger.warning(f"Invalid agent JSON: {query_params['agent']}")
+                logger.error(f"Invalid agent JSON: {query_params['agent']}")
                 agent_data = {}
 
         # Create CallRequest from URL parameters

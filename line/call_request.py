@@ -2,10 +2,6 @@ from typing import Any, Dict, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
-# Default initial message for new calls
-DEFAULT_INITIAL_MESSAGE = "Hello! I am your voice agent powered by Cartesia. What do you want to build?"
-
-
 class PreCallResult(BaseModel):
     """Result from pre_call_handler containing metadata and config."""
 
@@ -16,11 +12,8 @@ class PreCallResult(BaseModel):
 class AgentConfig(BaseModel):
     """Agent information for the call."""
 
-    system_prompt: str  # System prompt to define the agent's role and behavior
-    introduction: Optional[str] = Field(
-        default=DEFAULT_INITIAL_MESSAGE,
-        description=("Introduction message for the agent to start the call with"),
-    )
+    system_prompt: Optional[str] = None  # System prompt to define the agent's role and behavior
+    introduction: Optional[str] = None  # Introduction message for the agent to start the call with
 
 
 class CallRequest(BaseModel):
