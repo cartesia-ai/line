@@ -1,6 +1,7 @@
-# Basic Chat
+# Basic Chat Configurable
 
-Single system prompt voice agent that uses Gemini.
+Single system prompt voice agent that uses Gemini. This setup differs from `basic_chat` in that the system prompt and introduction message can be configured via the `CallRequest`.
+Those values do not need to be hardcoded and can be dynamically configured at API call. It is still recommended to have a fallback system prompt and introduction to handle malformed requests.
 
 ## Template Information
 
