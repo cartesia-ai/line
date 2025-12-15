@@ -1,7 +1,7 @@
 import os
 
 from chat_node import ChatNode
-from config import INITIAL_MESSAGE, SYSTEM_PROMPT
+from config import SYSTEM_PROMPT
 from google import genai
 from loguru import logger
 
