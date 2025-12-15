@@ -40,7 +40,10 @@ async def handle_new_call(system: VoiceAgentSystem, call_request: CallRequest):
     )
 
     await system.start()
-    await system.send_initial_message(call_request.agent.introduction or INITIAL_MESSAGE)
+
+    # The agent will wait for the user to speak first if no introduction is provided.
+    if call_request.agent.introduction:
+        await system.send_initial_message(call_request.agent.introduction)
     await system.wait_for_shutdown()
 
 
