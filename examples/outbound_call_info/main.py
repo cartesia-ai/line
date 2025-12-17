@@ -47,7 +47,7 @@ async def handle_new_call(system: VoiceAgentSystem, call_request: CallRequest):
     # Main conversation node
     conversation_node = ChatNode(
         gemini_client=gemini_client,
-        system_prompt=SYSTEM_PROMPT + f"\n\n {extra_prompt}",
+        system_prompt=(call_request.agent.system_prompt or SYSTEM_PROMPT) + f"\n\n {extra_prompt}",
     )
     conversation_bridge = Bridge(conversation_node)
 
@@ -63,7 +63,10 @@ async def handle_new_call(system: VoiceAgentSystem, call_request: CallRequest):
     )
 
     await system.start()
-    await system.send_initial_message("Hi there! How are you?")
+    if call_request.agent.introduction:
+        await system.send_initial_message(call_request.agent.introduction)
+    else:
+        await system.send_initial_message("Hi there! How are you?")
     await system.wait_for_shutdown()
 
 
