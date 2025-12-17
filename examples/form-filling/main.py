@@ -17,7 +17,7 @@ async def handle_new_call(system: VoiceAgentSystem, call_request: CallRequest):
 
     # Main form filling node
     form_node = FormFillingNode(
-        system_prompt=SYSTEM_PROMPT,
+        system_prompt=call_request.agent.system_prompt or SYSTEM_PROMPT,
         gemini_client=gemini_client,
         form_path=str(form_path),
     )
