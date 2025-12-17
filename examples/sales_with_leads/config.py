@@ -4,7 +4,7 @@ import os
 from google.genai import types
 from pydantic import BaseModel
 
-DEFAULT_MODEL_ID = os.getenv("MODEL_ID", "gemini-2.5-flash-lite-preview-06-17")
+DEFAULT_MODEL_ID = os.getenv("MODEL_ID", "gemini-2.5-flash")
 
 DEFAULT_TEMPERATURE = 0.7
 
