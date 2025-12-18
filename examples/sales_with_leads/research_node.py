@@ -27,7 +27,7 @@ class ResearchNode(ReasoningNode):
     def __init__(
         self,
         gemini_client,
-        model_id: str = "gemini-live-2.5-flash-preview",
+        model_id: str = "gemini-2.5-flash",
         max_context_length: int = 50,
     ):
         super().__init__(system_prompt=RESEARCH_PROMPT, max_context_length=max_context_length)

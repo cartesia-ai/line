@@ -9,7 +9,7 @@ the behavior of the template.
 ##################################################
 
 # Model Settings - using environment variable with fallback for compatibility
-CHAT_MODEL_ID = "gemini-live-2.5-flash-preview"
+CHAT_MODEL_ID = "gemini-2.5-flash"
 CHAT_TEMPERATURE = 0.7
 
 
