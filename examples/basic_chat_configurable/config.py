@@ -35,5 +35,5 @@ You should only ever end the call after confirming that the user has no more que
 """
 
 INITIAL_MESSAGE = """
-Hello I am a voice agent built by Cartesia. How can I help you today?
+Hello I am a voice agent built on Cartesia. How can I help you today?
 """
