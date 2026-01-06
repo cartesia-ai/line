@@ -45,7 +45,7 @@ async def handle_new_call(system: VoiceAgentSystem, call_request: CallRequest):
     if call_request.agent.introduction is not None:
         await system.send_initial_message(call_request.agent.introduction)
     else:
-        await system.send_initial_message(INITIAL_MESSAGE) 
+        await system.send_initial_message(INITIAL_MESSAGE)
 
     await system.wait_for_shutdown()
 
