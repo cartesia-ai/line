@@ -33,3 +33,7 @@ Remember, you're on the phone, so do not use emojis or abbreviations. Spell out 
 
 You should only ever end the call after confirming that the user has no more questions.
 """
+
+INITIAL_MESSAGE = """
+Hello I am a voice agent built by Cartesia. How can I help you today?
+"""

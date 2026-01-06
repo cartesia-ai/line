@@ -1,7 +1,7 @@
 import os
 
 from chat_node import ChatNode
-from config import SYSTEM_PROMPT
+from config import INITIAL_MESSAGE, SYSTEM_PROMPT
 from google import genai
 from loguru import logger
 
@@ -42,8 +42,11 @@ async def handle_new_call(system: VoiceAgentSystem, call_request: CallRequest):
     await system.start()
 
     # The agent will wait for the user to speak first if no introduction is provided.
-    if call_request.agent.introduction:
+    if call_request.agent.introduction is not None:
         await system.send_initial_message(call_request.agent.introduction)
+    else:
+        await system.send_initial_message(INITIAL_MESSAGE) 
+
     await system.wait_for_shutdown()
 
 
