@@ -227,6 +227,7 @@ class RouteBuilder:
         event_type: EventType,
         handler: OnEventHandler,
         method_name: Literal["suspend", "resume", "interrupt"],
+        filter_fn: Optional[Callable[[Message], bool]] = None,
     ) -> None:
         assert self.route_handler is not None, (
             f"self._set_route_handler is not initialized. It is required for configuring {method_name}."
@@ -255,7 +256,7 @@ class RouteBuilder:
                 lambda message: self.route_handler._resume(message, handler)
             )
         elif method_name == "interrupt":
-            self.bridge.on(event_type)._add_control_operation(
+            self.bridge.on(event_type, filter_fn=filter_fn)._add_control_operation(
                 lambda message: self.route_handler._interrupt(message, handler)
             )
         return self
@@ -276,18 +277,25 @@ class RouteBuilder:
         """Resume route execution when any of these events are received."""
         return self._add_on_event_handler(event_type, handler, "resume")
 
-    def interrupt_on(self, event_type: EventType, handler: OnEventHandler = None) -> "RouteBuilder":
+    def interrupt_on(
+        self,
+        event_type: EventType,
+        handler: OnEventHandler = None,
+        filter_fn: Optional[Callable[[Message], bool]] = None,
+    ) -> "RouteBuilder":
         """Interrupt this route execution when any of these events are received.
 
         Args:
-            event: EventType that should interrupt this route.
+            event_type: EventType that should interrupt this route.
             handler: Optional callable that runs after the route is cancelled but before the lock is released.
                 Receives the interrupt event type as argument.
+            filter_fn: Optional filter function that takes a Message and returns bool.
+                If provided, the interrupt will only be triggered when the filter returns True.
 
         Raises:
             ValueError: If the event is already registered for interrupt.
         """
-        return self._add_on_event_handler(event_type, handler, "interrupt")
+        return self._add_on_event_handler(event_type, handler, "interrupt", filter_fn=filter_fn)
 
     def on(self, event: str) -> "RouteBuilder":
         """Start a new route on a different event."""
