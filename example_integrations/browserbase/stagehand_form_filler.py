@@ -145,14 +145,12 @@ class StagehandFormFiller:
         try:
             logger.info("Initializing Stagehand browser automation")
 
-            # Create AsyncStagehand client
             self.client = AsyncStagehand(
                 browserbase_api_key=os.environ.get("BROWSERBASE_API_KEY"),
                 browserbase_project_id=os.environ.get("BROWSERBASE_PROJECT_ID"),
                 model_api_key=os.environ.get("GEMINI_API_KEY"),
             )
 
-            # Start session with model
             self.session = await self.client.sessions.create(
                 model_name="google/gemini-3-flash-preview"
             )
