@@ -1,7 +1,7 @@
 """Browser automation for filling web forms during voice conversations.
 
 This module provides the StagehandFormFiller class which manages browser
-automation for filling forms using Stagehand v3. It handles form field
+automation for filling forms using Stagehand. It handles form field
 mapping, field filling, and form submission.
 """
 
@@ -123,7 +123,7 @@ class FormFieldMapping:
 
 
 class StagehandFormFiller:
-    """Manages browser automation for filling forms using Stagehand v3"""
+    """Manages browser automation for filling forms using Stagehand"""
 
     def __init__(self, form_url: str):
         self.form_url = form_url
