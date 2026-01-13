@@ -12,7 +12,7 @@ from prompts import make_voice_system_prompt
 from line.events import AgentResponse, ToolResult
 
 # FAQ search agent settings
-FAQ_SEARCH_MODEL_ID = "gemini-live-2.5-flash-preview"
+FAQ_SEARCH_MODEL_ID = "gemini-2.5-flash"
 
 # FAQ search agent prompt
 FAQ_SEARCH_PROMPT = f"""
