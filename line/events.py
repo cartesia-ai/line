@@ -37,6 +37,7 @@ __all__ = [
     "UserTranscriptionReceived",
     "AgentSpeechSent",
     "UserUnknownInputReceived",
+    "CustomReceived",
     "LogMetric",
     "DTMFInputEvent",
     "DTMFOutputEvent",
@@ -185,6 +186,12 @@ class UserUnknownInputReceived(BaseModel):
     """User unknown input received event."""
 
     input_data: str
+
+
+class CustomReceived(BaseModel):
+    """Custom event received with arbitrary metadata."""
+
+    metadata: Dict[str, Any]
 
 
 class LogMetric(BaseModel):
