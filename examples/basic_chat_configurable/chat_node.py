@@ -11,7 +11,7 @@ from google import genai
 from google.genai import types as gemini_types
 from loguru import logger
 
-from line.events import AgentResponse, EndCall
+from line.events import AgentResponse, ToolCall, ToolResult, EndCall
 from line.nodes.conversation_context import ConversationContext
 from line.nodes.reasoning import ReasoningNode
 from line.tools.system_tools import EndCallArgs, EndCallTool, end_call
@@ -80,8 +80,7 @@ class ChatNode(ReasoningNode):
             logger.info("No messages to process")
             return
 
-        messages = convert_messages_to_gemini(context.events)
-
+        messages = convert_messages_to_gemini(context.get_committed_turns())
         user_message = context.get_latest_user_transcript_message()
         if user_message:
             logger.info(f'🧠 Processing user message: "{user_message}"')
