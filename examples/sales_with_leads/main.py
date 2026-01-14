@@ -9,7 +9,7 @@ from loguru import logger
 from research_node import ResearchNode
 
 from line import Bridge, CallRequest, VoiceAgentApp, VoiceAgentSystem
-from line.events import UserStartedSpeaking, UserStoppedSpeaking, UserTranscriptionReceived
+from line.events import AgentSpeechSent, UserStartedSpeaking, UserStoppedSpeaking, UserTranscriptionReceived
 
 # Configure logging to filter out DEBUG messages from cartesia modules
 logger.remove()
@@ -36,7 +36,7 @@ async def handle_new_call(system: VoiceAgentSystem, call_request: CallRequest):
     conversation_bridge = Bridge(chat_node)
     system.with_speaking_node(chat_node, conversation_bridge)
     conversation_bridge.on(UserTranscriptionReceived).map(chat_node.add_event)
-
+    conversation_bridge.on(AgentSpeechSent).map(chat_node.add_event)
     (
         conversation_bridge.on(UserStoppedSpeaking)
         .interrupt_on(UserStartedSpeaking, handler=chat_node.on_interrupt_generate)
