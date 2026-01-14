@@ -6,6 +6,7 @@ from google import genai
 
 from line import Bridge, CallRequest, VoiceAgentApp, VoiceAgentSystem
 from line.events import (
+    AgentSpeechSent,
     DTMFInputEvent,
     UserStartedSpeaking,
     UserStoppedSpeaking,
