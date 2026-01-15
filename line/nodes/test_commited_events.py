@@ -79,6 +79,7 @@ class TestGetCommittedEvents:
             AgentResponse(content="Let's play 20 questions! When you have your item in mind, just say start."),
             AgentSpeechSent(content="Let's"),  # Interrupted!
             UserTranscriptionReceived(content='Yeah.'),
+            AgentSpeechSent(content=" play 20 questions! When you have your item in mind, just say start."),
             AgentResponse(content="Alright, I'm ready to play! I'll try my best to guess what you're thinking of.\n\nQuestion 1: Is it an animal?"),
             AgentSpeechSent(content="Alright,I'mreadytoplay!I'lltrymybesttoguesswhatyou'rethinkingof.Question1:Isitananimal?"),
             UserTranscriptionReceived(content="No. It's not an animal."),
@@ -108,8 +109,7 @@ class TestGetCommittedEvents:
         # 8. UserTranscription: "No. It's not a physical object."
         # 9. AgentResponse: 'Interesting! Not a physical object.'
         # 10. UserTranscription: 'What was question'
-        print("Committed events: ", committed)
-        assert len(committed) == 10
+        assert len(committed) == 11
         
         # Check first committed response (interrupted)
         assert isinstance(committed[0], AgentResponse)
@@ -119,37 +119,40 @@ class TestGetCommittedEvents:
         assert isinstance(committed[1], UserTranscriptionReceived)
         assert committed[1].content == 'Yeah.'
         
-        # Check second committed response (full)
         assert isinstance(committed[2], AgentResponse)
-        assert committed[2].content == "Alright, I'm ready to play! I'll try my best to guess what you're thinking of.\n\nQuestion 1: Is it an animal?"
+        assert committed[2].content == "play 20 questions! When you have your item in mind, just say start."
+        
+        # Check second committed response (full)
+        assert isinstance(committed[3], AgentResponse)
+        assert committed[3].content == "Alright, I'm ready to play! I'll try my best to guess what you're thinking of.\n\nQuestion 1: Is it an animal?"
         
         # Check second user message
-        assert isinstance(committed[3], UserTranscriptionReceived)
-        assert committed[3].content == "No. It's not an animal."
+        assert isinstance(committed[4], UserTranscriptionReceived)
+        assert committed[4].content == "No. It's not an animal."
         
         # Check third committed response (interrupted - only "Okay, not an animal!")
-        assert isinstance(committed[4], AgentResponse)
-        assert committed[4].content == 'Okay, not an animal!'
+        assert isinstance(committed[5], AgentResponse)
+        assert committed[5].content == 'Okay, not an animal!'
         
         # Check third user message
-        assert isinstance(committed[5], UserTranscriptionReceived)
-        assert committed[5].content == 'Good call to go.'
+        assert isinstance(committed[6], UserTranscriptionReceived)
+        assert committed[6].content == 'Good call to go.'
         
         # Check fourth committed response (continuation from pending)
-        assert isinstance(committed[6], AgentResponse)
-        assert committed[6].content == 'Question 2: Is it a physical object?'
+        assert isinstance(committed[7], AgentResponse)
+        assert committed[7].content == 'Question 2: Is it a physical object?'
         
         # Check fourth user message
-        assert isinstance(committed[7], UserTranscriptionReceived)
-        assert committed[7].content == "No. It's not a physical object."
+        assert isinstance(committed[8], UserTranscriptionReceived)
+        assert committed[8].content == "No. It's not a physical object."
         
         # Check fifth user message (no agent response committed yet)
-        assert isinstance(committed[8], AgentResponse)
-        assert committed[8].content == 'Interesting! Not a physical object.'
+        assert isinstance(committed[9], AgentResponse)
+        assert committed[9].content == 'Interesting! Not a physical object.'
         
         # Check sixth user message
-        assert isinstance(committed[9], UserTranscriptionReceived)
-        assert committed[9].content == 'What was question'
+        assert isinstance(committed[10], UserTranscriptionReceived)
+        assert committed[10].content == 'What was question'
 
     def test_user_transcription_passed_through(self):
         """Test that UserTranscriptionReceived events are passed through unchanged."""
@@ -258,6 +261,86 @@ class TestGetCommittedEvents:
         assert len(committed) == 1
         assert isinstance(committed[0], AgentResponse)
         assert committed[0].content == "Hello world! How"
+
+    def test_chinese_characters_full_match(self):
+        """Test matching with Chinese characters (no spaces between words)."""
+        events = [
+            AgentResponse(content="你好！今天天气怎么样？"),  # "Hello! How's the weather today?"
+            AgentSpeechSent(content="你好！今天天气怎么样？"),  # TTS with all text
+        ]
+        
+        context = ConversationContext(events=events, system_prompt="")
+        committed = context.get_committed_events()
+        
+        assert len(committed) == 1
+        assert isinstance(committed[0], AgentResponse)
+        assert committed[0].content == "你好！今天天气怎么样？"
+
+    def test_chinese_characters_partial_match(self):
+        """Test matching with Chinese characters when interrupted."""
+        events = [
+            AgentResponse(content="你好！今天天气怎么样？"),  # "Hello! How's the weather today?"
+            AgentSpeechSent(content="你好！今天"),  # TTS interrupted after "Hello! Today"
+        ]
+        
+        context = ConversationContext(events=events, system_prompt="")
+        committed = context.get_committed_events()
+        
+        assert len(committed) == 1
+        assert isinstance(committed[0], AgentResponse)
+        assert committed[0].content == "你好！今天"
+
+    def test_mixed_language_with_spaces(self):
+        """Test matching with mixed English and Chinese with spaces."""
+        events = [
+            AgentResponse(content="Hello 你好! How are you 今天好吗?"),
+            AgentSpeechSent(content="Hello你好!Howareyou今天好吗?"),
+        ]
+        
+        context = ConversationContext(events=events, system_prompt="")
+        committed = context.get_committed_events()
+        
+        assert len(committed) == 1
+        assert isinstance(committed[0], AgentResponse)
+        assert committed[0].content == "Hello 你好! How are you 今天好吗?"
+
+    def test_chinese_with_interruption_and_continuation(self):
+        """Test Chinese text with interruption and continuation like real conversation."""
+        events = [
+            AgentResponse(content="我想问你一个问题"),  # "I want to ask you a question"
+            AgentSpeechSent(content="我想问你"),  # Interrupted after "I want to ask you"
+            UserTranscriptionReceived(content="等一下"),  # "Wait a moment"
+            AgentResponse(content="好的，你准备好了吗？"),  # "Okay, are you ready?"
+            AgentSpeechSent(content="好的，你准备好了吗？"),
+        ]
+        
+        context = ConversationContext(events=events, system_prompt="")
+        committed = context.get_committed_events()
+        
+        assert len(committed) == 3
+        assert isinstance(committed[0], AgentResponse)
+        assert committed[0].content == "我想问你"
+        assert isinstance(committed[1], UserTranscriptionReceived)
+        assert committed[1].content == "等一下"
+        assert isinstance(committed[2], AgentResponse)
+        assert committed[2].content == "好的，你准备好了吗？"
+
+    def test_multiple_responses_concatenation_with_space(self):
+        """Test that multiple AgentResponse events are concatenated with space separator."""
+        events = [
+            AgentResponse(content="First response."),
+            AgentResponse(content="Second response."),
+            AgentResponse(content="Third response."),
+            AgentSpeechSent(content="Firstresponse.Second"),  # Interrupted in second response
+        ]
+        
+        context = ConversationContext(events=events, system_prompt="")
+        committed = context.get_committed_events()
+        
+        assert len(committed) == 1
+        assert isinstance(committed[0], AgentResponse)
+        # Should preserve the space separator added during concatenation
+        assert committed[0].content == "First response.Second"
 
 
 if __name__ == "__main__":
