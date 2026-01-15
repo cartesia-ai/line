@@ -11,7 +11,7 @@ from google import genai
 from google.genai import types as gemini_types
 from loguru import logger
 
-from line.events import AgentResponse, ToolCall, ToolResult, EndCall
+from line.events import AgentResponse, EndCall
 from line.nodes.conversation_context import ConversationContext
 from line.nodes.reasoning import ReasoningNode
 from line.tools.system_tools import EndCallArgs, EndCallTool, end_call
