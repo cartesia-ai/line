@@ -6,7 +6,7 @@ to specialized processing methods in ReasoningNode subclasses.
 """
 
 from dataclasses import dataclass, field
-from typing import Any, List, Optional, Union
+from typing import Any, List, Optional
 
 from line.events import (
     AgentResponse,
@@ -62,7 +62,7 @@ class ConversationContext:
         """Add metadata for specialized processing."""
         self.metadata[key] = value
 
-    def get_committed_turns(self) -> list[Union[UserTranscriptionReceived, AgentResponse]]:
+    def get_committed_events(self) -> list[EventInstance]:
         """
         Get all transcript turns that were actually spoken by the agent.
 
@@ -70,25 +70,26 @@ class ConversationContext:
         (without spaces) to preserve original formatting for LLM context.
 
         Returns:
-            List of committed turns: UserTranscriptionReceived and AgentResponse events
-            that were confirmed spoken via AgentSpeechSent.
+            List of committed events: where the AgentResponse events
+            were confirmed spoken via AgentSpeechSent.
         """
         pending_responses = []
-        committed_turns = []
+        committed_events = []
 
         for event in self.events:
-            if isinstance(event, UserTranscriptionReceived):
-                committed_turns.append(event)
-            elif isinstance(event, AgentResponse):
+            if isinstance(event, AgentResponse):
                 pending_responses.append(event)
             elif isinstance(event, AgentSpeechSent):
                 committed = self._process_speech_event(
                     event.content,
                     pending_responses,
                 )
-                committed_turns.extend(committed)
+                committed_events.extend(committed)
+            # All other events are committed as is
+            else:
+                committed_events.append(event)
 
-        return committed_turns
+        return committed_events
 
     @staticmethod
     def _match_formatted_text_to_speech(
