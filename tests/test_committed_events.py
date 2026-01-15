@@ -364,5 +364,656 @@ class TestGetCommittedEvents:
         assert committed[0].content == "First response.Second"
 
 
+class TestLatinScriptsWithDiacritics:
+    """Test cases for European languages with diacritics."""
+
+    def test_french_accents_full_match(self):
+        """Test French text with various accents (é, è, ê, à, ç)."""
+        events = [
+            AgentResponse(content="Ça va? Comment ça s'est passé?"),
+            AgentSpeechSent(content="Çava?Commentças'estpassé?"),
+        ]
+
+        context = ConversationContext(events=events, system_prompt="")
+        committed = context.get_committed_events()
+
+        assert len(committed) == 1
+        assert isinstance(committed[0], AgentResponse)
+        assert committed[0].content == "Ça va? Comment ça s'est passé?"
+
+    def test_french_interruption(self):
+        """Test French text interrupted mid-sentence."""
+        events = [
+            AgentResponse(content="Bonjour! J'espère que tu vas bien aujourd'hui."),
+            AgentSpeechSent(content="Bonjour!J'espèrequetuvas"),  # Interrupted
+        ]
+
+        context = ConversationContext(events=events, system_prompt="")
+        committed = context.get_committed_events()
+
+        assert len(committed) == 1
+        assert isinstance(committed[0], AgentResponse)
+        assert committed[0].content == "Bonjour! J'espère que tu vas"
+
+    def test_spanish_special_characters(self):
+        """Test Spanish punctuation and accents (ñ, á, í, ¿, ¡)."""
+        events = [
+            AgentResponse(content="¿Cómo estás? ¡Muy bien! Mañana es España."),
+            AgentSpeechSent(content="¿Cómoestás?¡Muybien!MañanaesEspaña."),
+        ]
+
+        context = ConversationContext(events=events, system_prompt="")
+        committed = context.get_committed_events()
+
+        assert len(committed) == 1
+        assert isinstance(committed[0], AgentResponse)
+        assert committed[0].content == "¿Cómo estás? ¡Muy bien! Mañana es España."
+
+    def test_spanish_interruption(self):
+        """Test Spanish text with interruption."""
+        events = [
+            AgentResponse(content="¿Cómo estás? ¡Muy bien!"),
+            AgentSpeechSent(content="¿Cómoestás?"),  # Interrupted after first sentence
+        ]
+
+        context = ConversationContext(events=events, system_prompt="")
+        committed = context.get_committed_events()
+
+        assert len(committed) == 1
+        assert isinstance(committed[0], AgentResponse)
+        assert committed[0].content == "¿Cómo estás?"
+
+    def test_german_umlauts(self):
+        """Test German text with umlauts (ä, ö, ü, ß)."""
+        events = [
+            AgentResponse(content="Guten Tag! Schönes Wetter. Straße und Äpfel."),
+            AgentSpeechSent(content="GutenTag!SchönesWetter.StraßeundÄpfel."),
+        ]
+
+        context = ConversationContext(events=events, system_prompt="")
+        committed = context.get_committed_events()
+
+        assert len(committed) == 1
+        assert isinstance(committed[0], AgentResponse)
+        assert committed[0].content == "Guten Tag! Schönes Wetter. Straße und Äpfel."
+
+    def test_portuguese_tildes(self):
+        """Test Portuguese text with tildes and accents (ã, õ, â, ê)."""
+        events = [
+            AgentResponse(content="Não tenho irmão. São Paulo é bonito!"),
+            AgentSpeechSent(content="Nãotenhoirmão.SãoPauloé"),  # Interrupted
+        ]
+
+        context = ConversationContext(events=events, system_prompt="")
+        committed = context.get_committed_events()
+
+        assert len(committed) == 1
+        assert isinstance(committed[0], AgentResponse)
+        assert committed[0].content == "Não tenho irmão. São Paulo é"
+
+    def test_multiple_languages_in_conversation(self):
+        """Test conversation switching between multiple European languages."""
+        events = [
+            AgentResponse(content="Bonjour! Comment ça va?"),
+            AgentSpeechSent(content="Bonjour!Commentçava?"),
+            UserTranscriptionReceived(content="Très bien!"),
+            AgentResponse(content="¿Y cómo está el tiempo?"),
+            AgentSpeechSent(content="¿Ycómo"),  # Interrupted
+        ]
+
+        context = ConversationContext(events=events, system_prompt="")
+        committed = context.get_committed_events()
+
+        assert len(committed) == 3
+        assert committed[0].content == "Bonjour! Comment ça va?"
+        assert committed[1].content == "Très bien!"
+        assert committed[2].content == "¿Y cómo"
+
+
+class TestOtherNonLatinScripts:
+    """Test cases for Japanese, Arabic, Korean, and other scripts."""
+
+    def test_japanese_hiragana_katakana_kanji(self):
+        """Test Japanese with hiragana, katakana, and kanji."""
+        events = [
+            AgentResponse(content="こんにちは。今日はいい天気ですね。ありがとう。"),
+            AgentSpeechSent(content="こんにちは。今日はいい天気ですね。ありがとう。"),
+        ]
+
+        context = ConversationContext(events=events, system_prompt="")
+        committed = context.get_committed_events()
+
+        assert len(committed) == 1
+        assert isinstance(committed[0], AgentResponse)
+        assert committed[0].content == "こんにちは。今日はいい天気ですね。ありがとう。"
+
+    def test_japanese_interruption(self):
+        """Test Japanese text with interruption."""
+        events = [
+            AgentResponse(content="こんにちは。今日はいい天気ですね。"),
+            AgentSpeechSent(content="こんにちは。今日は"),  # Interrupted
+        ]
+
+        context = ConversationContext(events=events, system_prompt="")
+        committed = context.get_committed_events()
+
+        assert len(committed) == 1
+        assert isinstance(committed[0], AgentResponse)
+        assert committed[0].content == "こんにちは。今日は"
+
+    def test_japanese_mixed_with_english(self):
+        """Test Japanese mixed with English words."""
+        events = [
+            AgentResponse(content="Hello! 今日はいい天気ですね。Thank you!"),
+            AgentSpeechSent(content="Hello!今日はいい天気ですね。Thankyou!"),
+        ]
+
+        context = ConversationContext(events=events, system_prompt="")
+        committed = context.get_committed_events()
+
+        assert len(committed) == 1
+        assert isinstance(committed[0], AgentResponse)
+        assert committed[0].content == "Hello! 今日はいい天気ですね。Thank you!"
+
+    def test_arabic_rtl_text(self):
+        """Test Arabic right-to-left text."""
+        events = [
+            AgentResponse(content="مرحبا! كيف حالك اليوم؟"),
+            AgentSpeechSent(content="مرحبا!كيفحالكاليوم؟"),
+        ]
+
+        context = ConversationContext(events=events, system_prompt="")
+        committed = context.get_committed_events()
+
+        assert len(committed) == 1
+        assert isinstance(committed[0], AgentResponse)
+        assert committed[0].content == "مرحبا! كيف حالك اليوم؟"
+
+    def test_arabic_interruption(self):
+        """Test Arabic text with interruption."""
+        events = [
+            AgentResponse(content="مرحبا! كيف حالك اليوم؟ أنا بخير."),
+            AgentSpeechSent(content="مرحبا!كيفحالك"),  # Interrupted
+        ]
+
+        context = ConversationContext(events=events, system_prompt="")
+        committed = context.get_committed_events()
+
+        assert len(committed) == 1
+        assert isinstance(committed[0], AgentResponse)
+        assert committed[0].content == "مرحبا! كيف حالك"
+
+    def test_korean_hangul(self):
+        """Test Korean Hangul characters."""
+        events = [
+            AgentResponse(content="안녕하세요! 오늘 날씨가 좋네요."),
+            AgentSpeechSent(content="안녕하세요!오늘날씨가좋네요."),
+        ]
+
+        context = ConversationContext(events=events, system_prompt="")
+        committed = context.get_committed_events()
+
+        assert len(committed) == 1
+        assert isinstance(committed[0], AgentResponse)
+        assert committed[0].content == "안녕하세요! 오늘 날씨가 좋네요."
+
+    def test_korean_interruption(self):
+        """Test Korean text with interruption."""
+        events = [
+            AgentResponse(content="안녕하세요! 오늘 날씨가 좋네요. 감사합니다."),
+            AgentSpeechSent(content="안녕하세요!오늘"),  # Interrupted
+        ]
+
+        context = ConversationContext(events=events, system_prompt="")
+        committed = context.get_committed_events()
+
+        assert len(committed) == 1
+        assert isinstance(committed[0], AgentResponse)
+        assert committed[0].content == "안녕하세요! 오늘"
+
+    def test_thai_script(self):
+        """Test Thai script (no spaces between words)."""
+        events = [
+            AgentResponse(content="สวัสดีครับ วันนี้อากาศดีมาก"),
+            AgentSpeechSent(content="สวัสดีครับวันนี้อากาศดีมาก"),
+        ]
+
+        context = ConversationContext(events=events, system_prompt="")
+        committed = context.get_committed_events()
+
+        assert len(committed) == 1
+        assert isinstance(committed[0], AgentResponse)
+        assert committed[0].content == "สวัสดีครับ วันนี้อากาศดีมาก"
+
+    def test_hindi_devanagari(self):
+        """Test Hindi Devanagari script."""
+        events = [
+            AgentResponse(content="नमस्ते! आप कैसे हैं?"),
+            AgentSpeechSent(content="नमस्ते!आपकैसेहैं?"),
+        ]
+
+        context = ConversationContext(events=events, system_prompt="")
+        committed = context.get_committed_events()
+
+        assert len(committed) == 1
+        assert isinstance(committed[0], AgentResponse)
+        assert committed[0].content == "नमस्ते! आप कैसे हैं?"
+
+
+class TestEmojisAndSpecialCharacters:
+    """Test cases for emojis and special characters."""
+
+    def test_emojis_in_response_full_match(self):
+        """Test responses containing emojis."""
+        events = [
+            AgentResponse(content="Hello! 👋 How are you? 😊"),
+            AgentSpeechSent(content="Hello!👋Howareyou?😊"),
+        ]
+
+        context = ConversationContext(events=events, system_prompt="")
+        committed = context.get_committed_events()
+
+        assert len(committed) == 1
+        assert isinstance(committed[0], AgentResponse)
+        assert committed[0].content == "Hello! 👋 How are you? 😊"
+
+    def test_emoji_interruption(self):
+        """Test interruption at emoji boundary."""
+        events = [
+            AgentResponse(content="Great! 🎉 Let's celebrate! 🎊"),
+            AgentSpeechSent(content="Great!🎉"),  # Interrupted after first emoji
+        ]
+
+        context = ConversationContext(events=events, system_prompt="")
+        committed = context.get_committed_events()
+
+        assert len(committed) == 1
+        assert isinstance(committed[0], AgentResponse)
+        assert committed[0].content == "Great! 🎉"
+
+    def test_multiple_emojis_consecutively(self):
+        """Test multiple emojis in a row."""
+        events = [
+            AgentResponse(content="Wow! 🎉🎊🎈 Amazing!"),
+            AgentSpeechSent(content="Wow!🎉🎊🎈Amazing!"),
+        ]
+
+        context = ConversationContext(events=events, system_prompt="")
+        committed = context.get_committed_events()
+
+        assert len(committed) == 1
+        assert isinstance(committed[0], AgentResponse)
+        assert committed[0].content == "Wow! 🎉🎊🎈 Amazing!"
+
+    def test_emoji_skin_tone_modifiers(self):
+        """Test emojis with skin tone modifiers."""
+        events = [
+            AgentResponse(content="Hello! 👋🏽 Nice to meet you! 👍🏾"),
+            AgentSpeechSent(content="Hello!👋🏽Nicetomeetyou!👍🏾"),
+        ]
+
+        context = ConversationContext(events=events, system_prompt="")
+        committed = context.get_committed_events()
+
+        assert len(committed) == 1
+        assert isinstance(committed[0], AgentResponse)
+        assert committed[0].content == "Hello! 👋🏽 Nice to meet you! 👍🏾"
+
+    def test_numbers_and_symbols(self):
+        """Test responses with numbers and mathematical symbols."""
+        events = [
+            AgentResponse(content="The answer is 42! That's 100% correct. 2+2=4."),
+            AgentSpeechSent(content="Theansweris42!That's100%correct.2+2=4."),
+        ]
+
+        context = ConversationContext(events=events, system_prompt="")
+        committed = context.get_committed_events()
+
+        assert len(committed) == 1
+        assert isinstance(committed[0], AgentResponse)
+        assert committed[0].content == "The answer is 42! That's 100% correct. 2+2=4."
+
+    def test_currency_symbols(self):
+        """Test various currency symbols."""
+        events = [
+            AgentResponse(content="It costs $100 or €85 or £75 or ¥10000."),
+            AgentSpeechSent(content="Itcosts$100or€85or£75or¥10000."),
+        ]
+
+        context = ConversationContext(events=events, system_prompt="")
+        committed = context.get_committed_events()
+
+        assert len(committed) == 1
+        assert isinstance(committed[0], AgentResponse)
+        assert committed[0].content == "It costs $100 or €85 or £75 or ¥10000."
+
+
+class TestWhitespaceAndFormatting:
+    """Test cases for various whitespace and formatting scenarios."""
+
+    def test_multiple_spaces(self):
+        """Test multiple consecutive spaces."""
+        events = [
+            AgentResponse(content="Hello    world!    How   are you?"),
+            AgentSpeechSent(content="Helloworld!Howareyou?"),
+        ]
+
+        context = ConversationContext(events=events, system_prompt="")
+        committed = context.get_committed_events()
+
+        assert len(committed) == 1
+        assert isinstance(committed[0], AgentResponse)
+        assert committed[0].content == "Hello    world!    How   are you?"
+
+    def test_multiple_newlines(self):
+        """Test multiple consecutive newlines."""
+        events = [
+            AgentResponse(content="Hello\n\n\nworld!\n\nHow are you?"),
+            AgentSpeechSent(content="Helloworld!Howareyou?"),
+        ]
+
+        context = ConversationContext(events=events, system_prompt="")
+        committed = context.get_committed_events()
+
+        assert len(committed) == 1
+        assert isinstance(committed[0], AgentResponse)
+        assert committed[0].content == "Hello\n\n\nworld!\n\nHow are you?"
+
+    def test_leading_trailing_whitespace(self):
+        """Test with leading/trailing whitespace in content."""
+        events = [
+            AgentResponse(content="  Hello world!  "),
+            AgentSpeechSent(content="Helloworld!"),
+        ]
+
+        context = ConversationContext(events=events, system_prompt="")
+        committed = context.get_committed_events()
+
+        assert len(committed) == 1
+        assert isinstance(committed[0], AgentResponse)
+        # Strip is applied in the implementation
+        assert committed[0].content == "Hello world!"
+
+    def test_tab_characters(self):
+        """Test with tab characters."""
+        events = [
+            AgentResponse(content="Hello\tworld!\tHow\tare\tyou?"),
+            AgentSpeechSent(content="Helloworld!Howareyou?"),
+        ]
+
+        context = ConversationContext(events=events, system_prompt="")
+        committed = context.get_committed_events()
+
+        assert len(committed) == 1
+        assert isinstance(committed[0], AgentResponse)
+        assert committed[0].content == "Hello\tworld!\tHow\tare\tyou?"
+
+    def test_mixed_whitespace_types(self):
+        """Test mixed spaces, tabs, and newlines."""
+        events = [
+            AgentResponse(content="Hello \t world!\n How  \tare\tyou?"),
+            AgentSpeechSent(content="Helloworld!Howareyou?"),
+        ]
+
+        context = ConversationContext(events=events, system_prompt="")
+        committed = context.get_committed_events()
+
+        assert len(committed) == 1
+        assert isinstance(committed[0], AgentResponse)
+        assert committed[0].content == "Hello \t world!\n How  \tare\tyou?"
+
+
+class TestPunctuationVariations:
+    """Test cases for various punctuation marks and their variations."""
+
+    def test_smart_quotes_and_apostrophes(self):
+        """Test 'smart' typographic quotes vs straight quotes."""
+        events = [
+            AgentResponse(content="""It's a "test" of 'quotes' and "more"."""),
+            AgentSpeechSent(content="""It'sa"test"of'quotes'and"more"."""),
+        ]
+
+        context = ConversationContext(events=events, system_prompt="")
+        committed = context.get_committed_events()
+
+        assert len(committed) == 1
+        assert isinstance(committed[0], AgentResponse)
+        assert committed[0].content == """It's a "test" of 'quotes' and "more"."""
+
+    def test_ellipsis_variations(self):
+        """Test three dots vs ellipsis character."""
+        events = [
+            AgentResponse(content="Well... I think… maybe?"),
+            AgentSpeechSent(content="Well...Ithink…maybe?"),
+        ]
+
+        context = ConversationContext(events=events, system_prompt="")
+        committed = context.get_committed_events()
+
+        assert len(committed) == 1
+        assert isinstance(committed[0], AgentResponse)
+        assert committed[0].content == "Well... I think… maybe?"
+
+    def test_dashes_and_hyphens(self):
+        """Test em-dash, en-dash, and hyphen."""
+        events = [
+            AgentResponse(content="Hello—world! It's 2020–2025 or well-known."),
+            AgentSpeechSent(content="Hello—world!It's2020–2025orwell-known."),
+        ]
+
+        context = ConversationContext(events=events, system_prompt="")
+        committed = context.get_committed_events()
+
+        assert len(committed) == 1
+        assert isinstance(committed[0], AgentResponse)
+        assert committed[0].content == "Hello—world! It's 2020–2025 or well-known."
+
+    def test_various_brackets(self):
+        """Test different types of brackets."""
+        events = [
+            AgentResponse(content="Test (parentheses) [brackets] {braces} <angles>."),
+            AgentSpeechSent(content="Test(parentheses)[brackets]{braces}<angles>."),
+        ]
+
+        context = ConversationContext(events=events, system_prompt="")
+        committed = context.get_committed_events()
+
+        assert len(committed) == 1
+        assert isinstance(committed[0], AgentResponse)
+        assert committed[0].content == "Test (parentheses) [brackets] {braces} <angles>."
+
+    def test_special_punctuation(self):
+        """Test special punctuation marks."""
+        events = [
+            AgentResponse(content="Wow! Really? Yes... Maybe; no, never: always."),
+            AgentSpeechSent(content="Wow!Really?Yes...Maybe;no,never:always."),
+        ]
+
+        context = ConversationContext(events=events, system_prompt="")
+        committed = context.get_committed_events()
+
+        assert len(committed) == 1
+        assert isinstance(committed[0], AgentResponse)
+        assert committed[0].content == "Wow! Really? Yes... Maybe; no, never: always."
+
+
+class TestEdgeCases:
+    """Test cases for edge cases and boundary conditions."""
+
+    def test_empty_response_content(self):
+        """Test with empty AgentResponse content."""
+        events = [
+            AgentResponse(content=""),
+            AgentSpeechSent(content=""),
+        ]
+
+        context = ConversationContext(events=events, system_prompt="")
+        committed = context.get_committed_events()
+
+        # Empty content after strip returns no committed events
+        assert len(committed) == 0
+
+    def test_only_whitespace_content(self):
+        """Test response with only whitespace."""
+        events = [
+            AgentResponse(content="   \n\t  "),
+            AgentSpeechSent(content=""),
+        ]
+
+        context = ConversationContext(events=events, system_prompt="")
+        committed = context.get_committed_events()
+
+        # Whitespace-only content gets stripped and returns empty
+        assert len(committed) == 0
+
+    def test_only_punctuation(self):
+        """Test response with only punctuation."""
+        events = [
+            AgentResponse(content="...!?!"),
+            AgentSpeechSent(content="...!?!"),
+        ]
+
+        context = ConversationContext(events=events, system_prompt="")
+        committed = context.get_committed_events()
+
+        assert len(committed) == 1
+        assert isinstance(committed[0], AgentResponse)
+        assert committed[0].content == "...!?!"
+
+    def test_very_long_response(self):
+        """Test with extremely long response text."""
+        long_text = "Hello world! " * 100  # 1300 chars
+        long_speech = long_text.replace(" ", "")[:650]  # Interrupted halfway
+
+        events = [
+            AgentResponse(content=long_text),
+            AgentSpeechSent(content=long_speech),
+        ]
+
+        context = ConversationContext(events=events, system_prompt="")
+        committed = context.get_committed_events()
+
+        assert len(committed) == 1
+        assert isinstance(committed[0], AgentResponse)
+        # Should have committed about half of the responses
+        assert len(committed[0].content) < len(long_text)
+
+    def test_single_character_response(self):
+        """Test single character responses."""
+        events = [
+            AgentResponse(content="A"),
+            AgentSpeechSent(content="A"),
+        ]
+
+        context = ConversationContext(events=events, system_prompt="")
+        committed = context.get_committed_events()
+
+        assert len(committed) == 1
+        assert isinstance(committed[0], AgentResponse)
+        assert committed[0].content == "A"
+
+    def test_single_word_response(self):
+        """Test single word response."""
+        events = [
+            AgentResponse(content="Hello"),
+            AgentSpeechSent(content="Hello"),
+        ]
+
+        context = ConversationContext(events=events, system_prompt="")
+        committed = context.get_committed_events()
+
+        assert len(committed) == 1
+        assert isinstance(committed[0], AgentResponse)
+        assert committed[0].content == "Hello"
+
+
+class TestComplexMultilingual:
+    """Test cases for complex multilingual scenarios."""
+
+    def test_complex_multilingual_mix(self):
+        """Test mixing multiple scripts in one response."""
+        events = [
+            AgentResponse(content="Hello 你好 مرحبا こんにちは 안녕하세요! How are you?"),
+            AgentSpeechSent(content="Hello你好مرحباこんにちは안녕하세요!Howareyou?"),
+        ]
+
+        context = ConversationContext(events=events, system_prompt="")
+        committed = context.get_committed_events()
+
+        assert len(committed) == 1
+        assert isinstance(committed[0], AgentResponse)
+        assert committed[0].content == "Hello 你好 مرحبا こんにちは 안녕하세요! How are you?"
+
+    def test_multilingual_with_emojis(self):
+        """Test multilingual text with emojis."""
+        events = [
+            AgentResponse(content="Hello 👋 你好 😊 مرحبا 🌟"),
+            AgentSpeechSent(content="Hello👋你好😊مرحبا🌟"),
+        ]
+
+        context = ConversationContext(events=events, system_prompt="")
+        committed = context.get_committed_events()
+
+        assert len(committed) == 1
+        assert isinstance(committed[0], AgentResponse)
+        assert committed[0].content == "Hello 👋 你好 😊 مرحبا 🌟"
+
+    def test_code_snippet_in_response(self):
+        """Test code snippets in response."""
+        events = [
+            AgentResponse(content="Use the function: print('hello world')"),
+            AgentSpeechSent(content="Usethefunction:print('helloworld')"),
+        ]
+
+        context = ConversationContext(events=events, system_prompt="")
+        committed = context.get_committed_events()
+
+        assert len(committed) == 1
+        assert isinstance(committed[0], AgentResponse)
+        assert committed[0].content == "Use the function: print('hello world')"
+
+    def test_url_in_response(self):
+        """Test URLs in responses."""
+        events = [
+            AgentResponse(content="Visit https://example.com for more info!"),
+            AgentSpeechSent(content="Visithttps://example.comformoreinfo!"),
+        ]
+
+        context = ConversationContext(events=events, system_prompt="")
+        committed = context.get_committed_events()
+
+        assert len(committed) == 1
+        assert isinstance(committed[0], AgentResponse)
+        assert committed[0].content == "Visit https://example.com for more info!"
+
+    def test_email_in_response(self):
+        """Test email addresses in responses."""
+        events = [
+            AgentResponse(content="Contact us at support@example.com today!"),
+            AgentSpeechSent(content="Contactusatsupport@example.comtoday!"),
+        ]
+
+        context = ConversationContext(events=events, system_prompt="")
+        committed = context.get_committed_events()
+
+        assert len(committed) == 1
+        assert isinstance(committed[0], AgentResponse)
+        assert committed[0].content == "Contact us at support@example.com today!"
+
+    def test_case_sensitivity_preserved(self):
+        """Test that case is preserved correctly."""
+        events = [
+            AgentResponse(content="HELLO World! HoW ArE yOu?"),
+            AgentSpeechSent(content="HELLOWorld!HoWArEyOu?"),
+        ]
+
+        context = ConversationContext(events=events, system_prompt="")
+        committed = context.get_committed_events()
+
+        assert len(committed) == 1
+        assert isinstance(committed[0], AgentResponse)
+        assert committed[0].content == "HELLO World! HoW ArE yOu?"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
