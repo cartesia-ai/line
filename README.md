@@ -51,3 +51,16 @@ pip install cartesia-line
   > While Cartesia approves each example, they are implemented and maintained by our partners.
 - **Full API reference**: [docs.cartesia.ai/line](https://docs.cartesia.ai/line/)
 - **Get help**: [Discord community](https://discord.gg/cartesia)
+
+## Releasing to pypi
+CI automatically releases to pypi if you change the version number.
+
+To do this:
+1. Review the commits between the previous version and the one you are about to release
+
+    * Also double check by diffing the two commits
+
+1. Bump the version number in `pyproject.toml`
+    *  Note that can only [change the version number](https://github.com/cartesia-ai/line/blob/main/.github/workflows/version-check.yaml#L39) in that PR e.g. make a PR that looks like this https://github.com/cartesia-ai/line/pull/4
+1. Once merged, ensure that the `Build and Publish` [workflow](https://github.com/cartesia-ai/line/actions/workflows/publish-to-pypi.yaml) succeeds
+    * Please verify that the version gets incremented on our pypi page: https://pypi.org/project/cartesia-line/
