@@ -19,6 +19,7 @@ from line.events import (
 
 NORMAL_CHARACTERS_REGEX = r"(\s+|[^\w\s]+)"
 
+
 @dataclass
 class ConversationContext:
     """
@@ -83,7 +84,7 @@ class ConversationContext:
                 committed_events.append(event)
 
         return committed_events
-        
+
     def _parse_committed(self, pending_text: str, speech_text: str) -> tuple[str, list[str]]:
         pending_parts = list(filter(lambda x: x != "", re.split(NORMAL_CHARACTERS_REGEX, pending_text)))
         speech_parts = list(filter(lambda x: x != "", re.split(NORMAL_CHARACTERS_REGEX, speech_text)))
@@ -91,7 +92,7 @@ class ConversationContext:
         # If the pending text has no spaces (ex. non-latin languages), we can just commit the entire pending text.
         if len([x for x in pending_parts if x.isspace()]) == 0:
             return speech_text, ""
-        
+
         committed_parts = []
         still_pending_text = []
         for pending_part in pending_parts:
@@ -100,7 +101,7 @@ class ConversationContext:
                 still_pending_text.extend(pending_part)
             # If the next pending text matches the start of what's been marked committed (as sent by TTS), add it to committed and trim it from committed_text.
             elif speech_parts[0].startswith(pending_part):
-                speech_parts[0] = speech_parts[0][len(pending_part):]
+                speech_parts[0] = speech_parts[0][len(pending_part) :]
                 committed_parts.extend(pending_part)
                 if len(speech_parts[0]) == 0:
                     speech_parts.pop(0)
@@ -110,7 +111,6 @@ class ConversationContext:
             # Otherwise, this part isn't aligned with the committed speech (possibly an interruption or TTS mismatch); skip it.
             else:
                 pass
-            
 
         committed_str = "".join(committed_parts).strip()
         return committed_str, "".join(still_pending_text)

@@ -19,10 +19,10 @@ class TestGetCommittedEvents:
             AgentResponse(content="Hello world!"),
             AgentSpeechSent(content="Helloworld!"),
         ]
-        
+
         context = ConversationContext(events=events, system_prompt="")
         committed = context.get_committed_events()
-        
+
         assert len(committed) == 1
         assert isinstance(committed[0], AgentResponse)
         assert committed[0].content == "Hello world!"
@@ -33,10 +33,10 @@ class TestGetCommittedEvents:
             AgentResponse(content="Hello world! How are you today?"),
             AgentSpeechSent(content="Helloworld!How"),  # Interrupted after "How"
         ]
-        
+
         context = ConversationContext(events=events, system_prompt="")
         committed = context.get_committed_events()
-        
+
         # Should return AgentResponse with only what was actually spoken
         assert len(committed) == 1
         assert isinstance(committed[0], AgentResponse)
@@ -51,10 +51,10 @@ class TestGetCommittedEvents:
             AgentResponse(content=" world!"),
             AgentSpeechSent(content="Helloworld!"),
         ]
-        
+
         context = ConversationContext(events=events, system_prompt="")
         committed = context.get_committed_events()
-        
+
         assert len(committed) == 1
         assert isinstance(committed[0], AgentResponse)
         assert committed[0].content == "Hello world!"
@@ -65,10 +65,10 @@ class TestGetCommittedEvents:
             AgentResponse(content="Hello!\n\nHow are you?"),
             AgentSpeechSent(content="Hello!How"),  # Interrupted after "How"
         ]
-        
+
         context = ConversationContext(events=events, system_prompt="")
         committed = context.get_committed_events()
-        
+
         assert len(committed) == 1
         assert isinstance(committed[0], AgentResponse)
         assert committed[0].content == "Hello!\n\nHow"
@@ -76,27 +76,37 @@ class TestGetCommittedEvents:
     def test_real_world_conversation(self):
         """Test real-world conversation with multiple interruptions and continuations."""
         events = [
-            AgentResponse(content="Let's play 20 questions! When you have your item in mind, just say start."),
+            AgentResponse(
+                content="Let's play 20 questions! When you have your item in mind, just say start."
+            ),
             AgentSpeechSent(content="Let's"),  # Interrupted!
-            UserTranscriptionReceived(content='Yeah.'),
+            UserTranscriptionReceived(content="Yeah."),
             AgentSpeechSent(content=" play 20 questions! When you have your item in mind, just say start."),
-            AgentResponse(content="Alright, I'm ready to play! I'll try my best to guess what you're thinking of.\n\nQuestion 1: Is it an animal?"),
-            AgentSpeechSent(content="Alright,I'mreadytoplay!I'lltrymybesttoguesswhatyou'rethinkingof.Question1:Isitananimal?"),
+            AgentResponse(
+                content="Alright, I'm ready to play! I'll try my best to guess what you're thinking of.\n\nQuestion 1: Is it an animal?"
+            ),
+            AgentSpeechSent(
+                content="Alright,I'mreadytoplay!I'lltrymybesttoguesswhatyou'rethinkingof.Question1:Isitananimal?"
+            ),
             UserTranscriptionReceived(content="No. It's not an animal."),
-            AgentResponse(content='Okay, not an animal! That narrows it down a bit.\n\nQuestion 2: Is it a physical object?'),
-            AgentSpeechSent(content='Okay,notananimal!'),  # Interrupted!
-            UserTranscriptionReceived(content='Good call to go.'),
-            AgentResponse(content='Question 2: Is it a physical object?'),
-            AgentSpeechSent(content='Question2:Isitaphysicalobject?'),
+            AgentResponse(
+                content="Okay, not an animal! That narrows it down a bit.\n\nQuestion 2: Is it a physical object?"
+            ),
+            AgentSpeechSent(content="Okay,notananimal!"),  # Interrupted!
+            UserTranscriptionReceived(content="Good call to go."),
+            AgentResponse(content="Question 2: Is it a physical object?"),
+            AgentSpeechSent(content="Question2:Isitaphysicalobject?"),
             UserTranscriptionReceived(content="No. It's not a physical object."),
-            AgentResponse(content='Interesting! Not a physical object.\n\nQuestion 3: Is it an abstract concept or idea?'),
-            AgentSpeechSent(content='Interesting!Notaphysicalobject.'),
-            UserTranscriptionReceived(content='What was question'),
+            AgentResponse(
+                content="Interesting! Not a physical object.\n\nQuestion 3: Is it an abstract concept or idea?"
+            ),
+            AgentSpeechSent(content="Interesting!Notaphysicalobject."),
+            UserTranscriptionReceived(content="What was question"),
         ]
-        
+
         context = ConversationContext(events=events, system_prompt="")
         committed = context.get_committed_events()
-        
+
         # Expected: 10 events total
         # 1. AgentResponse: "Let's play 20 questions! When you have your item in mind, just say start."
         # 2. AgentSpeechSent: "Let's" (matched from first speech)
@@ -110,49 +120,52 @@ class TestGetCommittedEvents:
         # 9. AgentResponse: 'Interesting! Not a physical object.'
         # 10. UserTranscription: 'What was question'
         assert len(committed) == 11
-        
+
         # Check first committed response (interrupted)
         assert isinstance(committed[0], AgentResponse)
         assert committed[0].content == "Let's"
-        
+
         # Check first user message
         assert isinstance(committed[1], UserTranscriptionReceived)
-        assert committed[1].content == 'Yeah.'
-        
+        assert committed[1].content == "Yeah."
+
         assert isinstance(committed[2], AgentResponse)
         assert committed[2].content == "play 20 questions! When you have your item in mind, just say start."
-        
+
         # Check second committed response (full)
         assert isinstance(committed[3], AgentResponse)
-        assert committed[3].content == "Alright, I'm ready to play! I'll try my best to guess what you're thinking of.\n\nQuestion 1: Is it an animal?"
-        
+        assert (
+            committed[3].content
+            == "Alright, I'm ready to play! I'll try my best to guess what you're thinking of.\n\nQuestion 1: Is it an animal?"
+        )
+
         # Check second user message
         assert isinstance(committed[4], UserTranscriptionReceived)
         assert committed[4].content == "No. It's not an animal."
-        
+
         # Check third committed response (interrupted - only "Okay, not an animal!")
         assert isinstance(committed[5], AgentResponse)
-        assert committed[5].content == 'Okay, not an animal!'
-        
+        assert committed[5].content == "Okay, not an animal!"
+
         # Check third user message
         assert isinstance(committed[6], UserTranscriptionReceived)
-        assert committed[6].content == 'Good call to go.'
-        
+        assert committed[6].content == "Good call to go."
+
         # Check fourth committed response (continuation from pending)
         assert isinstance(committed[7], AgentResponse)
-        assert committed[7].content == 'Question 2: Is it a physical object?'
-        
+        assert committed[7].content == "Question 2: Is it a physical object?"
+
         # Check fourth user message
         assert isinstance(committed[8], UserTranscriptionReceived)
         assert committed[8].content == "No. It's not a physical object."
-        
+
         # Check fifth user message (no agent response committed yet)
         assert isinstance(committed[9], AgentResponse)
-        assert committed[9].content == 'Interesting! Not a physical object.'
-        
+        assert committed[9].content == "Interesting! Not a physical object."
+
         # Check sixth user message
         assert isinstance(committed[10], UserTranscriptionReceived)
-        assert committed[10].content == 'What was question'
+        assert committed[10].content == "What was question"
 
     def test_user_transcription_passed_through(self):
         """Test that UserTranscriptionReceived events are passed through unchanged."""
@@ -162,10 +175,10 @@ class TestGetCommittedEvents:
             AgentSpeechSent(content="Hello!"),
             UserTranscriptionReceived(content="How are you?"),
         ]
-        
+
         context = ConversationContext(events=events, system_prompt="")
         committed = context.get_committed_events()
-        
+
         assert len(committed) == 3
         assert isinstance(committed[0], UserTranscriptionReceived)
         assert committed[0].content == "Hi there"
@@ -183,10 +196,10 @@ class TestGetCommittedEvents:
             AgentResponse(content="How are you?"),
             AgentSpeechSent(content="Howareyou?"),
         ]
-        
+
         context = ConversationContext(events=events, system_prompt="")
         committed = context.get_committed_events()
-        
+
         assert len(committed) == 3
         assert isinstance(committed[0], AgentResponse)
         assert committed[0].content == "Hello!"
@@ -203,10 +216,10 @@ class TestGetCommittedEvents:
             # In real scenario, there would be another speech event later
             # but pending text should carry over
         ]
-        
+
         context = ConversationContext(events=events, system_prompt="")
         committed = context.get_committed_events()
-        
+
         # Should only commit what was actually spoken (with formatting preserved)
         assert len(committed) == 1
         assert isinstance(committed[0], AgentResponse)
@@ -216,7 +229,7 @@ class TestGetCommittedEvents:
         """Test with no events."""
         context = ConversationContext(events=[], system_prompt="")
         committed = context.get_committed_events()
-        
+
         assert len(committed) == 0
 
     def test_only_user_events(self):
@@ -225,10 +238,10 @@ class TestGetCommittedEvents:
             UserTranscriptionReceived(content="Hello"),
             UserTranscriptionReceived(content="How are you?"),
         ]
-        
+
         context = ConversationContext(events=events, system_prompt="")
         committed = context.get_committed_events()
-        
+
         assert len(committed) == 2
         assert all(isinstance(e, UserTranscriptionReceived) for e in committed)
 
@@ -238,10 +251,10 @@ class TestGetCommittedEvents:
             AgentResponse(content="Hello"),
             UserTranscriptionReceived(content="Hi"),
         ]
-        
+
         context = ConversationContext(events=events, system_prompt="")
         committed = context.get_committed_events()
-        
+
         # AgentResponse without speech should not be committed
         assert len(committed) == 1
         assert isinstance(committed[0], UserTranscriptionReceived)
@@ -254,10 +267,10 @@ class TestGetCommittedEvents:
             AgentResponse(content="! How are you?"),
             AgentSpeechSent(content="Helloworld!How"),  # Matches across all three responses
         ]
-        
+
         context = ConversationContext(events=events, system_prompt="")
         committed = context.get_committed_events()
-        
+
         assert len(committed) == 1
         assert isinstance(committed[0], AgentResponse)
         assert committed[0].content == "Hello world! How"
@@ -268,10 +281,10 @@ class TestGetCommittedEvents:
             AgentResponse(content="你好！今天天气怎么样？"),  # "Hello! How's the weather today?"
             AgentSpeechSent(content="你好！今天天气怎么样？"),  # TTS with all text
         ]
-        
+
         context = ConversationContext(events=events, system_prompt="")
         committed = context.get_committed_events()
-        
+
         assert len(committed) == 1
         assert isinstance(committed[0], AgentResponse)
         assert committed[0].content == "你好！今天天气怎么样？"
@@ -282,10 +295,10 @@ class TestGetCommittedEvents:
             AgentResponse(content="你好！今天天气怎么样？"),  # "Hello! How's the weather today?"
             AgentSpeechSent(content="你好！今天"),  # TTS interrupted after "Hello! Today"
         ]
-        
+
         context = ConversationContext(events=events, system_prompt="")
         committed = context.get_committed_events()
-        
+
         assert len(committed) == 1
         assert isinstance(committed[0], AgentResponse)
         assert committed[0].content == "你好！今天"
@@ -296,10 +309,10 @@ class TestGetCommittedEvents:
             AgentResponse(content="Hello 你好! How are you 今天好吗?"),
             AgentSpeechSent(content="Hello你好!Howareyou今天好吗?"),
         ]
-        
+
         context = ConversationContext(events=events, system_prompt="")
         committed = context.get_committed_events()
-        
+
         assert len(committed) == 1
         assert isinstance(committed[0], AgentResponse)
         assert committed[0].content == "Hello 你好! How are you 今天好吗?"
@@ -313,10 +326,10 @@ class TestGetCommittedEvents:
             AgentResponse(content="好的，你准备好了吗？"),  # "Okay, are you ready?"
             AgentSpeechSent(content="好的，你准备好了吗？"),
         ]
-        
+
         context = ConversationContext(events=events, system_prompt="")
         committed = context.get_committed_events()
-        
+
         assert len(committed) == 3
         assert isinstance(committed[0], AgentResponse)
         assert committed[0].content == "我想问你"
@@ -333,10 +346,10 @@ class TestGetCommittedEvents:
             AgentResponse(content="Third response."),
             AgentSpeechSent(content="Firstresponse.Second"),  # Interrupted in second response
         ]
-        
+
         context = ConversationContext(events=events, system_prompt="")
         committed = context.get_committed_events()
-        
+
         assert len(committed) == 1
         assert isinstance(committed[0], AgentResponse)
         # Should preserve the space separator added during concatenation
