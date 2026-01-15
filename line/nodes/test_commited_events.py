@@ -84,14 +84,20 @@ class TestGetCommittedEvents:
             UserTranscriptionReceived(content="Yeah."),
             AgentSpeechSent(content=" play 20 questions! When you have your item in mind, just say start."),
             AgentResponse(
-                content="Alright, I'm ready to play! I'll try my best to guess what you're thinking of.\n\nQuestion 1: Is it an animal?"
+                content=(
+                    "Alright, I'm ready to play! I'll try my best to guess what you're "
+                    "thinking of.\n\nQuestion 1: Is it an animal?"
+                )
             ),
             AgentSpeechSent(
                 content="Alright,I'mreadytoplay!I'lltrymybesttoguesswhatyou'rethinkingof.Question1:Isitananimal?"
             ),
             UserTranscriptionReceived(content="No. It's not an animal."),
             AgentResponse(
-                content="Okay, not an animal! That narrows it down a bit.\n\nQuestion 2: Is it a physical object?"
+                content=(
+                    "Okay, not an animal! That narrows it down a bit.\n\nQuestion 2: "
+                    "Is it a physical object?"
+                )
             ),
             AgentSpeechSent(content="Okay,notananimal!"),  # Interrupted!
             UserTranscriptionReceived(content="Good call to go."),
@@ -99,7 +105,10 @@ class TestGetCommittedEvents:
             AgentSpeechSent(content="Question2:Isitaphysicalobject?"),
             UserTranscriptionReceived(content="No. It's not a physical object."),
             AgentResponse(
-                content="Interesting! Not a physical object.\n\nQuestion 3: Is it an abstract concept or idea?"
+                content=(
+                    "Interesting! Not a physical object.\n\nQuestion 3: "
+                    "Is it an abstract concept or idea?"
+                )
             ),
             AgentSpeechSent(content="Interesting!Notaphysicalobject."),
             UserTranscriptionReceived(content="What was question"),
@@ -137,7 +146,10 @@ class TestGetCommittedEvents:
         assert isinstance(committed[3], AgentResponse)
         assert (
             committed[3].content
-            == "Alright, I'm ready to play! I'll try my best to guess what you're thinking of.\n\nQuestion 1: Is it an animal?"
+            == (
+                "Alright, I'm ready to play! I'll try my best to guess what you're "
+                "thinking of.\n\nQuestion 1: Is it an animal?"
+            )
         )
 
         # Check second user message

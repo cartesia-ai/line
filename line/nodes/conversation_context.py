@@ -88,26 +88,28 @@ class ConversationContext:
         pending_parts = list(filter(lambda x: x != "", re.split(NORMAL_CHARACTERS_REGEX, pending_text)))
         speech_parts = list(filter(lambda x: x != "", re.split(NORMAL_CHARACTERS_REGEX, speech_text)))
 
-        # If the pending text has no spaces (ex. non-latin languages), we can just commit the entire pending text.
+        # If the pending text has no spaces (ex. non-latin languages), commit the entire pending text.
         if len([x for x in pending_parts if x.isspace()]) == 0:
             return speech_text, ""
 
         committed_parts = []
         still_pending_text = []
         for pending_part in pending_parts:
-            # If nothing is left to commit from the agent (speech_text is empty), treat all remaining pending parts as still pending.
+            #If speech_text is empty), treat remaining pending parts as still pending.
             if not speech_parts:
                 still_pending_text.extend(pending_part)
-            # If the next pending text matches the start of what's been marked committed (as sent by TTS), add it to committed and trim it from committed_text.
+            # If the next pending text matches the start of what's been marked committed (as sent by TTS), 
+            # add it to committed and trim it from speech_parts.
             elif speech_parts[0].startswith(pending_part):
                 speech_parts[0] = speech_parts[0][len(pending_part) :]
                 committed_parts.extend(pending_part)
                 if len(speech_parts[0]) == 0:
                     speech_parts.pop(0)
-            # If the part is purely whitespace, add it directly to the committed parts (we don't want to lose formatting).
+            # If the part is purely whitespace, add it directly to committed_parts.
             elif pending_part.isspace():
                 committed_parts.extend(pending_part)
-            # Otherwise, this part isn't aligned with the committed speech (possibly an interruption or TTS mismatch); skip it.
+            # Otherwise, this part isn't aligned with the committed speech 
+            # (possibly an interruption or TTS mismatch); 
             else:
                 pass
 
