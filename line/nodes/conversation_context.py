@@ -95,10 +95,10 @@ class ConversationContext:
         committed_parts = []
         still_pending_text = []
         for pending_part in pending_parts:
-            #If speech_text is empty), treat remaining pending parts as still pending.
+            # If speech_text is empty), treat remaining pending parts as still pending.
             if not speech_parts:
                 still_pending_text.extend(pending_part)
-            # If the next pending text matches the start of what's been marked committed (as sent by TTS), 
+            # If the next pending text matches the start of what's been marked committed (as sent by TTS),
             # add it to committed and trim it from speech_parts.
             elif speech_parts[0].startswith(pending_part):
                 speech_parts[0] = speech_parts[0][len(pending_part) :]
@@ -108,8 +108,8 @@ class ConversationContext:
             # If the part is purely whitespace, add it directly to committed_parts.
             elif pending_part.isspace():
                 committed_parts.extend(pending_part)
-            # Otherwise, this part isn't aligned with the committed speech 
-            # (possibly an interruption or TTS mismatch); 
+            # Otherwise, this part isn't aligned with the committed speech
+            # (possibly an interruption or TTS mismatch);
             else:
                 pass
 

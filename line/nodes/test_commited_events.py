@@ -95,8 +95,7 @@ class TestGetCommittedEvents:
             UserTranscriptionReceived(content="No. It's not an animal."),
             AgentResponse(
                 content=(
-                    "Okay, not an animal! That narrows it down a bit.\n\nQuestion 2: "
-                    "Is it a physical object?"
+                    "Okay, not an animal! That narrows it down a bit.\n\nQuestion 2: Is it a physical object?"
                 )
             ),
             AgentSpeechSent(content="Okay,notananimal!"),  # Interrupted!
@@ -106,8 +105,7 @@ class TestGetCommittedEvents:
             UserTranscriptionReceived(content="No. It's not a physical object."),
             AgentResponse(
                 content=(
-                    "Interesting! Not a physical object.\n\nQuestion 3: "
-                    "Is it an abstract concept or idea?"
+                    "Interesting! Not a physical object.\n\nQuestion 3: Is it an abstract concept or idea?"
                 )
             ),
             AgentSpeechSent(content="Interesting!Notaphysicalobject."),
@@ -144,12 +142,9 @@ class TestGetCommittedEvents:
 
         # Check second committed response (full)
         assert isinstance(committed[3], AgentResponse)
-        assert (
-            committed[3].content
-            == (
-                "Alright, I'm ready to play! I'll try my best to guess what you're "
-                "thinking of.\n\nQuestion 1: Is it an animal?"
-            )
+        assert committed[3].content == (
+            "Alright, I'm ready to play! I'll try my best to guess what you're "
+            "thinking of.\n\nQuestion 1: Is it an animal?"
         )
 
         # Check second user message
