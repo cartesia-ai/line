@@ -80,6 +80,9 @@ class ConversationHarness:
         # State tracking
         self.is_running = False
 
+        # Lock to serialize WebSocket sends (prevents out-of-order delivery)
+        self._send_lock = asyncio.Lock()
+
     async def start(self):
         """
         Start the harness tasks for input and output processing
@@ -131,12 +134,13 @@ class ConversationHarness:
         return await self.input_queue.get()
 
     async def _send(self, output: OutputMessage):
-        try:
-            if not self.shutdown_event.is_set():
-                await self.websocket.send_json(output.model_dump())
-        except Exception as e:
-            logger.warning(f"Failed to send message via WebSocket: {e}")
-            self.shutdown_event.set()
+        async with self._send_lock:
+            try:
+                if not self.shutdown_event.is_set():
+                    await self.websocket.send_json(output.model_dump())
+            except Exception as e:
+                logger.warning(f"Failed to send message via WebSocket: {e}")
+                self.shutdown_event.set()
 
     async def end_call(self):
         """
