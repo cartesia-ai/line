@@ -16,7 +16,6 @@ from pydantic import TypeAdapter
 import uvicorn
 
 from line.call_request import CallRequest, PreCallResult
-from line.v02.agent import Agent, AgentEnv, AgentSpec, EventFilter
 from line.harness_types import (
     AgentSpeechInput,
     AgentStateInput,
@@ -34,6 +33,7 @@ from line.harness_types import (
     TransferOutput,
     UserStateInput,
 )
+from line.v02.agent import Agent, AgentSpec, EventFilter
 from line.v02.events import (
     AgentDTMFSent,
     AgentEndCall,
@@ -73,18 +73,23 @@ from line.v02.events import (
 
 class UserState:
     """User voice states."""
+
     SPEAKING = "speaking"
     IDLE = "idle"
+
 
 class AgentEnv:
     def __init__(self, loop: Optional[asyncio.AbstractEventLoop] = None):
         self.loop = loop
 
+
 load_dotenv()
+
+
 class VoiceAgentApp:
     """
     VoiceAgentApp handles responding ot HTTP requests and managing websocket connections
-    
+
     Uses ConversationRunner to manage the websocket loop for each connection.
     """
 
@@ -217,6 +222,7 @@ class VoiceAgentApp:
         port = port or int(os.getenv("PORT", 8000))
         uvicorn.run(self.fastapi_app, host=host, port=port)
 
+
 class ConversationRunner:
     """
     Manages the websocket loop for a single conversation.
@@ -246,19 +252,27 @@ class ConversationRunner:
 
     def _prepare_agent(
         self, agent_spec: AgentSpec
-    ) -> tuple[Callable[[InputEvent], AsyncIterable[OutputEvent]], Callable[[InputEvent], bool], Callable[[InputEvent], bool]]:
+    ) -> tuple[
+        Callable[[InputEvent], AsyncIterable[OutputEvent]],
+        Callable[[InputEvent], bool],
+        Callable[[InputEvent], bool],
+    ]:
         """Extract agent callable and filters from agent_spec."""
-        default_run = lambda ev: isinstance(ev, (CallStarted, UserTurnEnded, CallEnded))
-        default_cancel = lambda ev: isinstance(ev, UserTurnStarted)
+
+        def default_run(ev: InputEvent) -> bool:
+            return isinstance(ev, (CallStarted, UserTurnEnded, CallEnded))
+
+        def default_cancel(ev: InputEvent) -> bool:
+            return isinstance(ev, UserTurnStarted)
 
         agent_obj: Agent
         run_spec: EventFilter
-        cancel_spec: EventFilter 
+        cancel_spec: EventFilter
 
         if isinstance(agent_spec, (list, tuple)) and len(agent_spec) == 3:
             agent_obj, run_spec, cancel_spec = agent_spec
         else:
-            agent_obj = agent_spec 
+            agent_obj = agent_spec
             run_spec = default_run
             cancel_spec = default_cancel
 
@@ -266,7 +280,7 @@ class ConversationRunner:
         cancel_filter = self._normalize_filter(cancel_spec)
 
         def _agent_callable(event: InputEvent) -> AsyncIterable[OutputEvent]:
-            if hasattr(agent_obj, "process") and callable(getattr(agent_obj, "process")):
+            if hasattr(agent_obj, "process") and callable(agent_obj.process):
                 return agent_obj.process(self.env, event)  # type: ignore[return-value]
             if callable(agent_obj):
                 return agent_obj(self.env, event)  # type: ignore[return-value]
@@ -274,15 +288,15 @@ class ConversationRunner:
 
         return _agent_callable, run_filter, cancel_filter
 
-    def _normalize_filter(
-        self, filter_spec: EventFilter
-    ) -> Callable[[InputEvent], bool]:
+    def _normalize_filter(self, filter_spec: EventFilter) -> Callable[[InputEvent], bool]:
         """Normalize EventFilter spec to a callable."""
         if callable(filter_spec):
             return filter_spec  # type: ignore[return-value]
         if isinstance(filter_spec, (list, tuple)):
+
             def _fn(event: InputEvent) -> bool:
                 return any(isinstance(event, cls) for cls in filter_spec)  # type: ignore[arg-type]
+
             return _fn
         raise TypeError("EventFilter must be callable or list")
 
@@ -291,7 +305,7 @@ class ConversationRunner:
     async def run(self):
         """
         Run the conversation loop.
-        
+
         Processes incoming websocket messages until shutdown.
         """
         # Emit call_started to seed history/context
@@ -407,7 +421,12 @@ class ConversationRunner:
                 content = self._turn_content(
                     history,
                     SpecificAgentTurnStarted,
-                    (SpecificAgentTextSent, SpecificAgentDTMFSent, SpecificAgentToolCalled, SpecificAgentToolReturned),
+                    (
+                        SpecificAgentTextSent,
+                        SpecificAgentDTMFSent,
+                        SpecificAgentToolCalled,
+                        SpecificAgentToolReturned,
+                    ),
                 )
                 return self._wrap_with_history(history, SpecificAgentTurnEnded(content=content))
 
@@ -437,7 +456,9 @@ class ConversationRunner:
                 return [ev for ev in history[idx + 1 :] if isinstance(ev, content_types)]
         return []
 
-    def _wrap_with_history(self, history: List[SpecificInputEvent], specific_event: SpecificInputEvent) -> tuple[InputEvent, List[SpecificInputEvent]]:
+    def _wrap_with_history(
+        self, history: List[SpecificInputEvent], specific_event: SpecificInputEvent
+    ) -> tuple[InputEvent, List[SpecificInputEvent]]:
         """Create an InputEvent including history from a SpecificInputEvent."""
         history = history + [specific_event]
         base_data = specific_event.model_dump()
