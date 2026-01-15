@@ -99,7 +99,8 @@ class ConversationContext:
         """
         Match AgentResponse text against whitespace-free AgentSpeechSent text.
 
-        Performs character-by-character matching while preserving whitespace from AgentResponse text. Stops at first mismatch.
+        Performs character-by-character matching while preserving whitespace from AgentResponse text. 
+        Stops at first mismatch.
 
         Args:
             formatted_text: AgentResponse content with spaces/newlines (e.g., "Hello world!\n")
