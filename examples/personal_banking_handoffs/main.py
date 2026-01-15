@@ -9,7 +9,6 @@ logger = logging.getLogger(__name__)
 
 
 async def handle_new_call(system: VoiceAgentSystem, _call_request: CallRequest):
-    print("Starting new call", _call_request)
     chat_node = ChatNode()
     chat_bridge = Bridge(chat_node)
     system.with_speaking_node(chat_node, chat_bridge)
