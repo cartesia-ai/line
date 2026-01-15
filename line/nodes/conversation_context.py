@@ -7,6 +7,8 @@ to specialized processing methods in ReasoningNode subclasses.
 
 from dataclasses import dataclass, field
 from typing import Any, List, Optional
+import re
+from loguru import logger
 
 from line.events import (
     AgentResponse,
@@ -63,118 +65,40 @@ class ConversationContext:
         self.metadata[key] = value
 
     def get_committed_events(self) -> list[EventInstance]:
-        """
-        Get all transcript turns that were actually spoken by the agent.
-
-        Matches AgentResponse events (with formatting) against AgentSpeechSent events
-        (without spaces) to preserve original formatting for LLM context.
-
-        Returns:
-            List of committed events: where the AgentResponse events
-            were confirmed spoken via AgentSpeechSent.
-        """
-        pending_responses = []
+        logger.info(f"🧠 Getting committed events: {self.events}")
+        pending_text = ""
         committed_events = []
-
         for event in self.events:
             if isinstance(event, AgentResponse):
-                pending_responses.append(event)
+                pending_text = pending_text + event.content
             elif isinstance(event, AgentSpeechSent):
-                committed = self._process_speech_event(
+                committed_text, pending_text = self._parse_committed(
+                    pending_text,
                     event.content,
-                    pending_responses,
                 )
-                committed_events.extend(committed)
+                if committed_text.strip():  # Only add if there's actual content
+                    committed_events.append(AgentResponse(content=committed_text))
             # All other events are committed as is
             else:
                 committed_events.append(event)
 
         return committed_events
-
-    @staticmethod
-    def _match_formatted_text_to_speech(
-        formatted_text: str, speech_no_whitespace: str
-    ) -> tuple[str, int, int]:
-        """
-        Match AgentResponse text against whitespace-free AgentSpeechSent text.
-
-        Performs character-by-character matching while preserving whitespace from AgentResponse text.
-        Stops at first mismatch.
-
-        Args:
-            formatted_text: AgentResponse content with spaces/newlines (e.g., "Hello world!\n")
-            speech_no_whitespace: AgentSpeechSent content without whitespace (e.g., "Helloworld!")
-
-        Returns:
-            (matched_content_with_formatting, chars_consumed_from_response, chars_consumed_from_speech)
-        """
-        matched_chars = []
-        response_idx = 0
-        speech_idx = 0
-
-        while speech_idx < len(speech_no_whitespace) and response_idx < len(formatted_text):
-            char = formatted_text[response_idx]
-            if char.isspace():
-                # Preserve all whitespace (spaces, newlines, tabs) from original formatting
-                matched_chars.append(char)
-                response_idx += 1
-            elif char == speech_no_whitespace[speech_idx]:
-                matched_chars.append(char)
-                response_idx += 1
-                speech_idx += 1
+        
+    def _parse_committed(self, pending_text: str, committed_text: str) -> tuple[str, list[str]]:
+        pending_parts = re.split(r"(\s+)", pending_text)
+        committed_parts = []
+        still_pending_text = []
+        for pending_part in pending_parts:
+            if not committed_text:
+                still_pending_text.extend(pending_part)
+            elif pending_part.isspace():
+                committed_parts.extend(pending_part)
+            elif committed_text.startswith(pending_part):
+                committed_text = committed_text[len(pending_part):]
+                committed_parts.extend(pending_part)
             else:
-                break
+                # skipped text
+                pass
 
-        return "".join(matched_chars), response_idx, speech_idx
 
-    def _process_speech_event(
-        self,
-        speech_content: str,
-        pending_responses: list[AgentResponse],
-    ) -> list[AgentResponse]:
-        """
-        Match AgentSpeechSent content against pending AgentResponse events.
-
-        Args:
-            speech_content: Content from AgentSpeechSent (no whitespace from word-level TTS)
-            pending_responses: Pending AgentResponse events (mutated: matched items popped)
-
-        Returns:
-            List of committed AgentResponse events with preserved formatting for LLM context.
-        """
-        committed = []
-        remaining_speech = speech_content
-
-        while pending_responses and remaining_speech:
-            pending = pending_responses[0]
-            # Remove all whitespace from pending response to match against speech (which has no spaces)
-            normalized_pending = "".join(pending.content.split())
-
-            if remaining_speech.startswith(normalized_pending):
-                # Full match - commit the entire pending response
-                committed.append(pending_responses.pop(0))
-                remaining_speech = remaining_speech[len(normalized_pending) :]
-            else:
-                # Partial match - find how much matches
-                matched_content, chars_consumed_response, chars_consumed_speech = (
-                    self._match_formatted_text_to_speech(pending.content, remaining_speech)
-                )
-
-                # Part of the response was spoken and committed
-                # Only commit if there's actual content (not just whitespace or empty string)
-                if matched_content.strip():
-                    committed.append(AgentResponse(content=matched_content))
-                    remaining_content = pending.content[chars_consumed_response:]
-
-                    if remaining_content:
-                        pending_responses[0] = AgentResponse(content=remaining_content)
-                    else:
-                        pending_responses.pop(0)
-
-                    # Update remaining speech to only what wasn't spoken
-                    remaining_speech = remaining_speech[chars_consumed_speech:]
-                else:
-                    # No match - skip this entire pending response
-                    pending_responses.pop(0)
-
-        return committed
+        return "".join(committed_parts), "".join(still_pending_text)
