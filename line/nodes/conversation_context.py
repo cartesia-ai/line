@@ -6,9 +6,8 @@ to specialized processing methods in ReasoningNode subclasses.
 """
 
 from dataclasses import dataclass, field
-from typing import Any, List, Optional
 import re
-from loguru import logger
+from typing import Any, List, Optional
 
 from line.events import (
     AgentResponse,

@@ -6,8 +6,9 @@ particularly handling interruptions where speech is cut short.
 """
 
 import pytest
-from line.nodes.conversation_context import ConversationContext
+
 from line.events import AgentResponse, AgentSpeechSent, UserTranscriptionReceived
+from line.nodes.conversation_context import ConversationContext
 
 
 class TestGetCommittedEvents:
