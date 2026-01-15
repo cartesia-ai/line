@@ -13,8 +13,6 @@ from line.events import (
     AgentSpeechSent,
     EventInstance,
     UserTranscriptionReceived,
-    ToolCall,
-    ToolResult,
 )
 
 
