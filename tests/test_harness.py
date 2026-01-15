@@ -56,7 +56,5 @@ async def test_concurrent_sends_preserve_order():
 
     # This assertion FAILS without the lock, PASSES with the lock
     assert received_order == messages, (
-        f"Messages arrived out of order!\n"
-        f"Expected: {messages}\n"
-        f"Received: {received_order}"
+        f"Messages arrived out of order!\nExpected: {messages}\nReceived: {received_order}"
     )
