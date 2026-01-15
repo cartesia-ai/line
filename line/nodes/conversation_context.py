@@ -5,10 +5,10 @@ This class provides a clean abstraction for conversation data that gets passed
 to specialized processing methods in ReasoningNode subclasses.
 """
 
-from dataclasses import dataclass
-from typing import Any, List, Optional
+from dataclasses import dataclass, field
+from typing import Any, List, Optional, Union
 
-from line.events import EventInstance, UserTranscriptionReceived
+from line.events import AgentResponse, AgentSpeechSent, EventInstance, UserTranscriptionReceived
 
 
 @dataclass
@@ -27,12 +27,7 @@ class ConversationContext:
 
     events: List[EventInstance]
     system_prompt: str
-    metadata: dict = None
-
-    def __post_init__(self):
-        """Initialize metadata if not provided."""
-        if self.metadata is None:
-            self.metadata = {}
+    metadata: dict = field(default_factory=dict)
 
     def format_events(self, max_messages: int = None) -> str:
         """
@@ -64,3 +59,13 @@ class ConversationContext:
     def add_metadata(self, key: str, value: Any) -> None:
         """Add metadata for specialized processing."""
         self.metadata[key] = value
+
+    def get_committed_transcript(self) -> list[Union[UserTranscriptionReceived, AgentResponse]]:
+        """Get all committed transcript messages from the conversation events."""
+        committed_turns = []
+        for event in self.events:
+            if isinstance(event, UserTranscriptionReceived):
+                committed_turns.append(event)
+            elif isinstance(event, AgentSpeechSent):
+                committed_turns.append(AgentResponse(content=event.content))
+        return committed_turns

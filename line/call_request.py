@@ -10,6 +10,13 @@ class PreCallResult(BaseModel):
     config: Dict[str, Any] = Field(default_factory=dict, description="Configuration for the call")
 
 
+class AgentConfig(BaseModel):
+    """Agent information for the call."""
+
+    system_prompt: Optional[str] = None  # System prompt to define the agent's role and behavior
+    introduction: Optional[str] = None  # Introduction message for the agent to start the call with
+
+
 class CallRequest(BaseModel):
     """Request body for the /chats endpoint."""
 
@@ -17,6 +24,7 @@ class CallRequest(BaseModel):
     from_: str = Field(alias="from")  # Using from_ to avoid Python keyword conflict
     to: str
     agent_call_id: str  # Agent call ID for logging and correlation
+    agent: AgentConfig
     metadata: Optional[Dict[str, Any]] = None
 
     model_config = ConfigDict(

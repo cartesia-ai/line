@@ -9,7 +9,7 @@ from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconn
 from loguru import logger
 import uvicorn
 
-from line.call_request import CallRequest, PreCallResult
+from line.call_request import AgentConfig, CallRequest, PreCallResult
 from line.voice_agent_system import VoiceAgentSystem
 
 # Load environment variables from .env file
@@ -48,6 +48,10 @@ class VoiceAgentApp:
             from_=body.get("from_", "unknown"),
             to=body.get("to", "unknown"),
             agent_call_id=body.get("agent_call_id", body.get("call_id", "unknown")),
+            agent=AgentConfig(
+                system_prompt=body.get("agent", {}).get("system_prompt", ""),
+                introduction=body.get("agent", {}).get("introduction", ""),
+            ),
             metadata=body.get("metadata", {}),
         )
 
@@ -74,6 +78,7 @@ class VoiceAgentApp:
             "call_id": call_request.call_id,
             "from": call_request.from_,
             "to": call_request.to,
+            "agent": json.dumps(call_request.agent.model_dump()),  # JSON encode agent
             "agent_call_id": call_request.agent_call_id,
             "metadata": json.dumps(call_request.metadata),  # JSON encode metadata
         }
@@ -113,12 +118,25 @@ class VoiceAgentApp:
                 logger.warning(f"Invalid metadata JSON: {query_params['metadata']}")
                 metadata = {}
 
+        # Parse agent JSON
+        agent_data = {}
+        if "agent" in query_params:
+            try:
+                agent_data = json.loads(query_params["agent"])
+            except (json.JSONDecodeError, TypeError):
+                logger.error(f"Invalid agent JSON: {query_params['agent']}")
+                agent_data = {}
+
         # Create CallRequest from URL parameters
         call_request = CallRequest(
             call_id=query_params.get("call_id", "unknown"),
             from_=query_params.get("from", "unknown"),
             to=query_params.get("to", "unknown"),
             agent_call_id=query_params.get("agent_call_id", "unknown"),
+            agent=AgentConfig(
+                system_prompt=agent_data.get("system_prompt", ""),
+                introduction=agent_data.get("introduction", ""),
+            ),
             metadata=metadata,
         )
 

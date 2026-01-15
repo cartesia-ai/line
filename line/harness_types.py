@@ -40,6 +40,11 @@ class AgentSpeechInput(BaseModel):
     type: Literal["agent_speech"] = "agent_speech"
 
 
+class CustomInput(BaseModel):
+    metadata: Dict[str, object]
+    type: Literal["custom"] = "custom"
+
+
 InputMessage = Union[
     TranscriptionInput,
     DTMFInput,
@@ -47,6 +52,7 @@ InputMessage = Union[
     AgentStateInput,
     ValidationErrorInput,
     AgentSpeechInput,
+    CustomInput,
 ]
 
 
