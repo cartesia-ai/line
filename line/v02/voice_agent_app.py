@@ -6,7 +6,7 @@ import asyncio
 from datetime import datetime, timezone
 import json
 import os
-from typing import Any, Awaitable, Callable, List, Optional
+from typing import AsyncIterable, Awaitable, Callable, List, Optional
 from urllib.parse import urlencode
 
 from dotenv import load_dotenv
@@ -15,26 +15,8 @@ from loguru import logger
 from pydantic import TypeAdapter
 import uvicorn
 
-from lib.node import Node, AgentOutputEvent
 from line.call_request import CallRequest, PreCallResult
-from line.events import (
-    AgentError,
-    AgentResponse,
-    AgentSpeechSent,
-    AgentStartedSpeaking,
-    AgentStoppedSpeaking,
-    DTMFInputEvent,
-    DTMFOutputEvent,
-    EndCall,
-    EventInstance,
-    LogMetric,
-    ToolResult,
-    TransferCall,
-    UserStartedSpeaking,
-    UserStoppedSpeaking,
-    UserTranscriptionReceived,
-    UserUnknownInputReceived,
-)
+from line.v02.agent import Agent, AgentEnv, AgentSpec, EventFilter
 from line.harness_types import (
     AgentSpeechInput,
     AgentStateInput,
@@ -43,6 +25,7 @@ from line.harness_types import (
     EndCallOutput,
     ErrorOutput,
     InputMessage,
+    LogEventOutput,
     LogMetricOutput,
     MessageOutput,
     OutputMessage,
@@ -51,7 +34,41 @@ from line.harness_types import (
     TransferOutput,
     UserStateInput,
 )
-from line.nodes.conversation_context import ConversationContext
+from line.v02.events import (
+    AgentDTMFSent,
+    AgentEndCall,
+    AgentSendDTMF,
+    AgentSendText,
+    AgentTextSent,
+    AgentToolCalled,
+    AgentToolReturned,
+    AgentTransferCall,
+    AgentTurnEnded,
+    AgentTurnStarted,
+    CallEnded,
+    CallStarted,
+    InputEvent,
+    LogMessage,
+    LogMetric,
+    OutputEvent,
+    SpecificAgentDTMFSent,
+    SpecificAgentTextSent,
+    SpecificAgentToolCalled,
+    SpecificAgentToolReturned,
+    SpecificAgentTurnEnded,
+    SpecificAgentTurnStarted,
+    SpecificCallEnded,
+    SpecificCallStarted,
+    SpecificInputEvent,
+    SpecificUserDtmfSent,
+    SpecificUserTextSent,
+    SpecificUserTurnEnded,
+    SpecificUserTurnStarted,
+    UserDtmfSent,
+    UserTextSent,
+    UserTurnEnded,
+    UserTurnStarted,
+)
 
 
 class UserState:
@@ -59,48 +76,28 @@ class UserState:
     SPEAKING = "speaking"
     IDLE = "idle"
 
-
-class CartesiaEnv:
-    """
-    Environment context for Cartesia voice agent operations.
-    
-    Provides access to the asyncio event loop for scheduling async operations
-    from synchronous contexts (e.g., RxPY callbacks).
-    """
-
-    def __init__(self, loop: asyncio.AbstractEventLoop):
-        """
-        Initialize the CartesiaEnv.
-
-        Args:
-            loop: The asyncio event loop to use for async operations.
-        """
-        self._loop = loop
-
-    @property
-    def loop(self) -> asyncio.AbstractEventLoop:
-        """Get the asyncio event loop."""
-        return self._loop
-
+class AgentEnv:
+    def __init__(self, loop: Optional[asyncio.AbstractEventLoop] = None):
+        self.loop = loop
 
 load_dotenv()
 class VoiceAgentApp:
     """
-    VoiceAgentApp handles HTTP and websocket communication for voice agents.
+    VoiceAgentApp handles responding ot HTTP requests and managing websocket connections
     
     Uses ConversationRunner to manage the websocket loop for each connection.
     """
 
     def __init__(
         self,
-        get_agent: Callable[["CartesiaEnv", CallRequest], Awaitable[Node]],
+        get_agent: Callable[[AgentEnv, CallRequest], Awaitable[AgentSpec]],
         pre_call_handler: Optional[Callable[[CallRequest], Awaitable[Optional[PreCallResult]]]] = None,
     ):
         """
         Initialize the VoiceAgentApp.
 
         Args:
-            get_agent: Async function that creates a Node from CartesiaEnv and CallRequest.
+            get_agent: Async function that creates a Node from AgentEnv and CallRequest.
             pre_call_handler: Optional async function to configure call settings before connection.
         """
         self.fastapi_app = FastAPI()
@@ -191,13 +188,13 @@ class VoiceAgentApp:
         runner: Optional[ConversationRunner] = None
 
         try:
-            # Create the CartesiaEnv with the current event loop
+            # Create the AgentEnv with the current event loop
             loop = asyncio.get_running_loop()
-            env = CartesiaEnv(loop)
-            agent = await self.get_agent(env, call_request)
+            env = AgentEnv(loop)
+            agent_spec = await self.get_agent(env, call_request)
 
             # Create and run the conversation runner
-            runner = ConversationRunner(websocket, agent)
+            runner = ConversationRunner(websocket, agent_spec, env)
             await runner.run()
 
         except WebSocketDisconnect:
@@ -212,7 +209,7 @@ class VoiceAgentApp:
                     pass
         finally:
             if runner:
-                runner.shutdown_event.set()
+                await runner.shutdown()
             logger.info("Websocket session ended")
 
     def run(self, host="0.0.0.0", port=None):
@@ -223,37 +220,83 @@ class VoiceAgentApp:
 class ConversationRunner:
     """
     Manages the websocket loop for a single conversation.
-    
-    Aggregates incoming events into ConversationContext, passes them to the Node,
-    and serializes Node output events back to the websocket.
+    Converts websocket messages to v0.2 InputEvents, applies run/cancel filters,
+    drives the agent async iterable, and serializes agent OutputEvents back to
+    the websocket.
     """
 
-    def __init__(self, websocket: WebSocket, agent: Node):
+    def __init__(self, websocket: WebSocket, agent_spec: AgentSpec, env: AgentEnv):
         """
         Initialize the ConversationRunner.
 
         Args:
             websocket: The WebSocket connection.
-            agent: The Node to process conversation events.
+            agent_spec: Agent or (Agent, run_filter, cancel_filter).
+            env: Environment passed to the agent.
         """
         self.websocket = websocket
-        self.agent = agent
+        self.env = env
         self.shutdown_event = asyncio.Event()
-        self.events: List[EventInstance] = []
+        self.history: List[SpecificInputEvent] = []
+
+        self.agent_callable, self.run_filter, self.cancel_filter = self._prepare_agent(agent_spec)
+        self.agent_task: Optional[asyncio.Task] = None
+
+    ######### Initialization Methods #########
+
+    def _prepare_agent(
+        self, agent_spec: AgentSpec
+    ) -> tuple[Callable[[InputEvent], AsyncIterable[OutputEvent]], Callable[[InputEvent], bool], Callable[[InputEvent], bool]]:
+        """Extract agent callable and filters from agent_spec."""
+        default_run = lambda ev: isinstance(ev, (CallStarted, UserTurnEnded, CallEnded))
+        default_cancel = lambda ev: isinstance(ev, UserTurnStarted)
+
+        agent_obj: Agent
+        run_spec: EventFilter
+        cancel_spec: EventFilter 
+
+        if isinstance(agent_spec, (list, tuple)) and len(agent_spec) == 3:
+            agent_obj, run_spec, cancel_spec = agent_spec
+        else:
+            agent_obj = agent_spec 
+            run_spec = default_run
+            cancel_spec = default_cancel
+
+        run_filter = self._normalize_filter(run_spec)
+        cancel_filter = self._normalize_filter(cancel_spec)
+
+        def _agent_callable(event: InputEvent) -> AsyncIterable[OutputEvent]:
+            if hasattr(agent_obj, "process") and callable(getattr(agent_obj, "process")):
+                return agent_obj.process(self.env, event)  # type: ignore[return-value]
+            if callable(agent_obj):
+                return agent_obj(self.env, event)  # type: ignore[return-value]
+            raise TypeError("Agent must be callable or have a callable 'process' method.")
+
+        return _agent_callable, run_filter, cancel_filter
+
+    def _normalize_filter(
+        self, filter_spec: EventFilter
+    ) -> Callable[[InputEvent], bool]:
+        """Normalize EventFilter spec to a callable."""
+        if callable(filter_spec):
+            return filter_spec  # type: ignore[return-value]
+        if isinstance(filter_spec, (list, tuple)):
+            def _fn(event: InputEvent) -> bool:
+                return any(isinstance(event, cls) for cls in filter_spec)  # type: ignore[arg-type]
+            return _fn
+        raise TypeError("EventFilter must be callable or list")
+
+    ######### Run Loop Methods #########
 
     async def run(self):
         """
         Run the conversation loop.
         
-        Subscribes to agent output, then processes incoming websocket messages
-        until shutdown.
+        Processes incoming websocket messages until shutdown.
         """
-        # Subscribe to agent output events
-        self.agent.out.subscribe(
-            on_next=self._on_agent_output,
-            on_error=self._on_agent_error,
-            on_completed=self._on_agent_complete,
-        )
+        # Emit call_started to seed history/context
+        start_event, self.history = self._wrap_with_history(self.history, SpecificCallStarted())
+        await self._handle_filters(start_event)
 
         while not self.shutdown_event.is_set():
             try:
@@ -262,20 +305,15 @@ class ConversationRunner:
                 input_msg = TypeAdapter(InputMessage).validate_python(message)
 
                 # Map to events
-                new_events = self._map_to_events(input_msg)
-                self.events.extend(new_events)
+                ev, self.history = self._map_input_event(self.history, input_msg)
 
-                # Build ConversationContext and pass to agent
-                context = ConversationContext(
-                    events=self.events.copy(),
-                    system_prompt="",  # Agent manages its own system prompt
-                )
-
-                # Pass context to agent's on_next
-                self.agent.on_next(context)
+                if ev is not None:
+                    await self._handle_event(ev)
 
             except WebSocketDisconnect:
                 logger.info("WebSocket disconnected in loop")
+                end_event, self.history = self._wrap_with_history(self.history, SpecificCallEnded())
+                await self._handle_filters(end_event)
                 self.shutdown_event.set()
                 break
             except json.JSONDecodeError as e:
@@ -286,98 +324,184 @@ class ConversationRunner:
                 if not self.shutdown_event.is_set():
                     await asyncio.sleep(0.1)
 
-    def _map_to_events(self, message: InputMessage) -> List[EventInstance]:
-        """Convert websocket input message to conversation events."""
+        await self._cancel_agent_task()
+
+    async def _handle_event(self, event: InputEvent) -> None:
+        """Apply run/cancel filters for a single event."""
+        if self.run_filter(event):
+            await self._start_agent_task(event)
+        elif self.cancel_filter(event):
+            await self._cancel_agent_task()
+
+    async def _start_agent_task(self, event: InputEvent) -> None:
+        """Start the agent async iterable for the given event."""
+        await self._cancel_agent_task()
+
+        async def runner():
+            try:
+                async for output in self.agent_callable(event):
+                    mapped = self._map_output_event(output)
+                    if mapped is None:
+                        continue
+
+                    is_terminal = isinstance(output, (AgentEndCall, AgentTransferCall))
+                    if is_terminal:
+                        self.shutdown_event.set()
+
+                    if not self.shutdown_event.is_set() or is_terminal:
+                        await self.websocket.send_json(mapped.model_dump())
+                    else:
+                        break
+            except asyncio.CancelledError:
+                pass
+            except Exception as exc:  # noqa: BLE001
+                logger.exception(f"Agent iterable error: {exc}")
+                self.shutdown_event.set()
+
+        self.agent_task = asyncio.create_task(runner())
+
+    async def _cancel_agent_task(self) -> None:
+        """Cancel any running agent iterable task."""
+        if self.agent_task and not self.agent_task.done():
+            self.agent_task.cancel()
+            try:
+                await self.agent_task
+            except asyncio.CancelledError:
+                pass
+        self.agent_task = None
+
+    async def shutdown(self) -> None:
+        """Shutdown helper for websocket_endpoint cleanup."""
+        await self._cancel_agent_task()
+        self.shutdown_event.set()
+
+    ######### Event Parsing Methods #########
+
+    def _map_input_event(
+        self, history: List[SpecificInputEvent], message: InputMessage
+    ) -> tuple[Optional[InputEvent], List[SpecificInputEvent]]:
+        """Pure mapping: history + harness message -> (InputEvent | None, updated history)."""
         if isinstance(message, UserStateInput):
             if message.value == UserState.SPEAKING:
                 logger.info("🎤 User started speaking")
-                return [UserStartedSpeaking()]
-            elif message.value == UserState.IDLE:
+                return self._wrap_with_history(history, SpecificUserTurnStarted())
+            if message.value == UserState.IDLE:
                 logger.info("🔇 User stopped speaking")
-                return [UserStoppedSpeaking()]
+                content = self._turn_content(
+                    history,
+                    SpecificUserTurnStarted,
+                    (SpecificUserTextSent, SpecificUserDtmfSent),
+                )
+                return self._wrap_with_history(history, SpecificUserTurnEnded(content=content))
+
         elif isinstance(message, TranscriptionInput):
             logger.info(f'📝 User said: "{message.content}"')
-            return [UserTranscriptionReceived(content=message.content)]
+            return self._wrap_with_history(history, SpecificUserTextSent(content=message.content))
+
         elif isinstance(message, AgentStateInput):
             if message.value == UserState.SPEAKING:
                 logger.info("🎤 Agent started speaking")
-                return [AgentStartedSpeaking()]
-            elif message.value == UserState.IDLE:
+                return self._wrap_with_history(history, SpecificAgentTurnStarted())
+            if message.value == UserState.IDLE:
                 logger.info("🔇 Agent stopped speaking")
-                return [AgentStoppedSpeaking()]
+                content = self._turn_content(
+                    history,
+                    SpecificAgentTurnStarted,
+                    (SpecificAgentTextSent, SpecificAgentDTMFSent, SpecificAgentToolCalled, SpecificAgentToolReturned),
+                )
+                return self._wrap_with_history(history, SpecificAgentTurnEnded(content=content))
+
         elif isinstance(message, AgentSpeechInput):
             logger.info(f'🗣️ Agent speech sent: "{message.content}"')
-            return [AgentSpeechSent(content=message.content)]
+            return self._wrap_with_history(history, SpecificAgentTextSent(content=message.content))
+
         elif isinstance(message, DTMFInput):
             logger.info(f"🔔 DTMF received: {message.button}")
-            return [DTMFInputEvent(button=message.button)]
+            return self._wrap_with_history(history, SpecificUserDtmfSent(button=message.button))
+
         else:
             logger.warning(f"Unknown message type: {type(message).__name__} ({message.model_dump_json()})")
-            return [UserUnknownInputReceived(input_data=message.model_dump_json())]
+            # Unknown messages are ignored for v0.2 events
 
-        return []  # No events for unhandled states
+        return None, history
 
-    def _on_agent_output(self, event: AgentOutputEvent):
-        """Handle agent output events by sending them to the websocket."""
-        asyncio.create_task(self._send_event(event))
+    def _turn_content(
+        self,
+        history: List[SpecificInputEvent],
+        start_type: type,
+        content_types: tuple[type, ...],
+    ) -> List[SpecificInputEvent]:
+        """Collect turn content since the most recent start_type event."""
+        for idx in range(len(history) - 1, -1, -1):
+            if isinstance(history[idx], start_type):
+                return [ev for ev in history[idx + 1 :] if isinstance(ev, content_types)]
+        return []
 
-    def _on_agent_error(self, error: Exception):
-        """Handle agent errors."""
-        logger.error(f"Agent error: {error}")
-        self.shutdown_event.set()
+    def _wrap_with_history(self, history: List[SpecificInputEvent], specific_event: SpecificInputEvent) -> tuple[InputEvent, List[SpecificInputEvent]]:
+        """Create an InputEvent including history from a SpecificInputEvent."""
+        history = history + [specific_event]
+        base_data = specific_event.model_dump()
 
-    def _on_agent_complete(self):
-        """Handle agent completion."""
-        logger.info("Agent completed")
-        self.shutdown_event.set()
+        if isinstance(specific_event, SpecificCallStarted):
+            return CallStarted(history=history, **base_data), history
+        if isinstance(specific_event, SpecificCallEnded):
+            return CallEnded(history=history, **base_data), history
+        if isinstance(specific_event, SpecificUserTurnStarted):
+            return UserTurnStarted(history=history, **base_data), history
+        if isinstance(specific_event, SpecificUserDtmfSent):
+            return UserDtmfSent(history=history, **base_data), history
+        if isinstance(specific_event, SpecificUserTextSent):
+            return UserTextSent(history=history, **base_data), history
+        if isinstance(specific_event, SpecificUserTurnEnded):
+            return UserTurnEnded(history=history, **base_data), history
+        if isinstance(specific_event, SpecificAgentTurnStarted):
+            return AgentTurnStarted(history=history, **base_data), history
+        if isinstance(specific_event, SpecificAgentTextSent):
+            return AgentTextSent(history=history, **base_data), history
+        if isinstance(specific_event, SpecificAgentDTMFSent):
+            return AgentDTMFSent(history=history, **base_data), history
+        if isinstance(specific_event, SpecificAgentToolCalled):
+            return AgentToolCalled(history=history, **base_data), history
+        if isinstance(specific_event, SpecificAgentToolReturned):
+            return AgentToolReturned(history=history, **base_data), history
+        if isinstance(specific_event, SpecificAgentTurnEnded):
+            return AgentTurnEnded(history=history, **base_data), history
 
-    async def _send_event(self, event: AgentOutputEvent):
-        """
-        Serialize and send an agent output event to the websocket.
+        raise ValueError(f"Unhandled specific event type: {type(specific_event).__name__}")
 
-        Converts AgentOutputEvent types from line.events to the appropriate
-        websocket output format (harness_types).
+    def _map_output_event(self, event: OutputEvent) -> Optional[OutputMessage]:
+        """Convert OutputEvent to websocket OutputMessage."""
+        if isinstance(event, AgentSendText):
+            logger.info(f'🤖 Agent said: "{event.text}"')
+            return MessageOutput(content=event.text)
+        if isinstance(event, AgentSendDTMF):
+            logger.info(f"🔢 DTMF output: {event.button}")
+            return DTMFOutput(button=event.button)
+        if isinstance(event, AgentEndCall):
+            logger.info("📞 End call")
+            return EndCallOutput()
+        if isinstance(event, AgentTransferCall):
+            logger.info(f"📱 Transfer to: {event.target_phone_number}")
+            return TransferOutput(target_phone_number=event.target_phone_number)
+        if isinstance(event, LogMetric):
+            logger.debug(f"📈 Log metric: {event.name}={event.value}")
+            return LogMetricOutput(name=event.name, value=event.value)
+        if isinstance(event, LogMessage):
+            logger.debug(f"🪵 Log message: {event.name} [{event.level}] {event.message}")
+            return LogEventOutput(
+                event=event.name,
+                metadata={"level": event.level, "message": event.message, "metadata": event.metadata},
+            )
+        if isinstance(event, AgentToolCalled):
+            logger.info(f"🔧 Tool called: {event.tool_name}({event.tool_args})")
+            return ToolCallOutput(name=event.tool_name, arguments=event.tool_args)
+        if isinstance(event, AgentToolReturned):
+            logger.info(f"🔧 Tool returned: {event.tool_name}({event.tool_args}) -> {event.result}")
+            result_str = str(event.result) if event.result is not None else None
+            return ToolCallOutput(name=event.tool_name, arguments=event.tool_args, result=result_str)
 
-        Args:
-            event: The agent output event to send.
-        """
-        if self.shutdown_event.is_set():
-            return
-
-        try:
-            # Convert event to websocket output format and log
-            output: OutputMessage
-            if isinstance(event, AgentResponse):
-                logger.info(f'🤖 Agent said: "{event.content}"')
-                output = MessageOutput(content=event.content)
-            elif isinstance(event, DTMFOutputEvent):
-                logger.info(f"🔢 DTMF output: {event.button}")
-                output = DTMFOutput(button=event.button)
-            elif isinstance(event, EndCall):
-                logger.info("📞 End call")
-                self.shutdown_event.set()
-                output = EndCallOutput()
-            elif isinstance(event, AgentError):
-                logger.warning(f"⚠️ Agent error: {event.content}")
-                output = ErrorOutput(content=event.content)
-            elif isinstance(event, ToolResult):
-                logger.info(f"🔧 Tool result: {event.tool_name}({event.tool_args})")
-                output = ToolCallOutput(name=event.tool_name, arguments=event.tool_args)
-            elif isinstance(event, TransferCall):
-                logger.info(f"📱 Transfer to: {event.target_phone_number}")
-                self.shutdown_event.set()
-                output = TransferOutput(target_phone_number=event.target_phone_number)
-            elif isinstance(event, LogMetric):
-                logger.debug(f"📈 Log metric: {event.name}={event.value}")
-                output = LogMetricOutput(name=event.name, value=event.value)
-            else:
-                logger.warning(f"Unknown event type: {type(event)}")
-                return
-
-            await self.websocket.send_json(output.model_dump())
-        except Exception as e:
-            logger.warning(f"Failed to send event via WebSocket: {e}")
-            self.shutdown_event.set()
+        logger.warning(f"Unknown event type: {type(event)}")
+        return None
 
     async def send_error(self, error: str):
         """Send an error message via WebSocket."""
@@ -385,11 +509,3 @@ class ConversationRunner:
             await self.websocket.send_json(ErrorOutput(content=error).model_dump())
         except Exception as e:
             logger.warning(f"Failed to send error via WebSocket: {e}")
-
-    async def send_end_call(self):
-        """Send end_call message via WebSocket."""
-        try:
-            await self.websocket.send_json(EndCallOutput().model_dump())
-        except Exception as e:
-            logger.warning(f"Failed to send end_call via WebSocket: {e}")
-
