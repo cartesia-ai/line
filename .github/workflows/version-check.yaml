@@ -56,17 +56,33 @@ jobs:
             exit 0
           fi
 
-          # Get list of changed files (excluding pyproject.toml)
-          CHANGED_FILES=$(git diff --name-only $COMPARISON_REF | grep -v '^pyproject\.toml$' || true)
+          # Get list of changed files (excluding pyproject.toml and example pyproject.toml files)
+          CHANGED_FILES=$(git diff --name-only $COMPARISON_REF | grep -v '^pyproject\.toml$' | grep -v '^examples/.*/pyproject\.toml$' | grep -v '^example_integrations/.*/pyproject\.toml$' || true)
 
           if [[ -n "$CHANGED_FILES" ]]; then
             echo "❌ Version change detected, but other files were also modified:"
             echo "$CHANGED_FILES"
             echo ""
-            echo "When changing the version in pyproject.toml, no other files should be modified."
+            echo "When changing the version in pyproject.toml, no other files should be modified"
+            echo "(except example pyproject.toml files for updating cartesia-line version pins)."
             echo "Please create a separate commit for the version change."
             exit 1
           fi
+
+          # Check that example pyproject.toml changes only modify the cartesia-line version
+          EXAMPLE_PYPROJECTS=$(git diff --name-only $COMPARISON_REF | grep -E '^(examples|example_integrations)/.*/pyproject\.toml$' || true)
+          for EXAMPLE_FILE in $EXAMPLE_PYPROJECTS; do
+            EXAMPLE_DIFF=$(git diff $COMPARISON_REF -- "$EXAMPLE_FILE")
+            # Look for changes that are NOT cartesia-line version-related
+            NON_LINE_CHANGES=$(echo "$EXAMPLE_DIFF" | grep '^[+-]' | grep -v '^+++' | grep -v '^---' | grep -v 'cartesia-line' || true)
+            if [[ -n "$NON_LINE_CHANGES" ]]; then
+              echo "❌ $EXAMPLE_FILE contains changes beyond the cartesia-line version:"
+              echo "$EXAMPLE_DIFF"
+              echo ""
+              echo "When changing the version, example pyproject.toml files should only update the cartesia-line version pin."
+              exit 1
+            fi
+          done
 
           # Check that only the version field changed in pyproject.toml
           PYPROJECT_DIFF=$(git diff $COMPARISON_REF pyproject.toml)
@@ -83,4 +99,21 @@ jobs:
             exit 1
           fi
 
-          echo "✅ Version change detected and only the version field was modified"
+          # Check that ALL example pyproject.toml files are updated to the new version
+          MISSING_UPDATES=""
+          for EXAMPLE_FILE in $(find examples example_integrations -name 'pyproject.toml' 2>/dev/null); do
+            if ! grep -q "cartesia-line==$CURRENT_VERSION" "$EXAMPLE_FILE"; then
+              ACTUAL_PIN=$(grep 'cartesia-line' "$EXAMPLE_FILE" | head -1 || echo "not found")
+              MISSING_UPDATES="$MISSING_UPDATES\n  - $EXAMPLE_FILE (has: $ACTUAL_PIN)"
+            fi
+          done
+
+          if [[ -n "$MISSING_UPDATES" ]]; then
+            echo "❌ Version bumped to $CURRENT_VERSION, but some example pyproject.toml files are not updated:"
+            echo -e "$MISSING_UPDATES"
+            echo ""
+            echo "All example pyproject.toml files must pin cartesia-line==$CURRENT_VERSION"
+            exit 1
+          fi
+
+          echo "✅ Version change detected and all example versions are updated"
