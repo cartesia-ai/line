@@ -9,6 +9,7 @@ import requests
 
 from line import Bridge, CallRequest, PreCallResult, VoiceAgentApp, VoiceAgentSystem
 from line.events import (
+    AgentSpeechSent,
     DTMFOutputEvent,
     UserStartedSpeaking,
     UserStoppedSpeaking,
@@ -60,6 +61,7 @@ async def handle_new_call(system: VoiceAgentSystem, call_request: CallRequest):
 
     # Setup events
     conversation_bridge.on(UserTranscriptionReceived).map(conversation_node.add_event)
+    conversation_bridge.on(AgentSpeechSent).map(conversation_node.add_event)
     conversation_bridge.on(DTMFOutputEvent).map(conversation_node.on_dtmf_output)
 
     (

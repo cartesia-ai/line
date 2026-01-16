@@ -147,7 +147,7 @@ class ChatNode(ReasoningNode):
             AgentResponse: Messages from the current agent
             ToolResult: Tool calls from the current agent or handoff results
         """
-        messages = convert_messages_to_gemini(context.events)
+        messages = convert_messages_to_gemini(context.get_committed_events())
         user_message = context.get_latest_user_transcript_message()
 
         if user_message:

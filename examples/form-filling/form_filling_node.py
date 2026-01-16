@@ -110,7 +110,7 @@ class FormFillingNode(ReasoningNode):
             return
 
         # Note that we use text_events_only=True here to improve the accuracy of tool calling by filtering out prior ToolResults
-        messages = convert_messages_to_gemini(context.events, text_events_only=True)
+        messages = convert_messages_to_gemini(context.get_committed_events(), text_events_only=True)
 
         # Add current question context to help the LLM
         question_text = self.form_manager.format_question_for_llm(current_question)

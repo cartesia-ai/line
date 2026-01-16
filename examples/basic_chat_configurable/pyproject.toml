@@ -23,7 +23,6 @@ allow-direct-references = true
 [tool.hatch.build.targets.wheel]
 packages = ["."]
 
-
 [project.optional-dependencies]
 dev = [
     "pytest",

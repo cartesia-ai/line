@@ -6,18 +6,23 @@ to specialized processing methods in ReasoningNode subclasses.
 """
 
 from dataclasses import dataclass, field
-from typing import Any, List, Optional, Union
+import re
+from typing import Any, List, Optional
 
-from line.events import AgentResponse, AgentSpeechSent, EventInstance, UserTranscriptionReceived
+from line.events import (
+    AgentResponse,
+    AgentSpeechSent,
+    EventInstance,
+    UserTranscriptionReceived,
+)
+
+NORMAL_CHARACTERS_REGEX = r"(\s+|[^\w\s]+)"
 
 
 @dataclass
 class ConversationContext:
     """
     Encapsulates conversation state for ReasoningNode template method pattern.
-
-    This standardizes how conversation data is passed between the template method
-    (ReasoningNode.generate) and specialized processing (process_context).
 
     Attributes:
         events: List of conversation events
@@ -60,12 +65,53 @@ class ConversationContext:
         """Add metadata for specialized processing."""
         self.metadata[key] = value
 
-    def get_committed_transcript(self) -> list[Union[UserTranscriptionReceived, AgentResponse]]:
-        """Get all committed transcript messages from the conversation events."""
-        committed_turns = []
+    def get_committed_events(self) -> list[EventInstance]:
+        pending_text = ""
+        committed_events = []
         for event in self.events:
-            if isinstance(event, UserTranscriptionReceived):
-                committed_turns.append(event)
+            if isinstance(event, AgentResponse):
+                pending_text = pending_text + event.content
             elif isinstance(event, AgentSpeechSent):
-                committed_turns.append(AgentResponse(content=event.content))
-        return committed_turns
+                committed_text, pending_text = self._parse_committed(
+                    pending_text,
+                    event.content,
+                )
+                if committed_text:  # Only add if there's actual content
+                    committed_events.append(AgentResponse(content=committed_text))
+            # All other events are committed as is
+            else:
+                committed_events.append(event)
+
+        return committed_events
+
+    def _parse_committed(self, pending_text: str, speech_text: str) -> tuple[str, list[str]]:
+        pending_parts = list(filter(lambda x: x != "", re.split(NORMAL_CHARACTERS_REGEX, pending_text)))
+        speech_parts = list(filter(lambda x: x != "", re.split(NORMAL_CHARACTERS_REGEX, speech_text)))
+
+        # If the pending text has no spaces (ex. non-latin languages), commit the entire pending text.
+        if len([x for x in pending_parts if x.isspace()]) == 0:
+            return speech_text, ""
+
+        committed_parts = []
+        still_pending_text = []
+        for pending_part in pending_parts:
+            # If speech_text is empty), treat remaining pending parts as still pending.
+            if not speech_parts:
+                still_pending_text.append(pending_part)
+            # If the next pending text matches the start of what's been marked committed (as sent by TTS),
+            # add it to committed and trim it from speech_parts.
+            elif speech_parts[0].startswith(pending_part):
+                speech_parts[0] = speech_parts[0][len(pending_part) :]
+                committed_parts.append(pending_part)
+                if len(speech_parts[0]) == 0:
+                    speech_parts.pop(0)
+            # If the part is purely whitespace, add it directly to committed_parts.
+            elif pending_part.isspace():
+                committed_parts.append(pending_part)
+            # Otherwise, this part isn't aligned with the committed speech
+            # (possibly an interruption or TTS mismatch);
+            else:
+                pass
+
+        committed_str = "".join(committed_parts).strip()
+        return committed_str, "".join(still_pending_text)
