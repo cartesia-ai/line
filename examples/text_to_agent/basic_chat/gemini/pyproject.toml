@@ -3,7 +3,7 @@ name = "basic-chat-gemini"
 version = "0.1.0"
 description = "Basic chat agent using Gemini"
 dependencies = [
-    "cartesia-line",
+    "cartesia-line==0.1.9",
     "google-genai",
     "loguru",
     "fastapi",
