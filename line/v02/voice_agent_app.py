@@ -10,7 +10,6 @@ import re
 from typing import AsyncIterable, Awaitable, Callable, List, Optional
 from urllib.parse import urlencode
 
-
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from loguru import logger
@@ -237,7 +236,9 @@ class ConversationRunner:
         self.env = env
         self.shutdown_event = asyncio.Event()
         self.history: List[SpecificInputEvent] = []
-        self.emitted_agent_text: str = ""  # Buffer for all AgentSendText content (for whitespace interpolation)
+        self.emitted_agent_text: str = (
+            ""  # Buffer for all AgentSendText content (for whitespace interpolation)
+        )
 
         self.agent_callable, self.run_filter, self.cancel_filter = self._prepare_agent(agent_spec)
         self.agent_task: Optional[asyncio.Task] = None
@@ -331,6 +332,7 @@ class ConversationRunner:
 
     async def _start_agent_task(self, event: InputEvent) -> None:
         """Start the agent async iterable for the given event."""
+
         async def runner():
             try:
                 async for output in self.agent_callable(event):
@@ -506,8 +508,11 @@ class ConversationRunner:
         logger.warning(f"Unknown event type: {type(event)}")
         return None
 
+
 # Regex to split text into words, whitespace, and punctuation
 NORMAL_CHARACTERS_REGEX = r"(\s+|[^\w\s]+)"
+
+
 def _get_processed_history(pending_text: str, history: List[SpecificInputEvent]) -> List[SpecificInputEvent]:
     """
     Process history to reinterpolate whitespace into SpecificAgentTextSent events.
@@ -533,6 +538,7 @@ def _get_processed_history(pending_text: str, history: List[SpecificInputEvent])
             processed_events.append(event)
 
     return processed_events
+
 
 def _parse_committed(pending_text: str, speech_text: str) -> tuple[str, str]:
     """

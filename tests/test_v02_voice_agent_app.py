@@ -10,14 +10,13 @@ Focuses on:
 
 import asyncio
 from typing import AsyncIterator, List
-from unittest.mock import MagicMock, AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
-import pytest
 from fastapi import WebSocket, WebSocketDisconnect
+import pytest
 
 from line.v02.events import (
     AgentSendText,
-    CallEnded,
     CallStarted,
     InputEvent,
     OutputEvent,
@@ -28,7 +27,6 @@ from line.v02.events import (
     SpecificUserTextSent,
     SpecificUserTurnEnded,
     SpecificUserTurnStarted,
-    UserTurnEnded,
     UserTurnStarted,
 )
 from line.v02.voice_agent_app import (
@@ -37,7 +35,6 @@ from line.v02.voice_agent_app import (
     _get_processed_history,
     _parse_committed,
 )
-
 
 # ============================================================
 # Fixtures and Helpers
@@ -58,6 +55,7 @@ async def noop_agent(env: AgentEnv, event: InputEvent) -> AsyncIterator[OutputEv
     """Agent that yields nothing."""
     return
     yield  # Make this a generator
+
 
 class TestConversationRunner:
     # ============================================================
@@ -227,13 +225,12 @@ class TestConversationRunner:
 
         runner = ConversationRunner(ws, blocking_agent, env)
         runner_task = runner.run()
-        agent_blocking.set_result(None) 
+        agent_blocking.set_result(None)
         await runner_task
 
         assert agent_finished.is_set(), (
             "Agent task should be awaited/cancelled on disconnect so it can clean up"
         )
-
 
     """Tests for history accumulation and processing."""
     # ============================================================
@@ -431,30 +428,28 @@ class TestParseCommitted:
         assert remaining == ""
 
     def test_non_space_commit_preserves_remaining(self):
-        """Partial commit of non-latin text should preserve remaining.
-        """
+        """Partial commit of non-latin text should preserve remaining."""
         # Pending has two "sentences", only first is committed
-        pending = "ab"  
-        speech = "a"  
+        pending = "ab"
+        speech = "a"
 
         committed, remaining = _parse_committed(pending, speech)
 
-        assert committed == "a" 
+        assert committed == "a"
         assert remaining == "b", (
             f"Expected remaining to be 'b', got '{remaining}'. "
             "Non-latin partial commit should preserve remaining text."
         )
 
     def test_non_space_commit_preserves_skips_as_necessary(self):
-        """Partial commit of non-latin text should preserve remaining.
-        """
+        """Partial commit of non-latin text should preserve remaining."""
         # Pending has two "sentences", only first is committed
-        pending = "abc"  
-        speech = "b"  
+        pending = "abc"
+        speech = "b"
 
         committed, remaining = _parse_committed(pending, speech)
 
-        assert committed == "b" 
+        assert committed == "b"
         assert remaining == "c", (
             f"Expected remaining to be 'c', got '{remaining}'. "
             "Non-latin partial commit should preserve remaining text."
