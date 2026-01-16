@@ -300,7 +300,7 @@ class ConversationRunner:
         """
         # Emit call_started to seed history/context
         start_event, self.history = self._wrap_with_history(self.history, SpecificCallStarted())
-        await self._handle_filters(start_event)
+        await self._handle_event(start_event)
 
         while not self.shutdown_event.is_set():
             try:
@@ -315,7 +315,7 @@ class ConversationRunner:
             except WebSocketDisconnect:
                 logger.info("WebSocket disconnected in loop")
                 end_event, self.history = self._wrap_with_history(self.history, SpecificCallEnded())
-                await self._handle_filters(end_event)
+                await self._handle_event(end_event)
                 self.shutdown_event.set()
             except json.JSONDecodeError as e:
                 logger.exception(f"Failed to parse JSON message: {e}")
@@ -554,7 +554,8 @@ def _parse_committed(pending_text: str, speech_text: str) -> tuple[str, str]:
 
     # If the pending text has no spaces (ex. non-latin languages), commit the entire speech text.
     if len([x for x in pending_parts if x.isspace()]) == 0:
-        return speech_text, ""
+        match_index = pending_text.find(speech_text)
+        return speech_text, pending_text[match_index + len(speech_text) :]
 
     committed_parts: list[str] = []
     still_pending_parts: list[str] = []
