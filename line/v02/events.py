@@ -18,12 +18,14 @@ class AgentSendText(BaseModel):
 
 class AgentToolCalled(BaseModel):
     type: Literal["agent_tool_called"] = "agent_tool_called"
+    tool_call_id: str
     tool_name: str
     tool_args: Dict[str, Any] = Field(default_factory=dict)
 
 
 class AgentToolReturned(BaseModel):
     type: Literal["agent_tool_returned"] = "agent_tool_returned"
+    tool_call_id: str
     tool_name: str
     tool_args: Dict[str, Any] = Field(default_factory=dict)
     result: Any = None
@@ -118,12 +120,14 @@ class SpecificAgentDTMFSent(BaseModel):
 
 class SpecificAgentToolCalled(BaseModel):
     type: Literal["agent_tool_called"] = "agent_tool_called"
+    tool_call_id: str
     tool_name: str
     tool_args: Dict[str, Any] = Field(default_factory=dict)
 
 
 class SpecificAgentToolReturned(BaseModel):
     type: Literal["agent_tool_returned"] = "agent_tool_returned"
+    tool_call_id: str
     tool_name: str
     tool_args: Dict[str, Any] = Field(default_factory=dict)
     result: Any = None
@@ -154,6 +158,8 @@ SpecificInputEvent = Union[
     SpecificAgentToolReturned,
     SpecificAgentTurnEnded,
     SpecificCallEnded,
+    AgentToolCalled,
+    AgentToolReturned,
 ]
 
 
@@ -193,11 +199,11 @@ class AgentDTMFSent(SpecificAgentDTMFSent):
     history: List[SpecificInputEvent] = Field(default_factory=list)
 
 
-class AgentToolCalled(SpecificAgentToolCalled):
+class AgentToolCalledInput(AgentToolCalled):
     history: List[SpecificInputEvent] = Field(default_factory=list)
 
 
-class AgentToolReturned(SpecificAgentToolReturned):
+class AgentToolReturnedInput(AgentToolReturned):
     history: List[SpecificInputEvent] = Field(default_factory=list)
 
 
@@ -214,8 +220,8 @@ InputEvent = Union[
     AgentTurnStarted,
     AgentTextSent,
     AgentDTMFSent,
-    AgentToolCalled,
-    AgentToolReturned,
+    AgentToolCalledInput,
+    AgentToolReturnedInput,
     AgentTurnEnded,
     CallEnded,
 ]
@@ -256,8 +262,8 @@ __all__ = [
     "AgentTurnStarted",
     "AgentTextSent",
     "AgentDTMFSent",
-    "AgentToolCalled",
-    "AgentToolReturned",
+    "AgentToolCalledInput",
+    "AgentToolReturnedInput",
     "AgentTurnEnded",
     "InputEvent",
 ]
