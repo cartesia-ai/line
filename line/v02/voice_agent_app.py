@@ -6,8 +6,10 @@ import asyncio
 from datetime import datetime, timezone
 import json
 import os
+import re
 from typing import AsyncIterable, Awaitable, Callable, List, Optional
 from urllib.parse import urlencode
+
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
@@ -191,7 +193,6 @@ class VoiceAgentApp:
         )
 
         runner: Optional[ConversationRunner] = None
-
         try:
             # Create the AgentEnv with the current event loop
             loop = asyncio.get_running_loop()
@@ -202,19 +203,11 @@ class VoiceAgentApp:
             runner = ConversationRunner(websocket, agent_spec, env)
             await runner.run()
 
-        except WebSocketDisconnect:
-            logger.info("Client disconnected")
         except Exception as e:
             logger.exception(f"Error: {str(e)}")
             if runner:
-                try:
-                    await runner.send_error("System has encountered an error, please try again later.")
-                    await runner.send_end_call()
-                except:  # noqa: E722
-                    pass
+                await runner.send_error("System has encountered an error, please try again later.")
         finally:
-            if runner:
-                await runner.shutdown()
             logger.info("Websocket session ended")
 
     def run(self, host="0.0.0.0", port=None):
@@ -244,6 +237,7 @@ class ConversationRunner:
         self.env = env
         self.shutdown_event = asyncio.Event()
         self.history: List[SpecificInputEvent] = []
+        self.emitted_agent_text: str = ""  # Buffer for all AgentSendText content (for whitespace interpolation)
 
         self.agent_callable, self.run_filter, self.cancel_filter = self._prepare_agent(agent_spec)
         self.agent_task: Optional[asyncio.Task] = None
@@ -291,13 +285,9 @@ class ConversationRunner:
     def _normalize_filter(self, filter_spec: EventFilter) -> Callable[[InputEvent], bool]:
         """Normalize EventFilter spec to a callable."""
         if callable(filter_spec):
-            return filter_spec  # type: ignore[return-value]
+            return filter_spec
         if isinstance(filter_spec, (list, tuple)):
-
-            def _fn(event: InputEvent) -> bool:
-                return any(isinstance(event, cls) for cls in filter_spec)  # type: ignore[arg-type]
-
-            return _fn
+            return lambda event: any(isinstance(event, cls) for cls in filter_spec)
         raise TypeError("EventFilter must be callable or list")
 
     ######### Run Loop Methods #########
@@ -320,25 +310,17 @@ class ConversationRunner:
 
                 # Map to events
                 ev, self.history = self._map_input_event(self.history, input_msg)
-
-                if ev is not None:
-                    await self._handle_event(ev)
+                await self._handle_event(ev)
 
             except WebSocketDisconnect:
                 logger.info("WebSocket disconnected in loop")
                 end_event, self.history = self._wrap_with_history(self.history, SpecificCallEnded())
                 await self._handle_filters(end_event)
                 self.shutdown_event.set()
-                break
             except json.JSONDecodeError as e:
                 logger.exception(f"Failed to parse JSON message: {e}")
-                continue
             except Exception as e:
                 logger.exception(f"Error in websocket loop: {e}")
-                if not self.shutdown_event.is_set():
-                    await asyncio.sleep(0.1)
-
-        await self._cancel_agent_task()
 
     async def _handle_event(self, event: InputEvent) -> None:
         """Apply run/cancel filters for a single event."""
@@ -349,23 +331,19 @@ class ConversationRunner:
 
     async def _start_agent_task(self, event: InputEvent) -> None:
         """Start the agent async iterable for the given event."""
-        await self._cancel_agent_task()
-
         async def runner():
             try:
                 async for output in self.agent_callable(event):
+                    # Buffer AgentSendText content for whitespace interpolation
+                    if isinstance(output, AgentSendText):
+                        self.emitted_agent_text += output.text
                     mapped = self._map_output_event(output)
+
+                    if self.shutdown_event.is_set():
+                        break
                     if mapped is None:
                         continue
-
-                    is_terminal = isinstance(output, (AgentEndCall, AgentTransferCall))
-                    if is_terminal:
-                        self.shutdown_event.set()
-
-                    if not self.shutdown_event.is_set() or is_terminal:
-                        await self.websocket.send_json(mapped.model_dump())
-                    else:
-                        break
+                    await self.websocket.send_json(mapped.model_dump())
             except asyncio.CancelledError:
                 pass
             except Exception as exc:  # noqa: BLE001
@@ -384,13 +362,14 @@ class ConversationRunner:
                 pass
         self.agent_task = None
 
-    async def shutdown(self) -> None:
-        """Shutdown helper for websocket_endpoint cleanup."""
-        await self._cancel_agent_task()
-        self.shutdown_event.set()
+    async def send_error(self, error: str):
+        """Send an error message via WebSocket."""
+        try:
+            await self.websocket.send_json(ErrorOutput(content=error).model_dump())
+        except Exception as e:
+            logger.warning(f"Failed to send error via WebSocket: {e}")
 
     ######### Event Parsing Methods #########
-
     def _map_input_event(
         self, history: List[SpecificInputEvent], message: InputMessage
     ) -> tuple[Optional[InputEvent], List[SpecificInputEvent]]:
@@ -438,10 +417,7 @@ class ConversationRunner:
             logger.info(f"🔔 DTMF received: {message.button}")
             return self._wrap_with_history(history, SpecificUserDtmfSent(button=message.button))
 
-        else:
-            logger.warning(f"Unknown message type: {type(message).__name__} ({message.model_dump_json()})")
-            # Unknown messages are ignored for v0.2 events
-
+        logger.warning(f"Unknown message type: {type(message).__name__} ({message.model_dump_json()})")
         return None, history
 
     def _turn_content(
@@ -459,34 +435,40 @@ class ConversationRunner:
     def _wrap_with_history(
         self, history: List[SpecificInputEvent], specific_event: SpecificInputEvent
     ) -> tuple[InputEvent, List[SpecificInputEvent]]:
-        """Create an InputEvent including history from a SpecificInputEvent."""
-        history = history + [specific_event]
+        """Create an InputEvent including history from a SpecificInputEvent.
+
+        The raw history is updated with the new event, but the history passed to
+        the InputEvent is processed to restore whitespace in SpecificAgentTextSent events.
+        """
+        raw_history = history + [specific_event]
+        # Process history to restore whitespace before passing to agent
+        processed_history = _get_processed_history(self.emitted_agent_text, history)
         base_data = specific_event.model_dump()
 
         if isinstance(specific_event, SpecificCallStarted):
-            return CallStarted(history=history, **base_data), history
+            return CallStarted(history=processed_history, **base_data), raw_history
         if isinstance(specific_event, SpecificCallEnded):
-            return CallEnded(history=history, **base_data), history
+            return CallEnded(history=processed_history, **base_data), raw_history
         if isinstance(specific_event, SpecificUserTurnStarted):
-            return UserTurnStarted(history=history, **base_data), history
+            return UserTurnStarted(history=processed_history, **base_data), raw_history
         if isinstance(specific_event, SpecificUserDtmfSent):
-            return UserDtmfSent(history=history, **base_data), history
+            return UserDtmfSent(history=processed_history, **base_data), raw_history
         if isinstance(specific_event, SpecificUserTextSent):
-            return UserTextSent(history=history, **base_data), history
+            return UserTextSent(history=processed_history, **base_data), raw_history
         if isinstance(specific_event, SpecificUserTurnEnded):
-            return UserTurnEnded(history=history, **base_data), history
+            return UserTurnEnded(history=processed_history, **base_data), raw_history
         if isinstance(specific_event, SpecificAgentTurnStarted):
-            return AgentTurnStarted(history=history, **base_data), history
+            return AgentTurnStarted(history=processed_history, **base_data), raw_history
         if isinstance(specific_event, SpecificAgentTextSent):
-            return AgentTextSent(history=history, **base_data), history
+            return AgentTextSent(history=processed_history, **base_data), raw_history
         if isinstance(specific_event, SpecificAgentDTMFSent):
-            return AgentDTMFSent(history=history, **base_data), history
+            return AgentDTMFSent(history=processed_history, **base_data), raw_history
         if isinstance(specific_event, SpecificAgentToolCalled):
-            return AgentToolCalled(history=history, **base_data), history
+            return AgentToolCalled(history=processed_history, **base_data), raw_history
         if isinstance(specific_event, SpecificAgentToolReturned):
-            return AgentToolReturned(history=history, **base_data), history
+            return AgentToolReturned(history=processed_history, **base_data), raw_history
         if isinstance(specific_event, SpecificAgentTurnEnded):
-            return AgentTurnEnded(history=history, **base_data), history
+            return AgentTurnEnded(history=processed_history, **base_data), raw_history
 
         raise ValueError(f"Unhandled specific event type: {type(specific_event).__name__}")
 
@@ -524,9 +506,76 @@ class ConversationRunner:
         logger.warning(f"Unknown event type: {type(event)}")
         return None
 
-    async def send_error(self, error: str):
-        """Send an error message via WebSocket."""
-        try:
-            await self.websocket.send_json(ErrorOutput(content=error).model_dump())
-        except Exception as e:
-            logger.warning(f"Failed to send error via WebSocket: {e}")
+# Regex to split text into words, whitespace, and punctuation
+NORMAL_CHARACTERS_REGEX = r"(\s+|[^\w\s]+)"
+def _get_processed_history(pending_text: str, history: List[SpecificInputEvent]) -> List[SpecificInputEvent]:
+    """
+    Process history to reinterpolate whitespace into SpecificAgentTextSent events.
+
+    The TTS system strips whitespace when confirming what was spoken. This method
+    uses the buffered AgentSendText content to restore proper whitespace formatting
+    in the history passed to the agent's process method.
+
+    Args:
+        history: Raw history containing SpecificAgentTextSent with stripped whitespace
+
+    Returns:
+        Processed history with whitespace restored in SpecificAgentTextSent events
+    """
+    processed_events: List[SpecificInputEvent] = []
+    for event in history:
+        if isinstance(event, SpecificAgentTextSent):
+            committed_text, pending_text = _parse_committed(pending_text, event.content)
+            if committed_text:
+                processed_events.append(SpecificAgentTextSent(content=committed_text))
+            # If no committed_text (empty after strip), skip this event
+        else:
+            processed_events.append(event)
+
+    return processed_events
+
+def _parse_committed(pending_text: str, speech_text: str) -> tuple[str, str]:
+    """
+    Parse committed text by matching speech_text against pending_text to recover whitespace.
+
+    The TTS system strips whitespace when confirming speech. This method matches the
+    stripped speech_text against the original pending_text (with whitespace) to recover
+    the properly formatted committed text.
+
+    Args:
+        pending_text: Accumulated text from AgentSendText events (with whitespace)
+        speech_text: Confirmed speech from TTS (whitespace stripped)
+
+    Returns:
+        Tuple of (committed_text_with_whitespace, remaining_pending_text)
+    """
+    pending_parts = list(filter(lambda x: x != "", re.split(NORMAL_CHARACTERS_REGEX, pending_text)))
+    speech_parts = list(filter(lambda x: x != "", re.split(NORMAL_CHARACTERS_REGEX, speech_text)))
+
+    # If the pending text has no spaces (ex. non-latin languages), commit the entire speech text.
+    if len([x for x in pending_parts if x.isspace()]) == 0:
+        return speech_text, ""
+
+    committed_parts: list[str] = []
+    still_pending_parts: list[str] = []
+    for pending_part in pending_parts:
+        # If speech_text is empty, treat remaining pending parts as still pending.
+        if not speech_parts:
+            still_pending_parts.append(pending_part)
+        # If the next pending text matches the start of what's been marked committed (as sent by TTS),
+        # add it to committed and trim it from speech_parts.
+        elif speech_parts[0].startswith(pending_part):
+            speech_parts[0] = speech_parts[0][len(pending_part) :]
+            committed_parts.append(pending_part)
+            if len(speech_parts[0]) == 0:
+                speech_parts.pop(0)
+        # If the part is purely whitespace, add it directly to committed_parts.
+        elif pending_part.isspace():
+            committed_parts.append(pending_part)
+        # Otherwise, this part isn't aligned with the committed speech
+        # (possibly an interruption or TTS mismatch); skip it.
+        else:
+            pass
+
+    committed_str = "".join(committed_parts).strip()
+    return committed_str, "".join(still_pending_parts)
