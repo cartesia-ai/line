@@ -3,7 +3,7 @@ name = "web-search-gemini-background"
 version = "0.1.0"
 description = "Web search agent using Gemini Background Search"
 dependencies = [
-    "cartesia-line==0.1.10",
+    "cartesia-line==0.1.9",
     "google-genai",
     "pydantic",
     "loguru",
