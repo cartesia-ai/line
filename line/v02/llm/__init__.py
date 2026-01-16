@@ -1,62 +1,10 @@
 """
 LLM wrapper module for the Line SDK.
 
-This module provides a unified interface for working with 100+ LLM providers
-via LiteLLM (OpenAI, Anthropic, Google, and many more) with a powerful tool
-calling system supporting three paradigms:
+Provides a unified interface for 100+ LLM providers via LiteLLM with three
+tool calling paradigms: loopback, passthrough, and handoff.
 
-- **Loopback tools**: Response loops back to the LLM for continued generation
-- **Passthrough tools**: Response is emitted directly to the user
-- **Handoff tools**: Control is transferred to another agent/handler
-
-Quick Start:
-    ```python
-    from line.v02.llm import LlmAgent, LlmConfig, function_tool, passthrough_tool, Field
-    from line.v02.llm import AgentSendText, AgentEndCall, TurnEnv, UserTextSent
-    from typing import Annotated
-
-    # Define a loopback tool (default)
-    @function_tool
-    async def get_weather(
-        ctx: ToolContext,
-        city: Annotated[str, Field(description="The city name")]
-    ) -> str:
-        '''Get the current weather in a city'''
-        return f"72°F and sunny in {city}"
-
-    # Define a passthrough tool
-    @passthrough_tool
-    async def end_call(
-        ctx: ToolContext,
-        message: Annotated[str, Field(description="Goodbye message")]
-    ):
-        '''End the call with a goodbye message'''
-        yield AgentSendText(text=message)
-        yield AgentEndCall()
-
-    # Create the agent
-    agent = LlmAgent(
-        model="gpt-4o",  # LiteLLM format: "gpt-4o", "anthropic/claude-3-5-sonnet-20241022", etc.
-        tools=[get_weather, end_call],
-        config=LlmConfig(
-            system_prompt="You are a helpful weather assistant.",
-            introduction="Hello! I can help you check the weather.",
-            temperature=0.7,
-            num_retries=3,  # Built-in retry logic
-            fallbacks=["anthropic/claude-3-5-sonnet-20241022"],  # Automatic fallback
-        ),
-    )
-
-    # In get_agent
-    def get_agent(ctx, call_request):
-        return agent
-    ```
-
-Model Naming (LiteLLM format):
-    - OpenAI: "gpt-4o", "gpt-4o-mini", "o1"
-    - Anthropic: "anthropic/claude-3-5-sonnet-20241022", "anthropic/claude-3-opus-20240229"
-    - Google: "gemini/gemini-2.0-flash", "gemini/gemini-1.5-pro"
-    - See https://docs.litellm.ai/docs/providers for 100+ more providers
+See README.md for examples and detailed documentation.
 """
 
 # Agent types and events from v02

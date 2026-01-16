@@ -1,51 +1,7 @@
 """
-LlmAgent - An Agent implementation that wraps LLM providers via LiteLLM.
+LlmAgent - An Agent implementation wrapping 100+ LLM providers via LiteLLM.
 
-This module provides the LlmAgent class that abstracts over different LLM
-providers (OpenAI, Anthropic, Google, and 100+ more) using LiteLLM and provides
-a unified interface for tool calling with three paradigms: loopback, passthrough,
-and handoff.
-
-Model naming convention (LiteLLM format):
-- OpenAI: "gpt-4o", "gpt-4o-mini", "o1"
-- Anthropic: "anthropic/claude-3-5-sonnet-20241022", "anthropic/claude-3-opus-20240229"
-- Google: "gemini/gemini-2.0-flash", "gemini/gemini-1.5-pro"
-
-Example:
-    ```python
-    from line.v02.llm import LlmAgent, LlmConfig, function_tool, Field, passthrough_tool
-    from line.v02.llm import AgentSendText, AgentEndCall
-    from typing import Annotated
-
-    @function_tool
-    async def get_weather(
-        ctx: ToolContext,
-        city: Annotated[str, Field(description="The city name")]
-    ) -> str:
-        '''Get the current weather'''
-        return f"72°F in {city}"
-
-    @passthrough_tool
-    async def end_call(
-        ctx: ToolContext,
-        message: Annotated[str, Field(description="Goodbye message")]
-    ):
-        '''End the call'''
-        yield AgentSendText(text=message)
-        yield AgentEndCall()
-
-    agent = LlmAgent(
-        model="gpt-4o",
-        tools=[get_weather, end_call],
-        config=LlmConfig(
-            system_prompt="You are a helpful weather assistant.",
-            introduction="Hello! I can help you check the weather.",
-            temperature=0.7,
-            num_retries=3,
-            fallbacks=["anthropic/claude-3-5-sonnet-20241022"],
-        ),
-    )
-    ```
+See README.md for examples and documentation.
 """
 
 import inspect
@@ -78,38 +34,10 @@ from line.v02.llm.tool_context import ToolContext, ToolResult
 
 class LlmAgent:
     """
-    An Agent that wraps LLM providers for voice agents using LiteLLM.
+    Agent wrapping LLM providers via LiteLLM with tool calling support.
 
-    LlmAgent provides:
-    1. Abstraction over 100+ LLM providers via LiteLLM (OpenAI, Anthropic, Google, etc.)
-    2. Automatic context management (conversation history, tool calls)
-    3. Three tool calling paradigms (loopback, passthrough, handoff)
-    4. Built-in retry logic and fallback support
-    5. Seamless integration with the Cartesia Agent Harness
-
-    Model naming (LiteLLM format):
-    - OpenAI: "gpt-4o", "gpt-4o-mini"
-    - Anthropic: "anthropic/claude-3-5-sonnet-20241022"
-    - Google: "gemini/gemini-2.0-flash"
-
-    Example:
-        ```python
-        agent = LlmAgent(
-            model="gpt-4o",
-            tools=[get_weather, end_call],
-            config=LlmConfig(
-                system_prompt="You are a helpful assistant.",
-                introduction="Hello!",
-                temperature=0.7,
-                num_retries=3,
-                fallbacks=["anthropic/claude-3-5-sonnet-20241022"],
-            ),
-        )
-
-        # In get_agent
-        def get_agent(ctx, call_request):
-            return agent
-        ```
+    Supports loopback, passthrough, and handoff tool paradigms.
+    See README.md for examples.
     """
 
     def __init__(
@@ -215,7 +143,7 @@ class LlmAgent:
 
         # Handle UserTextSent - generate LLM response
         if isinstance(event, UserTextSent):
-            async for output in self._generate_response(event.history, event.content):
+            async for output in self._generate_response(env, event.history, event.content):
                 yield output
             return
 
@@ -227,7 +155,7 @@ class LlmAgent:
                 if isinstance(content_item, SpecificUserTextSent):
                     user_text += content_item.content
             if user_text:
-                async for output in self._generate_response(event.history, user_text):
+                async for output in self._generate_response(env, event.history, user_text):
                     yield output
             return
 
@@ -261,12 +189,13 @@ class LlmAgent:
             logger.error(f"Invalid handoff target: {type(self._handoff_target)}")
 
     async def _generate_response(
-        self, history: List[SpecificInputEvent], user_text: str
+        self, env: TurnEnv, history: List[SpecificInputEvent], user_text: str
     ) -> AsyncIterable[OutputEvent]:
         """
         Generate a response to user input using the LLM.
 
         Args:
+            env: The turn environment.
             history: The conversation history (list of SpecificInputEvent).
             user_text: The user's transcribed text.
 
@@ -326,7 +255,7 @@ class LlmAgent:
                 )
 
                 # Execute the tool
-                result = await self._execute_tool(tool, tc, history)
+                result = await self._execute_tool(tool, tc, history, env)
 
                 # Handle based on tool type
                 if tool.tool_type == ToolType.LOOPBACK:
@@ -403,7 +332,7 @@ class LlmAgent:
                 break
 
     async def _execute_tool(
-        self, tool: FunctionTool, tool_call: ToolCall, history: List[SpecificInputEvent]
+        self, tool: FunctionTool, tool_call: ToolCall, history: List[SpecificInputEvent], env: TurnEnv
     ) -> ToolResult:
         """
         Execute a tool and return the result.
@@ -412,6 +341,7 @@ class LlmAgent:
             tool: The FunctionTool to execute.
             tool_call: The tool call request.
             history: The conversation history.
+            env: The turn environment.
 
         Returns:
             ToolResult with the execution result.
@@ -425,6 +355,8 @@ class LlmAgent:
                 conversation_history=list(history),  # Copy the history
                 tool_call_id=tool_call.id,
                 tool_name=tool_call.name,
+                turn_env=env,
+                config=self._config,
             )
 
             # Execute based on tool type
