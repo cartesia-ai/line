@@ -80,8 +80,7 @@ class ChatNode(ReasoningNode):
             logger.info("No messages to process")
             return
 
-        messages = convert_messages_to_gemini(context.events)
-        logger.info(f"🧠 Messages: {messages}")
+        messages = convert_messages_to_gemini(context.get_committed_events())
         user_message = context.get_latest_user_transcript_message()
         if user_message:
             logger.info(f'🧠 Processing user message: "{user_message}"')
