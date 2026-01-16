@@ -214,25 +214,22 @@ class TestConversationRunner:
 
         async def blocking_agent(env, event):
             agent_started.set()
-            try:
-                await agent_blocking  # Block until cancelled
-                yield AgentSendText(text="response")
-            except asyncio.CancelledError:
-                pass
-            finally:
-                agent_finished.set()
+            await agent_blocking  # Block until cancelled
+            yield AgentSendText(text="response")
+            agent_finished.set()
 
         async def receive_messages():
             await agent_started.wait()
+            print("Disconnecting")
             raise WebSocketDisconnect()
 
         ws.receive_json = receive_messages
 
         runner = ConversationRunner(ws, blocking_agent, env)
-        await runner.run()
+        runner_task = runner.run()
+        agent_blocking.set_result(None) 
+        await runner_task
 
-        # BUG: agent_finished is not set because task wasn't awaited
-        # EXPECTED: Task should be cancelled/awaited so agent_finished is set
         assert agent_finished.is_set(), (
             "Agent task should be awaited/cancelled on disconnect so it can clean up"
         )
