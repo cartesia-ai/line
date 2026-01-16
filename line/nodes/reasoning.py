@@ -116,6 +116,9 @@ class ReasoningNode(Node):
         ctx = self._build_conversation_context()
 
         # 2. Let subclass do specialized processing
+        # Cleans up AgentSpeechSent events to be only the text that was spoken.
+        committed_events = ctx.get_committed_events()
+        ctx.events = committed_events
         logger.info(f"💬 Processing context: {ctx.events}")
         async for chunk in self.process_context(ctx):
             # Save the event to the conversation history.

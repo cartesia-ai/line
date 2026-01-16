@@ -71,13 +71,14 @@ class ConversationContext:
         for event in self.events:
             if isinstance(event, AgentResponse):
                 pending_text = pending_text + event.content
+                committed_events.append(AgentResponse(content=event.content))
             elif isinstance(event, AgentSpeechSent):
                 committed_text, pending_text = self._parse_committed(
                     pending_text,
                     event.content,
                 )
                 if committed_text:  # Only add if there's actual content
-                    committed_events.append(AgentResponse(content=committed_text))
+                    committed_events.append(AgentSpeechSent(content=committed_text))
             # All other events are committed as is
             else:
                 committed_events.append(event)

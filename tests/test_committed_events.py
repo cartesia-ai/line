@@ -3,6 +3,8 @@ Unit tests for ConversationContext.get_committed_events()
 
 Tests the matching of AgentResponse events against AgentSpeechSent events,
 particularly handling interruptions where speech is cut short.
+
+Returns both original AgentResponse and formatted AgentSpeechSent events.
 """
 
 import pytest
@@ -24,9 +26,11 @@ class TestGetCommittedEvents:
         context = ConversationContext(events=events, system_prompt="")
         committed = context.get_committed_events()
 
-        assert len(committed) == 1
+        assert len(committed) == 2
         assert isinstance(committed[0], AgentResponse)
+        assert isinstance(committed[1], AgentSpeechSent)
         assert committed[0].content == "Hello world!"
+        assert committed[1].content == "Hello world!"
 
     def test_interruption_partial_match(self):
         """Test when AgentSpeechSent is interrupted mid-response."""
@@ -39,11 +43,13 @@ class TestGetCommittedEvents:
         committed = context.get_committed_events()
 
         # Should return AgentResponse with only what was actually spoken
-        assert len(committed) == 1
+        assert len(committed) == 2
         assert isinstance(committed[0], AgentResponse)
+        assert isinstance(committed[1], AgentSpeechSent)
         # The committed text should preserve formatting from AgentResponse
         # "Hello world! How" matches "Helloworld!How"
-        assert committed[0].content == "Hello world! How"
+        assert committed[0].content == "Hello world! How are you today?"
+        assert committed[1].content == "Hello world! How"
 
     def test_multiple_responses_with_full_match(self):
         """Test multiple AgentResponse events concatenated before speech."""
@@ -56,9 +62,13 @@ class TestGetCommittedEvents:
         context = ConversationContext(events=events, system_prompt="")
         committed = context.get_committed_events()
 
-        assert len(committed) == 1
+        assert len(committed) == 3
         assert isinstance(committed[0], AgentResponse)
-        assert committed[0].content == "Hello world!"
+        assert isinstance(committed[1], AgentResponse)
+        assert isinstance(committed[2], AgentSpeechSent)
+        assert committed[0].content == "Hello"
+        assert committed[1].content == " world!"
+        assert committed[2].content == "Hello world!"
 
     def test_with_newlines_and_formatting(self):
         """Test matching with newlines and complex formatting."""
@@ -70,9 +80,11 @@ class TestGetCommittedEvents:
         context = ConversationContext(events=events, system_prompt="")
         committed = context.get_committed_events()
 
-        assert len(committed) == 1
+        assert len(committed) == 2
         assert isinstance(committed[0], AgentResponse)
-        assert committed[0].content == "Hello!\n\nHow"
+        assert isinstance(committed[1], AgentSpeechSent)
+        assert committed[0].content == "Hello!\n\nHow are you?"
+        assert committed[1].content == "Hello!\n\nHow"
 
     def test_real_world_conversation(self):
         """Test real-world conversation with multiple interruptions and continuations."""
@@ -127,53 +139,53 @@ class TestGetCommittedEvents:
         # 8. UserTranscription: "No. It's not a physical object."
         # 9. AgentResponse: 'Interesting! Not a physical object.'
         # 10. UserTranscription: 'What was question'
-        assert len(committed) == 11
+        assert len(committed) == 16
 
         # Check first committed response (interrupted)
-        assert isinstance(committed[0], AgentResponse)
-        assert committed[0].content == "Let's"
+        assert isinstance(committed[1], AgentSpeechSent)
+        assert committed[1].content == "Let's"
 
         # Check first user message
-        assert isinstance(committed[1], UserTranscriptionReceived)
-        assert committed[1].content == "Yeah."
+        assert isinstance(committed[2], UserTranscriptionReceived)
+        assert committed[2].content == "Yeah."
 
-        assert isinstance(committed[2], AgentResponse)
-        assert committed[2].content == "play 20 questions! When you have your item in mind, just say start."
+        assert isinstance(committed[3], AgentSpeechSent)
+        assert committed[3].content == "play 20 questions! When you have your item in mind, just say start."
 
         # Check second committed response (full)
-        assert isinstance(committed[3], AgentResponse)
-        assert committed[3].content == (
+        assert isinstance(committed[5], AgentSpeechSent)
+        assert committed[5].content == (
             "Alright, I'm ready to play! I'll try my best to guess what you're "
             "thinking of.\n\nQuestion 1: Is it an animal?"
         )
 
         # Check second user message
-        assert isinstance(committed[4], UserTranscriptionReceived)
-        assert committed[4].content == "No. It's not an animal."
+        assert isinstance(committed[6], UserTranscriptionReceived)
+        assert committed[6].content == "No. It's not an animal."
 
         # Check third committed response (interrupted - only "Okay, not an animal!")
-        assert isinstance(committed[5], AgentResponse)
-        assert committed[5].content == "Okay, not an animal!"
+        assert isinstance(committed[8], AgentSpeechSent)
+        assert committed[8].content == "Okay, not an animal!"
 
         # Check third user message
-        assert isinstance(committed[6], UserTranscriptionReceived)
-        assert committed[6].content == "Good call to go."
+        assert isinstance(committed[9], UserTranscriptionReceived)
+        assert committed[9].content == "Good call to go."
 
         # Check fourth committed response (continuation from pending)
-        assert isinstance(committed[7], AgentResponse)
-        assert committed[7].content == "Question 2: Is it a physical object?"
+        assert isinstance(committed[11], AgentSpeechSent)
+        assert committed[11].content == "Question 2: Is it a physical object?"
 
         # Check fourth user message
-        assert isinstance(committed[8], UserTranscriptionReceived)
-        assert committed[8].content == "No. It's not a physical object."
+        assert isinstance(committed[12], UserTranscriptionReceived)
+        assert committed[12].content == "No. It's not a physical object."
 
         # Check fifth user message (no agent response committed yet)
-        assert isinstance(committed[9], AgentResponse)
-        assert committed[9].content == "Interesting! Not a physical object."
+        assert isinstance(committed[14], AgentSpeechSent)
+        assert committed[14].content == "Interesting! Not a physical object."
 
         # Check sixth user message
-        assert isinstance(committed[10], UserTranscriptionReceived)
-        assert committed[10].content == "What was question"
+        assert isinstance(committed[15], UserTranscriptionReceived)
+        assert committed[15].content == "What was question"
 
     def test_user_transcription_passed_through(self):
         """Test that UserTranscriptionReceived events are passed through unchanged."""
@@ -187,13 +199,15 @@ class TestGetCommittedEvents:
         context = ConversationContext(events=events, system_prompt="")
         committed = context.get_committed_events()
 
-        assert len(committed) == 3
+        assert len(committed) == 4
         assert isinstance(committed[0], UserTranscriptionReceived)
         assert committed[0].content == "Hi there"
         assert isinstance(committed[1], AgentResponse)
         assert committed[1].content == "Hello!"
-        assert isinstance(committed[2], UserTranscriptionReceived)
-        assert committed[2].content == "How are you?"
+        assert isinstance(committed[2], AgentSpeechSent)
+        assert committed[2].content == "Hello!"
+        assert isinstance(committed[3], UserTranscriptionReceived)
+        assert committed[3].content == "How are you?"
 
     def test_multiple_speech_events(self):
         """Test multiple speech events in conversation."""
@@ -208,13 +222,17 @@ class TestGetCommittedEvents:
         context = ConversationContext(events=events, system_prompt="")
         committed = context.get_committed_events()
 
-        assert len(committed) == 3
+        assert len(committed) == 5
         assert isinstance(committed[0], AgentResponse)
         assert committed[0].content == "Hello!"
-        assert isinstance(committed[1], UserTranscriptionReceived)
-        assert committed[1].content == "Hi"
-        assert isinstance(committed[2], AgentResponse)
-        assert committed[2].content == "How are you?"
+        assert isinstance(committed[1], AgentSpeechSent)
+        assert committed[1].content == "Hello!"
+        assert isinstance(committed[2], UserTranscriptionReceived)
+        assert committed[2].content == "Hi"
+        assert isinstance(committed[3], AgentResponse)
+        assert committed[3].content == "How are you?"
+        assert isinstance(committed[4], AgentSpeechSent)
+        assert committed[4].content == "How are you?"
 
     def test_interruption_preserves_pending_for_next_speech(self):
         """Test that unspoken text remains pending for next speech event."""
@@ -229,9 +247,11 @@ class TestGetCommittedEvents:
         committed = context.get_committed_events()
 
         # Should only commit what was actually spoken (with formatting preserved)
-        assert len(committed) == 1
+        assert len(committed) == 2
         assert isinstance(committed[0], AgentResponse)
-        assert committed[0].content == "Hello"
+        assert committed[0].content == "Hello world!"
+        assert isinstance(committed[1], AgentSpeechSent)
+        assert committed[1].content == "Hello"
 
     def test_empty_events(self):
         """Test with no events."""
@@ -263,9 +283,12 @@ class TestGetCommittedEvents:
         context = ConversationContext(events=events, system_prompt="")
         committed = context.get_committed_events()
 
-        # AgentResponse without speech should not be committed
-        assert len(committed) == 1
-        assert isinstance(committed[0], UserTranscriptionReceived)
+        # AgentResponse without speech is now included in committed events
+        assert len(committed) == 2
+        assert isinstance(committed[0], AgentResponse)
+        assert committed[0].content == "Hello"
+        assert isinstance(committed[1], UserTranscriptionReceived)
+        assert committed[1].content == "Hi"
 
     def test_pending_text_carries_over_multiple_responses(self):
         """Test that pending text accumulates across multiple AgentResponse events."""
@@ -279,9 +302,15 @@ class TestGetCommittedEvents:
         context = ConversationContext(events=events, system_prompt="")
         committed = context.get_committed_events()
 
-        assert len(committed) == 1
+        assert len(committed) == 4  
         assert isinstance(committed[0], AgentResponse)
-        assert committed[0].content == "Hello world! How"
+        assert committed[0].content == "Hello"
+        assert isinstance(committed[1], AgentResponse)
+        assert committed[1].content == " world"
+        assert isinstance(committed[2], AgentResponse)
+        assert committed[2].content == "! How are you?"
+        assert isinstance(committed[3], AgentSpeechSent)
+        assert committed[3].content == "Hello world! How"
 
     def test_chinese_characters_full_match(self):
         """Test matching with Chinese characters (no spaces between words)."""
@@ -293,9 +322,12 @@ class TestGetCommittedEvents:
         context = ConversationContext(events=events, system_prompt="")
         committed = context.get_committed_events()
 
-        assert len(committed) == 1
+        assert len(committed) == 2
         assert isinstance(committed[0], AgentResponse)
         assert committed[0].content == "你好！今天天气怎么样？"
+        assert isinstance(committed[1], AgentSpeechSent)
+        assert committed[1].content == "你好！今天天气怎么样？"
+
 
     def test_chinese_characters_partial_match(self):
         """Test matching with Chinese characters when interrupted."""
@@ -307,9 +339,11 @@ class TestGetCommittedEvents:
         context = ConversationContext(events=events, system_prompt="")
         committed = context.get_committed_events()
 
-        assert len(committed) == 1
+        assert len(committed) == 2
         assert isinstance(committed[0], AgentResponse)
-        assert committed[0].content == "你好！今天"
+        assert committed[0].content == "你好！今天天气怎么样？"
+        assert isinstance(committed[1], AgentSpeechSent)
+        assert committed[1].content == "你好！今天"
 
     def test_mixed_language_with_spaces(self):
         """Test matching with mixed English and Chinese with spaces."""
@@ -321,9 +355,11 @@ class TestGetCommittedEvents:
         context = ConversationContext(events=events, system_prompt="")
         committed = context.get_committed_events()
 
-        assert len(committed) == 1
+        assert len(committed) == 2
         assert isinstance(committed[0], AgentResponse)
         assert committed[0].content == "Hello 你好! How are you 今天好吗?"
+        assert isinstance(committed[1], AgentSpeechSent)
+        assert committed[1].content == "Hello 你好! How are you 今天好吗?"
 
     def test_chinese_with_interruption_and_continuation(self):
         """Test Chinese text with interruption and continuation like real conversation."""
@@ -338,13 +374,17 @@ class TestGetCommittedEvents:
         context = ConversationContext(events=events, system_prompt="")
         committed = context.get_committed_events()
 
-        assert len(committed) == 3
+        assert len(committed) == 5
         assert isinstance(committed[0], AgentResponse)
-        assert committed[0].content == "我想问你"
-        assert isinstance(committed[1], UserTranscriptionReceived)
-        assert committed[1].content == "等一下"
-        assert isinstance(committed[2], AgentResponse)
-        assert committed[2].content == "好的，你准备好了吗？"
+        assert committed[0].content == "我想问你一个问题"
+        assert isinstance(committed[1], AgentSpeechSent)
+        assert committed[1].content == "我想问你"
+        assert isinstance(committed[2], UserTranscriptionReceived)
+        assert committed[2].content == "等一下"
+        assert isinstance(committed[3], AgentResponse)
+        assert committed[3].content == "好的，你准备好了吗？"
+        assert isinstance(committed[4], AgentSpeechSent)
+        assert committed[4].content == "好的，你准备好了吗？"
 
     def test_multiple_responses_concatenation_with_space(self):
         """Test that multiple AgentResponse events are concatenated with space separator."""
@@ -358,10 +398,16 @@ class TestGetCommittedEvents:
         context = ConversationContext(events=events, system_prompt="")
         committed = context.get_committed_events()
 
-        assert len(committed) == 1
+        assert len(committed) == 4
         assert isinstance(committed[0], AgentResponse)
-        # Should preserve the space separator added during concatenation
-        assert committed[0].content == "First response.Second"
+        assert committed[0].content == "First response."
+        assert isinstance(committed[1], AgentResponse)
+        assert committed[1].content == "Second response."
+        assert isinstance(committed[2], AgentResponse)
+        assert committed[2].content == "Third response."
+        assert isinstance(committed[3], AgentSpeechSent)
+        # The speech was interrupted partway through "Second response"
+        assert committed[3].content == "First response.Second"
 
 
 class TestLatinScriptsWithDiacritics:
@@ -377,9 +423,11 @@ class TestLatinScriptsWithDiacritics:
         context = ConversationContext(events=events, system_prompt="")
         committed = context.get_committed_events()
 
-        assert len(committed) == 1
+        assert len(committed) == 2
         assert isinstance(committed[0], AgentResponse)
         assert committed[0].content == "Ça va? Comment ça s'est passé?"
+        assert isinstance(committed[1], AgentSpeechSent)
+        assert committed[1].content == "Ça va? Comment ça s'est passé?"
 
     def test_french_interruption(self):
         """Test French text interrupted mid-sentence."""
@@ -391,9 +439,11 @@ class TestLatinScriptsWithDiacritics:
         context = ConversationContext(events=events, system_prompt="")
         committed = context.get_committed_events()
 
-        assert len(committed) == 1
+        assert len(committed) == 2
         assert isinstance(committed[0], AgentResponse)
-        assert committed[0].content == "Bonjour! J'espère que tu vas"
+        assert committed[0].content == "Bonjour! J'espère que tu vas bien aujourd'hui."
+        assert isinstance(committed[1], AgentSpeechSent)
+        assert committed[1].content == "Bonjour! J'espère que tu vas"
 
     def test_spanish_special_characters(self):
         """Test Spanish punctuation and accents (ñ, á, í, ¿, ¡)."""
@@ -405,9 +455,11 @@ class TestLatinScriptsWithDiacritics:
         context = ConversationContext(events=events, system_prompt="")
         committed = context.get_committed_events()
 
-        assert len(committed) == 1
+        assert len(committed) == 2
         assert isinstance(committed[0], AgentResponse)
         assert committed[0].content == "¿Cómo estás? ¡Muy bien! Mañana es España."
+        assert isinstance(committed[1], AgentSpeechSent)
+        assert committed[1].content == "¿Cómo estás? ¡Muy bien! Mañana es España."
 
     def test_spanish_interruption(self):
         """Test Spanish text with interruption."""
@@ -419,9 +471,11 @@ class TestLatinScriptsWithDiacritics:
         context = ConversationContext(events=events, system_prompt="")
         committed = context.get_committed_events()
 
-        assert len(committed) == 1
+        assert len(committed) == 2
         assert isinstance(committed[0], AgentResponse)
-        assert committed[0].content == "¿Cómo estás?"
+        assert committed[0].content == "¿Cómo estás? ¡Muy bien!"
+        assert isinstance(committed[1], AgentSpeechSent)
+        assert committed[1].content == "¿Cómo estás?"
 
     def test_german_umlauts(self):
         """Test German text with umlauts (ä, ö, ü, ß)."""
@@ -433,9 +487,11 @@ class TestLatinScriptsWithDiacritics:
         context = ConversationContext(events=events, system_prompt="")
         committed = context.get_committed_events()
 
-        assert len(committed) == 1
+        assert len(committed) == 2
         assert isinstance(committed[0], AgentResponse)
         assert committed[0].content == "Guten Tag! Schönes Wetter. Straße und Äpfel."
+        assert isinstance(committed[1], AgentSpeechSent)
+        assert committed[1].content == "Guten Tag! Schönes Wetter. Straße und Äpfel."
 
     def test_portuguese_tildes(self):
         """Test Portuguese text with tildes and accents (ã, õ, â, ê)."""
@@ -447,9 +503,11 @@ class TestLatinScriptsWithDiacritics:
         context = ConversationContext(events=events, system_prompt="")
         committed = context.get_committed_events()
 
-        assert len(committed) == 1
+        assert len(committed) == 2
         assert isinstance(committed[0], AgentResponse)
-        assert committed[0].content == "Não tenho irmão. São Paulo é"
+        assert committed[0].content == "Não tenho irmão. São Paulo é bonito!"
+        assert isinstance(committed[1], AgentSpeechSent)
+        assert committed[1].content == "Não tenho irmão. São Paulo é"
 
     def test_multiple_languages_in_conversation(self):
         """Test conversation switching between multiple European languages."""
@@ -464,10 +522,17 @@ class TestLatinScriptsWithDiacritics:
         context = ConversationContext(events=events, system_prompt="")
         committed = context.get_committed_events()
 
-        assert len(committed) == 3
+        assert len(committed) == 5
+        assert isinstance(committed[0], AgentResponse)
         assert committed[0].content == "Bonjour! Comment ça va?"
-        assert committed[1].content == "Très bien!"
-        assert committed[2].content == "¿Y cómo"
+        assert isinstance(committed[1], AgentSpeechSent)
+        assert committed[1].content == "Bonjour! Comment ça va?"
+        assert isinstance(committed[2], UserTranscriptionReceived)
+        assert committed[2].content == "Très bien!"
+        assert isinstance(committed[3], AgentResponse)
+        assert committed[3].content == "¿Y cómo está el tiempo?"
+        assert isinstance(committed[4], AgentSpeechSent)
+        assert committed[4].content == "¿Y cómo"
 
 
 class TestOtherNonLatinScripts:
@@ -483,9 +548,11 @@ class TestOtherNonLatinScripts:
         context = ConversationContext(events=events, system_prompt="")
         committed = context.get_committed_events()
 
-        assert len(committed) == 1
+        assert len(committed) == 2
         assert isinstance(committed[0], AgentResponse)
         assert committed[0].content == "こんにちは。今日はいい天気ですね。ありがとう。"
+        assert isinstance(committed[1], AgentSpeechSent)
+        assert committed[1].content == "こんにちは。今日はいい天気ですね。ありがとう。"
 
     def test_japanese_interruption(self):
         """Test Japanese text with interruption."""
@@ -497,9 +564,11 @@ class TestOtherNonLatinScripts:
         context = ConversationContext(events=events, system_prompt="")
         committed = context.get_committed_events()
 
-        assert len(committed) == 1
+        assert len(committed) == 2
         assert isinstance(committed[0], AgentResponse)
-        assert committed[0].content == "こんにちは。今日は"
+        assert committed[0].content == "こんにちは。今日はいい天気ですね。"
+        assert isinstance(committed[1], AgentSpeechSent)
+        assert committed[1].content == "こんにちは。今日は"
 
     def test_japanese_mixed_with_english(self):
         """Test Japanese mixed with English words."""
@@ -511,9 +580,11 @@ class TestOtherNonLatinScripts:
         context = ConversationContext(events=events, system_prompt="")
         committed = context.get_committed_events()
 
-        assert len(committed) == 1
+        assert len(committed) == 2
         assert isinstance(committed[0], AgentResponse)
         assert committed[0].content == "Hello! 今日はいい天気ですね。Thank you!"
+        assert isinstance(committed[1], AgentSpeechSent)
+        assert committed[1].content == "Hello! 今日はいい天気ですね。Thank you!"
 
     def test_arabic_rtl_text(self):
         """Test Arabic right-to-left text."""
@@ -525,9 +596,11 @@ class TestOtherNonLatinScripts:
         context = ConversationContext(events=events, system_prompt="")
         committed = context.get_committed_events()
 
-        assert len(committed) == 1
+        assert len(committed) == 2
         assert isinstance(committed[0], AgentResponse)
         assert committed[0].content == "مرحبا! كيف حالك اليوم؟"
+        assert isinstance(committed[1], AgentSpeechSent)
+        assert committed[1].content == "مرحبا! كيف حالك اليوم؟"
 
     def test_arabic_interruption(self):
         """Test Arabic text with interruption."""
@@ -539,9 +612,11 @@ class TestOtherNonLatinScripts:
         context = ConversationContext(events=events, system_prompt="")
         committed = context.get_committed_events()
 
-        assert len(committed) == 1
+        assert len(committed) == 2
         assert isinstance(committed[0], AgentResponse)
-        assert committed[0].content == "مرحبا! كيف حالك"
+        assert committed[0].content == "مرحبا! كيف حالك اليوم؟ أنا بخير."
+        assert isinstance(committed[1], AgentSpeechSent)
+        assert committed[1].content == "مرحبا! كيف حالك"
 
     def test_korean_hangul(self):
         """Test Korean Hangul characters."""
@@ -553,9 +628,11 @@ class TestOtherNonLatinScripts:
         context = ConversationContext(events=events, system_prompt="")
         committed = context.get_committed_events()
 
-        assert len(committed) == 1
+        assert len(committed) == 2
         assert isinstance(committed[0], AgentResponse)
         assert committed[0].content == "안녕하세요! 오늘 날씨가 좋네요."
+        assert isinstance(committed[1], AgentSpeechSent)
+        assert committed[1].content == "안녕하세요! 오늘 날씨가 좋네요."
 
     def test_korean_interruption(self):
         """Test Korean text with interruption."""
@@ -567,9 +644,11 @@ class TestOtherNonLatinScripts:
         context = ConversationContext(events=events, system_prompt="")
         committed = context.get_committed_events()
 
-        assert len(committed) == 1
+        assert len(committed) == 2
         assert isinstance(committed[0], AgentResponse)
-        assert committed[0].content == "안녕하세요! 오늘"
+        assert committed[0].content == "안녕하세요! 오늘 날씨가 좋네요. 감사합니다."
+        assert isinstance(committed[1], AgentSpeechSent)
+        assert committed[1].content == "안녕하세요! 오늘"
 
     def test_thai_script(self):
         """Test Thai script (no spaces between words)."""
@@ -581,9 +660,11 @@ class TestOtherNonLatinScripts:
         context = ConversationContext(events=events, system_prompt="")
         committed = context.get_committed_events()
 
-        assert len(committed) == 1
+        assert len(committed) == 2
         assert isinstance(committed[0], AgentResponse)
         assert committed[0].content == "สวัสดีครับ วันนี้อากาศดีมาก"
+        assert isinstance(committed[1], AgentSpeechSent)
+        assert committed[1].content == "สวัสดีครับ วันนี้อากาศดีมาก"
 
     def test_hindi_devanagari(self):
         """Test Hindi Devanagari script."""
@@ -595,9 +676,11 @@ class TestOtherNonLatinScripts:
         context = ConversationContext(events=events, system_prompt="")
         committed = context.get_committed_events()
 
-        assert len(committed) == 1
+        assert len(committed) == 2
         assert isinstance(committed[0], AgentResponse)
         assert committed[0].content == "नमस्ते! आप कैसे हैं?"
+        assert isinstance(committed[1], AgentSpeechSent)
+        assert committed[1].content == "नमस्ते! आप कैसे हैं?"
 
 
 class TestEmojisAndSpecialCharacters:
@@ -613,9 +696,11 @@ class TestEmojisAndSpecialCharacters:
         context = ConversationContext(events=events, system_prompt="")
         committed = context.get_committed_events()
 
-        assert len(committed) == 1
+        assert len(committed) == 2
         assert isinstance(committed[0], AgentResponse)
         assert committed[0].content == "Hello! 👋 How are you? 😊"
+        assert isinstance(committed[1], AgentSpeechSent)
+        assert committed[1].content == "Hello! 👋 How are you? 😊"
 
     def test_emoji_interruption(self):
         """Test interruption at emoji boundary."""
@@ -627,9 +712,11 @@ class TestEmojisAndSpecialCharacters:
         context = ConversationContext(events=events, system_prompt="")
         committed = context.get_committed_events()
 
-        assert len(committed) == 1
+        assert len(committed) == 2
         assert isinstance(committed[0], AgentResponse)
-        assert committed[0].content == "Great! 🎉"
+        assert committed[0].content == "Great! 🎉 Let's celebrate! 🎊"
+        assert isinstance(committed[1], AgentSpeechSent)
+        assert committed[1].content == "Great! 🎉"
 
     def test_multiple_emojis_consecutively(self):
         """Test multiple emojis in a row."""
@@ -641,9 +728,11 @@ class TestEmojisAndSpecialCharacters:
         context = ConversationContext(events=events, system_prompt="")
         committed = context.get_committed_events()
 
-        assert len(committed) == 1
+        assert len(committed) == 2
         assert isinstance(committed[0], AgentResponse)
         assert committed[0].content == "Wow! 🎉🎊🎈 Amazing!"
+        assert isinstance(committed[1], AgentSpeechSent)
+        assert committed[1].content == "Wow! 🎉🎊🎈 Amazing!"
 
     def test_emoji_skin_tone_modifiers(self):
         """Test emojis with skin tone modifiers."""
@@ -655,9 +744,11 @@ class TestEmojisAndSpecialCharacters:
         context = ConversationContext(events=events, system_prompt="")
         committed = context.get_committed_events()
 
-        assert len(committed) == 1
+        assert len(committed) == 2
         assert isinstance(committed[0], AgentResponse)
         assert committed[0].content == "Hello! 👋🏽 Nice to meet you! 👍🏾"
+        assert isinstance(committed[1], AgentSpeechSent)
+        assert committed[1].content == "Hello! 👋🏽 Nice to meet you! 👍🏾"
 
     def test_numbers_and_symbols(self):
         """Test responses with numbers and mathematical symbols."""
@@ -669,9 +760,11 @@ class TestEmojisAndSpecialCharacters:
         context = ConversationContext(events=events, system_prompt="")
         committed = context.get_committed_events()
 
-        assert len(committed) == 1
+        assert len(committed) == 2
         assert isinstance(committed[0], AgentResponse)
         assert committed[0].content == "The answer is 42! That's 100% correct. 2+2=4."
+        assert isinstance(committed[1], AgentSpeechSent)
+        assert committed[1].content == "The answer is 42! That's 100% correct. 2+2=4."
 
     def test_currency_symbols(self):
         """Test various currency symbols."""
@@ -683,9 +776,11 @@ class TestEmojisAndSpecialCharacters:
         context = ConversationContext(events=events, system_prompt="")
         committed = context.get_committed_events()
 
-        assert len(committed) == 1
+        assert len(committed) == 2
         assert isinstance(committed[0], AgentResponse)
         assert committed[0].content == "It costs $100 or €85 or £75 or ¥10000."
+        assert isinstance(committed[1], AgentSpeechSent)
+        assert committed[1].content == "It costs $100 or €85 or £75 or ¥10000."
 
 
 class TestWhitespaceAndFormatting:
@@ -701,9 +796,11 @@ class TestWhitespaceAndFormatting:
         context = ConversationContext(events=events, system_prompt="")
         committed = context.get_committed_events()
 
-        assert len(committed) == 1
+        assert len(committed) == 2
         assert isinstance(committed[0], AgentResponse)
         assert committed[0].content == "Hello    world!    How   are you?"
+        assert isinstance(committed[1], AgentSpeechSent)
+        assert committed[1].content == "Hello    world!    How   are you?"
 
     def test_multiple_newlines(self):
         """Test multiple consecutive newlines."""
@@ -715,9 +812,11 @@ class TestWhitespaceAndFormatting:
         context = ConversationContext(events=events, system_prompt="")
         committed = context.get_committed_events()
 
-        assert len(committed) == 1
+        assert len(committed) == 2
         assert isinstance(committed[0], AgentResponse)
         assert committed[0].content == "Hello\n\n\nworld!\n\nHow are you?"
+        assert isinstance(committed[1], AgentSpeechSent)
+        assert committed[1].content == "Hello\n\n\nworld!\n\nHow are you?"
 
     def test_leading_trailing_whitespace(self):
         """Test with leading/trailing whitespace in content."""
@@ -729,10 +828,12 @@ class TestWhitespaceAndFormatting:
         context = ConversationContext(events=events, system_prompt="")
         committed = context.get_committed_events()
 
-        assert len(committed) == 1
+        assert len(committed) == 2
         assert isinstance(committed[0], AgentResponse)
         # Strip is applied in the implementation
-        assert committed[0].content == "Hello world!"
+        assert committed[0].content == "  Hello world!  "
+        assert isinstance(committed[1], AgentSpeechSent)
+        assert committed[1].content == "Hello world!"
 
     def test_tab_characters(self):
         """Test with tab characters."""
@@ -744,9 +845,11 @@ class TestWhitespaceAndFormatting:
         context = ConversationContext(events=events, system_prompt="")
         committed = context.get_committed_events()
 
-        assert len(committed) == 1
+        assert len(committed) == 2
         assert isinstance(committed[0], AgentResponse)
         assert committed[0].content == "Hello\tworld!\tHow\tare\tyou?"
+        assert isinstance(committed[1], AgentSpeechSent)
+        assert committed[1].content == "Hello\tworld!\tHow\tare\tyou?"
 
     def test_mixed_whitespace_types(self):
         """Test mixed spaces, tabs, and newlines."""
@@ -758,9 +861,11 @@ class TestWhitespaceAndFormatting:
         context = ConversationContext(events=events, system_prompt="")
         committed = context.get_committed_events()
 
-        assert len(committed) == 1
+        assert len(committed) == 2
         assert isinstance(committed[0], AgentResponse)
         assert committed[0].content == "Hello \t world!\n How  \tare\tyou?"
+        assert isinstance(committed[1], AgentSpeechSent)
+        assert committed[1].content == "Hello \t world!\n How  \tare\tyou?"
 
 
 class TestPunctuationVariations:
@@ -776,9 +881,11 @@ class TestPunctuationVariations:
         context = ConversationContext(events=events, system_prompt="")
         committed = context.get_committed_events()
 
-        assert len(committed) == 1
+        assert len(committed) == 2
         assert isinstance(committed[0], AgentResponse)
         assert committed[0].content == """It's a "test" of 'quotes' and "more"."""
+        assert isinstance(committed[1], AgentSpeechSent)
+        assert committed[1].content == """It's a "test" of 'quotes' and "more"."""
 
     def test_ellipsis_variations(self):
         """Test three dots vs ellipsis character."""
@@ -790,9 +897,11 @@ class TestPunctuationVariations:
         context = ConversationContext(events=events, system_prompt="")
         committed = context.get_committed_events()
 
-        assert len(committed) == 1
+        assert len(committed) == 2
         assert isinstance(committed[0], AgentResponse)
         assert committed[0].content == "Well... I think… maybe?"
+        assert isinstance(committed[1], AgentSpeechSent)
+        assert committed[1].content == "Well... I think… maybe?"
 
     def test_dashes_and_hyphens(self):
         """Test em-dash, en-dash, and hyphen."""
@@ -804,9 +913,11 @@ class TestPunctuationVariations:
         context = ConversationContext(events=events, system_prompt="")
         committed = context.get_committed_events()
 
-        assert len(committed) == 1
+        assert len(committed) == 2
         assert isinstance(committed[0], AgentResponse)
         assert committed[0].content == "Hello—world! It's 2020–2025 or well-known."
+        assert isinstance(committed[1], AgentSpeechSent)
+        assert committed[1].content == "Hello—world! It's 2020–2025 or well-known."
 
     def test_various_brackets(self):
         """Test different types of brackets."""
@@ -818,9 +929,11 @@ class TestPunctuationVariations:
         context = ConversationContext(events=events, system_prompt="")
         committed = context.get_committed_events()
 
-        assert len(committed) == 1
+        assert len(committed) == 2
         assert isinstance(committed[0], AgentResponse)
         assert committed[0].content == "Test (parentheses) [brackets] {braces} <angles>."
+        assert isinstance(committed[1], AgentSpeechSent)
+        assert committed[1].content == "Test (parentheses) [brackets] {braces} <angles>."
 
     def test_special_punctuation(self):
         """Test special punctuation marks."""
@@ -832,9 +945,11 @@ class TestPunctuationVariations:
         context = ConversationContext(events=events, system_prompt="")
         committed = context.get_committed_events()
 
-        assert len(committed) == 1
+        assert len(committed) == 2
         assert isinstance(committed[0], AgentResponse)
         assert committed[0].content == "Wow! Really? Yes... Maybe; no, never: always."
+        assert isinstance(committed[1], AgentSpeechSent)
+        assert committed[1].content == "Wow! Really? Yes... Maybe; no, never: always."
 
 
 class TestEdgeCases:
@@ -850,8 +965,10 @@ class TestEdgeCases:
         context = ConversationContext(events=events, system_prompt="")
         committed = context.get_committed_events()
 
-        # Empty content after strip returns no committed events
-        assert len(committed) == 0
+        # Empty content is now included in committed events
+        assert len(committed) == 1
+        assert isinstance(committed[0], AgentResponse)
+        assert committed[0].content == ""
 
     def test_only_whitespace_content(self):
         """Test response with only whitespace."""
@@ -863,8 +980,10 @@ class TestEdgeCases:
         context = ConversationContext(events=events, system_prompt="")
         committed = context.get_committed_events()
 
-        # Whitespace-only content gets stripped and returns empty
-        assert len(committed) == 0
+        # Whitespace-only content is now included in committed events
+        assert len(committed) == 1
+        assert isinstance(committed[0], AgentResponse)
+        assert committed[0].content == "   \n\t  "
 
     def test_only_punctuation(self):
         """Test response with only punctuation."""
@@ -876,9 +995,11 @@ class TestEdgeCases:
         context = ConversationContext(events=events, system_prompt="")
         committed = context.get_committed_events()
 
-        assert len(committed) == 1
+        assert len(committed) == 2
         assert isinstance(committed[0], AgentResponse)
         assert committed[0].content == "...!?!"
+        assert isinstance(committed[1], AgentSpeechSent)
+        assert committed[1].content == "...!?!"
 
     def test_very_long_response(self):
         """Test with extremely long response text."""
@@ -893,10 +1014,13 @@ class TestEdgeCases:
         context = ConversationContext(events=events, system_prompt="")
         committed = context.get_committed_events()
 
-        assert len(committed) == 1
+        assert len(committed) == 2
         assert isinstance(committed[0], AgentResponse)
-        # Should have committed about half of the responses
-        assert len(committed[0].content) < len(long_text)
+        # AgentResponse is returned in full
+        assert committed[0].content == long_text
+        assert isinstance(committed[1], AgentSpeechSent)
+        # AgentSpeechSent should have the interrupted portion with formatting restored
+        assert len(committed[1].content) < len(long_text)
 
     def test_single_character_response(self):
         """Test single character responses."""
@@ -908,9 +1032,11 @@ class TestEdgeCases:
         context = ConversationContext(events=events, system_prompt="")
         committed = context.get_committed_events()
 
-        assert len(committed) == 1
+        assert len(committed) == 2
         assert isinstance(committed[0], AgentResponse)
         assert committed[0].content == "A"
+        assert isinstance(committed[1], AgentSpeechSent)
+        assert committed[1].content == "A"
 
     def test_single_word_response(self):
         """Test single word response."""
@@ -922,9 +1048,11 @@ class TestEdgeCases:
         context = ConversationContext(events=events, system_prompt="")
         committed = context.get_committed_events()
 
-        assert len(committed) == 1
+        assert len(committed) == 2
         assert isinstance(committed[0], AgentResponse)
         assert committed[0].content == "Hello"
+        assert isinstance(committed[1], AgentSpeechSent)
+        assert committed[1].content == "Hello"
 
 
 class TestComplexMultilingual:
@@ -940,9 +1068,11 @@ class TestComplexMultilingual:
         context = ConversationContext(events=events, system_prompt="")
         committed = context.get_committed_events()
 
-        assert len(committed) == 1
+        assert len(committed) == 2
         assert isinstance(committed[0], AgentResponse)
         assert committed[0].content == "Hello 你好 مرحبا こんにちは 안녕하세요! How are you?"
+        assert isinstance(committed[1], AgentSpeechSent)
+        assert committed[1].content == "Hello 你好 مرحبا こんにちは 안녕하세요! How are you?"
 
     def test_multilingual_with_emojis(self):
         """Test multilingual text with emojis."""
@@ -954,9 +1084,11 @@ class TestComplexMultilingual:
         context = ConversationContext(events=events, system_prompt="")
         committed = context.get_committed_events()
 
-        assert len(committed) == 1
+        assert len(committed) == 2
         assert isinstance(committed[0], AgentResponse)
         assert committed[0].content == "Hello 👋 你好 😊 مرحبا 🌟"
+        assert isinstance(committed[1], AgentSpeechSent)
+        assert committed[1].content == "Hello 👋 你好 😊 مرحبا 🌟"
 
     def test_code_snippet_in_response(self):
         """Test code snippets in response."""
@@ -968,9 +1100,11 @@ class TestComplexMultilingual:
         context = ConversationContext(events=events, system_prompt="")
         committed = context.get_committed_events()
 
-        assert len(committed) == 1
+        assert len(committed) == 2
         assert isinstance(committed[0], AgentResponse)
         assert committed[0].content == "Use the function: print('hello world')"
+        assert isinstance(committed[1], AgentSpeechSent)
+        assert committed[1].content == "Use the function: print('hello world')"
 
     def test_url_in_response(self):
         """Test URLs in responses."""
@@ -982,9 +1116,11 @@ class TestComplexMultilingual:
         context = ConversationContext(events=events, system_prompt="")
         committed = context.get_committed_events()
 
-        assert len(committed) == 1
+        assert len(committed) == 2
         assert isinstance(committed[0], AgentResponse)
         assert committed[0].content == "Visit https://example.com for more info!"
+        assert isinstance(committed[1], AgentSpeechSent)
+        assert committed[1].content == "Visit https://example.com for more info!"
 
     def test_email_in_response(self):
         """Test email addresses in responses."""
@@ -996,9 +1132,11 @@ class TestComplexMultilingual:
         context = ConversationContext(events=events, system_prompt="")
         committed = context.get_committed_events()
 
-        assert len(committed) == 1
+        assert len(committed) == 2
         assert isinstance(committed[0], AgentResponse)
         assert committed[0].content == "Contact us at support@example.com today!"
+        assert isinstance(committed[1], AgentSpeechSent)
+        assert committed[1].content == "Contact us at support@example.com today!"
 
     def test_case_sensitivity_preserved(self):
         """Test that case is preserved correctly."""
@@ -1010,9 +1148,11 @@ class TestComplexMultilingual:
         context = ConversationContext(events=events, system_prompt="")
         committed = context.get_committed_events()
 
-        assert len(committed) == 1
+        assert len(committed) == 2
         assert isinstance(committed[0], AgentResponse)
         assert committed[0].content == "HELLO World! HoW ArE yOu?"
+        assert isinstance(committed[1], AgentSpeechSent)
+        assert committed[1].content == "HELLO World! HoW ArE yOu?"
 
 
 if __name__ == "__main__":

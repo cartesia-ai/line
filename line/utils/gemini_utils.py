@@ -10,7 +10,7 @@ from google.genai import types
 from loguru import logger
 
 from line.events import (
-    AgentResponse,
+    AgentSpeechSent,
     DTMFInputEvent,
     DTMFOutputEvent,
     EventInstance,
@@ -34,7 +34,7 @@ def convert_messages_to_gemini(
 
     Note:
         This method only handles these event types:
-            - `AgentResponse`
+            - `AgentSpeechSent`
             - `UserTranscriptionReceived`
             - `ToolCall`
             - `ToolResult`
@@ -58,12 +58,12 @@ def convert_messages_to_gemini(
     for event in events:
         event_type = type(event)
 
-        if text_events_only and event_type not in (AgentResponse, UserTranscriptionReceived):
+        if text_events_only and event_type not in (AgentSpeechSent, UserTranscriptionReceived):
             continue
 
         if event_type in handlers:
             gemini_messages.append(handlers[event_type](event))
-        elif isinstance(event, AgentResponse):
+        elif isinstance(event, AgentSpeechSent):
             gemini_messages.append(types.ModelContent(parts=[types.Part.from_text(text=event.content)]))
         elif isinstance(event, UserTranscriptionReceived):
             gemini_messages.append(types.UserContent(parts=[types.Part.from_text(text=event.content)]))

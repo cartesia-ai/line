@@ -85,7 +85,7 @@ class ChatNode(ReasoningNode):
             return
 
         messages = convert_messages_to_gemini(
-            context.get_committed_events(),
+            context.events,
             {
                 DTMFOutputEvent: serialize_dtmf_output_event,
             },
