@@ -17,7 +17,8 @@ arrive incrementally as the model generates them:
     Chunk 2: ToolCall(id="call_1", name="get_weather", arguments='{"ci', is_complete=False)
     Chunk 3: ToolCall(id="call_1", name="get_weather", arguments='{"city":', is_complete=False)
     Chunk 4: ToolCall(id="call_1", name="get_weather", arguments='{"city": "San', is_complete=False)
-    Chunk 5: ToolCall(id="call_1", name="get_weather", arguments='{"city": "San Francisco"}', is_complete=True)
+    Chunk 5: ToolCall(id="call_1", name="get_weather",
+             arguments='{"city": "San Francisco"}', is_complete=True)
     ```
 
 The `is_complete` flag indicates when the tool call arguments are fully received and
@@ -51,10 +52,10 @@ Example consumption:
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, AsyncIterator, Dict, List, Optional
+from typing import Any, AsyncIterator, List, Optional
 
-from line.llm.config import LlmConfig
-from line.llm.function_tool import FunctionTool
+from line.v02.llm.config import LlmConfig
+from line.v02.llm.function_tool import FunctionTool
 
 
 @dataclass
@@ -244,8 +245,8 @@ class LLMStream(ABC):
         """Async context manager entry."""
         return self
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
-        """Async context manager exit."""
+    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:  # noqa: B027
+        """Async context manager exit. Default no-op; subclasses may override for cleanup."""
         pass
 
 

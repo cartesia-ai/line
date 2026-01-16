@@ -7,7 +7,7 @@ appropriate format for each provider (OpenAI, Anthropic, Google).
 
 Example:
     ```python
-    from line.llm import function_tool, Field
+    from line.v02.llm import function_tool, Field
 
     @function_tool
     async def get_temperature(
@@ -21,7 +21,8 @@ Example:
     ```
 """
 
-from dataclasses import dataclass, field as dataclass_field
+from dataclasses import dataclass
+from dataclasses import field as dataclass_field
 from enum import Enum
 from inspect import Parameter, iscoroutinefunction, signature
 from typing import (
@@ -37,8 +38,6 @@ from typing import (
     get_origin,
     get_type_hints,
 )
-
-from pydantic import BaseModel
 
 
 @dataclass
