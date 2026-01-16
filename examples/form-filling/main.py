@@ -6,7 +6,7 @@ from form_filling_node import FormFillingNode
 from google import genai
 
 from line import Bridge, CallRequest, VoiceAgentApp, VoiceAgentSystem
-from line.events import UserStartedSpeaking, UserStoppedSpeaking, UserTranscriptionReceived
+from line.events import AgentSpeechSent, UserStartedSpeaking, UserStoppedSpeaking, UserTranscriptionReceived
 
 gemini_client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
