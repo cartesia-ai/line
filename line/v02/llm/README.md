@@ -8,23 +8,17 @@ A unified interface for building LLM-powered voice agents with 100+ provider sup
 from typing import Annotated
 from line.v02.llm import (
     LlmAgent, LlmConfig, loopback_tool, passthrough_tool, handoff_tool,
-    Field, ToolContext, AgentSendText, AgentEndCall,
+    Field, AgentSendText, AgentEndCall,
 )
 
 # Define tools
 @loopback_tool
-async def get_weather(
-    ctx: ToolContext,
-    city: Annotated[str, Field(description="City name")]
-) -> str:
+async def get_weather(ctx, city: Annotated[str, Field(description="City name")]) -> str:
     """Get weather for a city."""
     return f"72°F in {city}"
 
 @passthrough_tool
-async def end_call(
-    ctx: ToolContext,
-    message: Annotated[str, Field(description="Goodbye message")]
-):
+async def end_call(ctx, message: Annotated[str, Field(description="Goodbye message")]):
     """End the call."""
     yield AgentSendText(text=message)
     yield AgentEndCall()
@@ -58,10 +52,7 @@ Result is sent back to the LLM for continued generation. Use for information ret
 
 ```python
 @loopback_tool
-async def lookup_order(
-    ctx: ToolContext,
-    order_id: Annotated[str, Field(description="Order ID")]
-) -> str:
+async def lookup_order(ctx, order_id: Annotated[str, Field(description="Order ID")]) -> str:
     """Look up order status."""
     order = await db.get_order(order_id)
     return f"Order {order_id}: {order.status}"
@@ -73,10 +64,7 @@ Response bypasses the LLM and goes directly to the user. Use for deterministic a
 
 ```python
 @passthrough_tool
-async def transfer_call(
-    ctx: ToolContext,
-    department: Annotated[str, Field(description="Department name")]
-):
+async def transfer_call(ctx, department: Annotated[str, Field(description="Department name")]):
     """Transfer to another department."""
     yield AgentSendText(text=f"Transferring to {department}...")
     yield AgentTransferCall(target_phone_number=DEPT_NUMBERS[department])
@@ -88,7 +76,7 @@ Transfers control to another agent. Use for multi-agent workflows.
 
 ```python
 @handoff_tool
-async def transfer_to_billing(ctx: ToolContext):
+async def transfer_to_billing(ctx):
     """Transfer to billing agent."""
     yield AgentSendText(text="Connecting you to billing...")
     yield BillingAgent()
@@ -101,7 +89,7 @@ Use `Annotated` with `Field` to define parameters:
 ```python
 @loopback_tool
 async def search_products(
-    ctx: ToolContext,
+    ctx,
     query: Annotated[str, Field(description="Search query")],
     category: Annotated[str, Field(description="Category", enum=["electronics", "clothing", "home"])],
     limit: Annotated[int, Field(description="Max results", default=10)]
@@ -111,25 +99,25 @@ async def search_products(
     ...
 ```
 
-## ToolContext
+## Tool Context
 
-Tools receive a `ToolContext` with access to:
+Tools receive a `ctx` dict with access to:
 
 ```python
 @loopback_tool
-async def my_tool(ctx: ToolContext, ...) -> str:
+async def my_tool(ctx, ...) -> str:
     # Conversation history
-    for event in ctx.conversation_history:
+    for event in ctx["conversation_history"]:
         print(event)
 
     # Current tool call info
-    print(ctx.tool_call_id, ctx.tool_name)
+    print(ctx["tool_call_id"], ctx["tool_name"])
 
     # Turn environment (session metadata)
-    print(ctx.turn_env)
+    print(ctx["turn_env"])
 
     # LLM config (system prompt, etc.)
-    print(ctx.config.system_prompt)
+    print(ctx["config"].system_prompt)
 ```
 
 ## Configuration
@@ -169,9 +157,9 @@ Responses stream automatically. Tool calls arrive incrementally:
 async for output in agent.process(env, event):
     if isinstance(output, AgentSendText):
         print(output.text, end="", flush=True)
-    elif isinstance(output, ToolCallEvent):
+    elif isinstance(output, AgentToolCalled):
         print(f"\nCalling {output.tool_name}...")
-    elif isinstance(output, ToolResultEvent):
+    elif isinstance(output, AgentToolReturned):
         print(f"Result: {output.result}")
 ```
 
@@ -188,8 +176,20 @@ async for output in agent.process(env, event):
 - `AgentEndCall` - End the call
 - `AgentTransferCall` - Transfer call
 - `AgentSendDTMF` - Send DTMF tones
-
-**Observability Events**:
-- `ToolCallEvent` - Tool was called
-- `ToolResultEvent` - Tool returned result
+- `AgentToolCalled` - Tool was called
+- `AgentToolReturned` - Tool returned result
 - `AgentHandoff` - Control transferred to another agent
+
+## Testing
+
+Run the integration test script to verify LLM provider connectivity:
+
+```bash
+# Set your API keys
+export OPENAI_API_KEY=your-key
+export ANTHROPIC_API_KEY=your-key
+export GEMINI_API_KEY=your-key
+
+# Run tests (will test whichever providers have keys set)
+uv run python line/v02/llm/scripts/test_provider.py
+```

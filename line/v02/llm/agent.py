@@ -1,15 +1,14 @@
 """
 Agent types and events for the LLM module.
 
-This module re-exports agent and event types from line.v02 for use in the LLM wrapper,
-plus defines LLM-specific extensions for tool call tracking and handoff.
+Re-exports agent and event types from line.v02 for use in the LLM wrapper.
 """
 
-from typing import Any, Dict, Literal, Optional
+from typing import Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
-# Re-export agent types from v02 (relative import since we're in v02)
+# Re-export agent types from v02
 from line.v02.agent import (
     Agent,
     AgentCallable,
@@ -21,15 +20,17 @@ from line.v02.agent import (
 
 # Re-export all event types from v02
 from line.v02.events import (
-    # Input events with history (harness -> agent)
+    # Input events with history
     AgentDTMFSent,
-    # Output events (agent -> harness)
+    # Output events
     AgentEndCall,
     AgentSendDTMF,
     AgentSendText,
     AgentTextSent,
     AgentToolCalled,
+    AgentToolCalledInput,
     AgentToolReturned,
+    AgentToolReturnedInput,
     AgentTransferCall,
     AgentTurnEnded,
     AgentTurnStarted,
@@ -39,7 +40,7 @@ from line.v02.events import (
     LogMessage,
     LogMetric,
     OutputEvent,
-    # Specific events (without history, used in history lists)
+    # Specific events
     SpecificAgentDTMFSent,
     SpecificAgentTextSent,
     SpecificAgentToolCalled,
@@ -59,48 +60,9 @@ from line.v02.events import (
     UserTurnStarted,
 )
 
-# =============================================================================
-# LLM-specific event extensions
-# These events extend v02 types with additional fields needed for LLM tool tracking.
-# =============================================================================
-
-
-class ToolCallEvent(BaseModel):
-    """
-    Extended tool call event with tool_call_id for LLM result matching.
-
-    This extends AgentToolCalled with the tool_call_id field that LLMs use
-    to match tool results back to their corresponding calls.
-    """
-
-    type: Literal["tool_call"] = "tool_call"
-    tool_name: str
-    tool_args: Dict[str, Any] = Field(default_factory=dict)
-    tool_call_id: Optional[str] = None
-
-
-class ToolResultEvent(BaseModel):
-    """
-    Extended tool result event with tool_call_id and error field.
-
-    This extends AgentToolReturned with tool_call_id for matching and
-    an error field for capturing tool execution failures.
-    """
-
-    type: Literal["tool_result"] = "tool_result"
-    tool_name: str
-    tool_call_id: Optional[str] = None
-    result: Any = None
-    error: Optional[str] = None
-
 
 class AgentHandoff(BaseModel):
-    """
-    Event emitted when control is transferred to another agent.
-
-    This is an LLM-specific event for the handoff tool paradigm where
-    one agent transfers control to another.
-    """
+    """Event emitted when control is transferred to another agent."""
 
     type: Literal["agent_handoff"] = "agent_handoff"
     target_agent: str
@@ -115,7 +77,7 @@ __all__ = [
     "AgentSpec",
     "EventFilter",
     "TurnEnv",
-    # Output events (v02)
+    # Output events
     "AgentEndCall",
     "AgentSendDTMF",
     "AgentSendText",
@@ -126,12 +88,12 @@ __all__ = [
     "LogMetric",
     "OutputEvent",
     # LLM-specific events
-    "ToolCallEvent",
-    "ToolResultEvent",
     "AgentHandoff",
     # Input events with history
     "AgentDTMFSent",
     "AgentTextSent",
+    "AgentToolCalledInput",
+    "AgentToolReturnedInput",
     "AgentTurnEnded",
     "AgentTurnStarted",
     "CallEnded",
