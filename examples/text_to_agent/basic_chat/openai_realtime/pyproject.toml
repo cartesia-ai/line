@@ -3,7 +3,7 @@ name = "basic-chat-openai-realtime"
 version = "0.1.0"
 description = "Basic chat agent using OpenAI Realtime API"
 dependencies = [
-    "cartesia-line",
+    "cartesia-line==0.1.9",
     "openai",
     "loguru",
     "fastapi",

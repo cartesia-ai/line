@@ -3,7 +3,7 @@ name = "wells-fargo-handoffs"
 version = "0.1.0"
 description = "Personal banking agent, combining bank teller and customer service agent with multi-agent handoffs"
 dependencies = [
-    "cartesia-line",
+    "cartesia-line==0.1.9",
     "google-genai; python_version>='3.9'",
     "loguru",
     "fastapi",
