@@ -6,6 +6,7 @@ See README.md for examples and documentation.
 
 import inspect
 import json
+from dataclasses import dataclass, field
 from typing import Any, AsyncIterable, Dict, List, Optional
 
 from loguru import logger
@@ -14,22 +15,38 @@ from line.v02.llm.agent import (
     Agent,
     AgentHandoff,
     AgentSendText,
+    AgentToolCalled,
+    AgentToolReturned,
     CallStarted,
     InputEvent,
     OutputEvent,
     SpecificAgentTextSent,
     SpecificInputEvent,
     SpecificUserTextSent,
-    ToolCallEvent,
-    ToolResultEvent,
     TurnEnv,
     UserTextSent,
     UserTurnEnded,
 )
 from line.v02.llm.config import LlmConfig
 from line.v02.llm.function_tool import FunctionTool, ToolType
-from line.v02.llm.providers.base import LLM, Message, ToolCall
-from line.v02.llm.tool_context import ToolContext, ToolResult
+from line.v02.llm.provider import LLMProvider, Message, ToolCall
+
+
+@dataclass
+class _ToolResult:
+    """Internal result from executing a tool."""
+
+    tool_call_id: str
+    tool_name: str
+    tool_args: Dict[str, Any] = field(default_factory=dict)
+    result: Any = None
+    error: Optional[str] = None
+    events: List[Any] = field(default_factory=list)
+    handoff_target: Any = None
+
+    @property
+    def success(self) -> bool:
+        return self.error is None
 
 
 class LlmAgent:
@@ -48,19 +65,6 @@ class LlmAgent:
         config: Optional[LlmConfig] = None,
         max_tool_iterations: int = 10,
     ):
-        """
-        Initialize the LlmAgent.
-
-        Args:
-            model: Model identifier in LiteLLM format (e.g., "gpt-4o",
-                "anthropic/claude-3-5-sonnet-20241022", "gemini/gemini-2.0-flash").
-            api_key: API key for the provider. Can also be set via environment variables.
-            tools: List of FunctionTool instances for the agent to use.
-            config: LLM configuration (system prompt, temperature, retries, fallbacks, etc.).
-            max_tool_iterations: Safety limit for loopback tool cycles per turn. Loopback tools
-                feed results back to the LLM, which may trigger more tool calls. This prevents
-                infinite loops and runaway API costs. Default 10.
-        """
         self._model = model
         self._api_key = api_key
         self._tools = tools or []
@@ -70,23 +74,18 @@ class LlmAgent:
         # Build tool lookup
         self._tool_map: Dict[str, FunctionTool] = {t.name: t for t in self._tools}
 
-        # Create the LLM instance using LiteLLM
+        # Create the LLM instance
         self._llm = self._create_llm()
 
-        # Track if first message has been sent
+        # Track state
         self._introduction_sent = False
-
-        # Handoff state: when set, all subsequent process() calls are delegated
-        # to the handoff target agent instead of this LlmAgent
         self._handoff_target: Optional[Agent] = None
 
         logger.info(f"LlmAgent initialized with model={self._model}, tools={[t.name for t in self._tools]}")
 
-    def _create_llm(self) -> LLM:
+    def _create_llm(self) -> LLMProvider:
         """Create the LiteLLM provider instance."""
-        from line.v02.llm.providers.litellm_provider import LiteLLMProvider
-
-        return LiteLLMProvider(
+        return LLMProvider(
             model=self._model,
             api_key=self._api_key,
             config=self._config,
@@ -97,59 +96,39 @@ class LlmAgent:
 
     @property
     def model(self) -> str:
-        """Get the model identifier."""
         return self._model
 
     @property
     def tools(self) -> List[FunctionTool]:
-        """Get the list of tools."""
         return self._tools
 
     @property
     def config(self) -> LlmConfig:
-        """Get the LLM configuration."""
         return self._config
 
     async def process(self, env: TurnEnv, event: InputEvent) -> AsyncIterable[OutputEvent]:
-        """
-        Process an input event and yield output events.
-
-        This is the main entry point called by the Cartesia Agent Harness.
-        It handles:
-        - Delegation to handoff target if active
-        - First message on CallStarted (if configured)
-        - LLM generation on UserTextSent or UserTurnEnded
-        - Tool execution with loopback/passthrough/handoff handling
-
-        Args:
-            env: The turn environment.
-            event: The input event to process (includes history).
-
-        Yields:
-            Output events (AgentSendText, AgentEndCall, ToolCallEvent, etc.)
-        """
-        # If handoff is active, delegate all events to the handoff target
+        """Process an input event and yield output events."""
+        # If handoff is active, delegate
         if self._handoff_target is not None:
             async for output in self._delegate_to_handoff(env, event):
                 yield output
             return
 
-        # Handle CallStarted - send first message if configured
+        # Handle CallStarted
         if isinstance(event, CallStarted):
             if self._config.introduction and not self._introduction_sent:
                 self._introduction_sent = True
                 yield AgentSendText(text=self._config.introduction)
             return
 
-        # Handle UserTextSent - generate LLM response
+        # Handle UserTextSent
         if isinstance(event, UserTextSent):
             async for output in self._generate_response(env, event.history, event.content):
                 yield output
             return
 
-        # Handle UserTurnEnded - extract text content and generate response
+        # Handle UserTurnEnded
         if isinstance(event, UserTurnEnded):
-            # Extract text from the user turn content
             user_text = ""
             for content_item in event.content:
                 if isinstance(content_item, SpecificUserTextSent):
@@ -159,30 +138,17 @@ class LlmAgent:
                     yield output
             return
 
-        # Other events can be handled here as needed
         logger.debug(f"LlmAgent received unhandled event: {type(event).__name__}")
 
     async def _delegate_to_handoff(self, env: TurnEnv, event: InputEvent) -> AsyncIterable[OutputEvent]:
-        """
-        Delegate processing to the handoff target agent.
-
-        Args:
-            env: The turn environment.
-            event: The input event.
-
-        Yields:
-            Output events from the handoff target.
-        """
+        """Delegate processing to the handoff target agent."""
         if self._handoff_target is None:
             return
 
-        # Call the handoff target's process method
         if hasattr(self._handoff_target, "process"):
-            # Class-based agent
             async for output in self._handoff_target.process(env, event):
                 yield output
         elif callable(self._handoff_target):
-            # Function-based agent
             async for output in self._handoff_target(env, event):
                 yield output
         else:
@@ -191,38 +157,23 @@ class LlmAgent:
     async def _generate_response(
         self, env: TurnEnv, history: List[SpecificInputEvent], user_text: str
     ) -> AsyncIterable[OutputEvent]:
-        """
-        Generate a response to user input using the LLM.
-
-        Args:
-            env: The turn environment.
-            history: The conversation history (list of SpecificInputEvent).
-            user_text: The user's transcribed text.
-
-        Yields:
-            Output events from LLM generation and tool execution.
-        """
-        # Build messages from conversation history
+        """Generate a response using the LLM."""
         messages = self._build_messages(history, user_text)
 
-        # Main generation loop with tool handling
         iteration = 0
         while iteration < self._max_tool_iterations:
             iteration += 1
 
-            # Stream LLM response
             text_buffer = ""
             tool_calls: List[ToolCall] = []
 
             stream = self._llm.chat(messages, self._tools if self._tools else None)
             async with stream:
                 async for chunk in stream:
-                    # Yield text as it streams
                     if chunk.text:
                         text_buffer += chunk.text
                         yield AgentSendText(text=chunk.text)
 
-                    # Collect tool calls
                     if chunk.tool_calls:
                         for tc in chunk.tool_calls:
                             existing = next((t for t in tool_calls if t.id == tc.id), None)
@@ -232,11 +183,9 @@ class LlmAgent:
                             else:
                                 tool_calls.append(tc)
 
-            # If no tool calls, we're done
             if not tool_calls:
                 break
 
-            # Process tool calls
             should_continue = False
             for tc in tool_calls:
                 if not tc.is_complete:
@@ -247,27 +196,28 @@ class LlmAgent:
                     logger.warning(f"Unknown tool: {tc.name}")
                     continue
 
-                # Yield tool call event for observability
-                yield ToolCallEvent(
-                    tool_name=tc.name,
-                    tool_args=json.loads(tc.arguments) if tc.arguments else {},
+                tool_args = json.loads(tc.arguments) if tc.arguments else {}
+
+                # Emit tool called event
+                yield AgentToolCalled(
                     tool_call_id=tc.id,
+                    tool_name=tc.name,
+                    tool_args=tool_args,
                 )
 
                 # Execute the tool
-                result = await self._execute_tool(tool, tc, history, env)
+                result = await self._execute_tool(tool, tc, tool_args, history, env)
 
-                # Handle based on tool type
                 if tool.tool_type == ToolType.LOOPBACK:
-                    # Yield result for observability
-                    yield ToolResultEvent(
-                        tool_name=tc.name,
+                    # Emit result event
+                    yield AgentToolReturned(
                         tool_call_id=tc.id,
-                        result=result.result,
-                        error=result.error,
+                        tool_name=tc.name,
+                        tool_args=tool_args,
+                        result=result.result if result.success else result.error,
                     )
 
-                    # Add assistant message with tool call to messages
+                    # Add to messages for next iteration
                     messages.append(
                         Message(
                             role="assistant",
@@ -275,8 +225,6 @@ class LlmAgent:
                             tool_calls=[tc],
                         )
                     )
-
-                    # Add tool result message
                     messages.append(
                         Message(
                             role="tool",
@@ -287,31 +235,25 @@ class LlmAgent:
                     )
 
                     should_continue = True
-                    text_buffer = ""  # Reset for next iteration
+                    text_buffer = ""
 
                 elif tool.tool_type == ToolType.PASSTHROUGH:
-                    # Yield events directly (bypass LLM)
                     for evt in result.events:
                         yield evt
 
-                    # Yield result for observability
-                    yield ToolResultEvent(
-                        tool_name=tc.name,
+                    yield AgentToolReturned(
                         tool_call_id=tc.id,
-                        result=result.result,
-                        error=result.error,
+                        tool_name=tc.name,
+                        tool_args=tool_args,
+                        result=result.result if result.success else result.error,
                     )
 
                 elif tool.tool_type == ToolType.HANDOFF:
-                    # Handoff tools yield events (like passthrough) AND set a handoff target.
-                    # After this, all subsequent process() calls go to the handoff target.
                     for evt in result.events:
                         yield evt
 
-                    # Set the handoff target for subsequent calls
                     if result.handoff_target:
                         self._handoff_target = result.handoff_target
-                        # Emit AgentHandoff event for the bus (target_agent is a string identifier)
                         target_name = (
                             getattr(result.handoff_target, "__name__", None)
                             or type(result.handoff_target).__name__
@@ -321,102 +263,86 @@ class LlmAgent:
                             reason=f"Handoff from tool {tc.name}",
                         )
 
-                    yield ToolResultEvent(
-                        tool_name=tc.name,
+                    yield AgentToolReturned(
                         tool_call_id=tc.id,
-                        result=result.result,
-                        error=result.error,
+                        tool_name=tc.name,
+                        tool_args=tool_args,
+                        result=result.result if result.success else result.error,
                     )
 
             if not should_continue:
                 break
 
     async def _execute_tool(
-        self, tool: FunctionTool, tool_call: ToolCall, history: List[SpecificInputEvent], env: TurnEnv
-    ) -> ToolResult:
-        """
-        Execute a tool and return the result.
-
-        Args:
-            tool: The FunctionTool to execute.
-            tool_call: The tool call request.
-            history: The conversation history.
-            env: The turn environment.
-
-        Returns:
-            ToolResult with the execution result.
-        """
+        self,
+        tool: FunctionTool,
+        tool_call: ToolCall,
+        tool_args: Dict[str, Any],
+        history: List[SpecificInputEvent],
+        env: TurnEnv,
+    ) -> _ToolResult:
+        """Execute a tool and return the result."""
         try:
-            # Parse arguments
-            args = json.loads(tool_call.arguments) if tool_call.arguments else {}
+            # Build context dict for tool
+            ctx = {
+                "conversation_history": list(history),
+                "tool_call_id": tool_call.id,
+                "tool_name": tool_call.name,
+                "turn_env": env,
+                "config": self._config,
+            }
 
-            # Create tool context
-            tool_ctx = ToolContext(
-                conversation_history=list(history),  # Copy the history
-                tool_call_id=tool_call.id,
-                tool_name=tool_call.name,
-                turn_env=env,
-                config=self._config,
-            )
-
-            # Execute based on tool type
             if tool.tool_type == ToolType.PASSTHROUGH:
-                # Passthrough tools are async generators that yield events
                 events = []
-                async for evt in tool.func(tool_ctx, **args):
+                async for evt in tool.func(ctx, **tool_args):
                     events.append(evt)
-                return ToolResult(
+                return _ToolResult(
                     tool_call_id=tool_call.id,
                     tool_name=tool_call.name,
+                    tool_args=tool_args,
                     events=events,
                 )
 
             elif tool.tool_type == ToolType.HANDOFF:
-                # Handoff tools are async generators that yield events AND return an agent.
-                # The last yielded value that is an Agent becomes the handoff target.
                 events = []
                 handoff_target = None
-                async for evt in tool.func(tool_ctx, **args):
-                    # Check if this is an agent (handoff target) or an event
+                async for evt in tool.func(ctx, **tool_args):
                     if self._is_agent(evt):
                         handoff_target = evt
                     else:
                         events.append(evt)
-                return ToolResult(
+                return _ToolResult(
                     tool_call_id=tool_call.id,
                     tool_name=tool_call.name,
+                    tool_args=tool_args,
                     events=events,
                     handoff_target=handoff_target,
                 )
 
             else:
-                # Loopback tools can return:
-                # 1. A bare value (use as-is)
-                # 2. A Future/Coroutine (await it)
-                # 3. An AsyncIterable (iterate and collect results)
-                raw_result = tool.func(tool_ctx, **args)
+                raw_result = tool.func(ctx, **tool_args)
                 result = await self._resolve_loopback_result(raw_result)
-                return ToolResult(
+                return _ToolResult(
                     tool_call_id=tool_call.id,
                     tool_name=tool_call.name,
+                    tool_args=tool_args,
                     result=result,
                 )
 
         except Exception as e:
             logger.error(f"Tool execution error: {e}")
-            return ToolResult(
+            return _ToolResult(
                 tool_call_id=tool_call.id,
                 tool_name=tool_call.name,
+                tool_args=tool_args,
                 error=str(e),
             )
 
     def _is_agent(self, obj: Any) -> bool:
-        """Check if an object is an Agent (has process method or is callable)."""
+        """Check if an object is an Agent."""
         if hasattr(obj, "process") and callable(obj.process):
             return True
-        # Check if it looks like a function-based agent
         if callable(obj) and not isinstance(obj, type):
-            # Heuristic: if it's a function with ctx and event params, it's likely an agent
             try:
                 sig = inspect.signature(obj)
                 params = list(sig.parameters.keys())
@@ -426,73 +352,37 @@ class LlmAgent:
         return False
 
     async def _resolve_loopback_result(self, raw_result: Any) -> Any:
-        """
-        Resolve a loopback tool result to a final value.
-
-        Supports:
-        - Bare values (returned as-is)
-        - Coroutines/Futures (awaited)
-        - AsyncIterables (collected into a list or single value)
-
-        Args:
-            raw_result: The raw return value from the tool function.
-
-        Returns:
-            The resolved result value.
-        """
-        # If it's a coroutine, await it
+        """Resolve a loopback tool result to a final value."""
         if inspect.iscoroutine(raw_result):
             return await raw_result
 
-        # If it's an awaitable (Future-like), await it
         if inspect.isawaitable(raw_result):
             return await raw_result
 
-        # If it's an async iterable, collect the results
         if hasattr(raw_result, "__aiter__"):
             results = []
             async for item in raw_result:
                 results.append(item)
-            # If only one result, return it directly; otherwise return list
             return results[0] if len(results) == 1 else results
 
-        # Otherwise, it's a bare value
         return raw_result
 
     def _build_messages(self, history: List[SpecificInputEvent], current_user_text: str) -> List[Message]:
-        """
-        Build LLM messages from conversation history.
-
-        Args:
-            history: The conversation history (list of SpecificInputEvent).
-            current_user_text: The current user's text to append.
-
-        Returns:
-            List of Message objects for the LLM.
-        """
+        """Build LLM messages from conversation history."""
         messages = []
 
-        # Convert history to messages
         for event in history:
             if isinstance(event, SpecificUserTextSent):
                 messages.append(Message(role="user", content=event.content))
             elif isinstance(event, SpecificAgentTextSent):
                 messages.append(Message(role="assistant", content=event.content))
-            # Note: Tool results in v02 don't have tool_call_id, so we skip them
-            # The LLM wrapper manages tool call/result tracking internally
 
-        # Add current user message
         messages.append(Message(role="user", content=current_user_text))
 
         return messages
 
     def reset_handoff(self) -> None:
-        """
-        Reset the handoff state, returning control to this LlmAgent.
-
-        Call this to clear an active handoff and resume processing
-        with the original LlmAgent.
-        """
+        """Reset the handoff state."""
         self._handoff_target = None
 
     @property
@@ -501,6 +391,6 @@ class LlmAgent:
         return self._handoff_target
 
     async def cleanup(self) -> None:
-        """Clean up resources (close LLM client, reset state)."""
+        """Clean up resources."""
         self._handoff_target = None
         await self._llm.aclose()

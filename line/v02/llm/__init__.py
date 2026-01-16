@@ -15,7 +15,7 @@ from line.v02.llm.agent import (
     AgentClass,
     # Input events with history
     AgentDTMFSent,
-    # Output events (v02)
+    # Output events
     AgentEndCall,
     # LLM-specific events
     AgentHandoff,
@@ -24,7 +24,9 @@ from line.v02.llm.agent import (
     AgentSpec,
     AgentTextSent,
     AgentToolCalled,
+    AgentToolCalledInput,
     AgentToolReturned,
+    AgentToolReturnedInput,
     AgentTransferCall,
     AgentTurnEnded,
     AgentTurnStarted,
@@ -49,8 +51,6 @@ from line.v02.llm.agent import (
     SpecificUserTextSent,
     SpecificUserTurnEnded,
     SpecificUserTurnStarted,
-    ToolCallEvent,
-    ToolResultEvent,
     TurnEnv,
     UserDtmfSent,
     UserTextSent,
@@ -67,8 +67,8 @@ from line.v02.llm.function_tool import Field, FunctionTool, ToolType, function_t
 # LLM Agent
 from line.v02.llm.llm_agent import LlmAgent
 
-# Provider base classes
-from line.v02.llm.providers import LLM, LLMStream, Message, StreamChunk, ToolCall, UsageInfo
+# Provider
+from line.v02.llm.provider import LLMProvider, Message, StreamChunk, ToolCall
 
 # Schema converters
 from line.v02.llm.schema_converter import (
@@ -80,9 +80,6 @@ from line.v02.llm.schema_converter import (
     function_tools_to_openai,
     merge_gemini_tools,
 )
-
-# Tool context
-from line.v02.llm.tool_context import ToolContext, ToolResult
 
 # Tool type decorators
 from line.v02.llm.tool_types import handoff_tool, loopback_tool, passthrough_tool
@@ -97,7 +94,7 @@ __all__ = [
     "AgentSpec",
     "EventFilter",
     "TurnEnv",
-    # Output events (v02)
+    # Output events
     "AgentEndCall",
     "AgentSendDTMF",
     "AgentSendText",
@@ -109,11 +106,11 @@ __all__ = [
     "OutputEvent",
     # LLM-specific events
     "AgentHandoff",
-    "ToolCallEvent",
-    "ToolResultEvent",
     # Input events with history
     "AgentDTMFSent",
     "AgentTextSent",
+    "AgentToolCalledInput",
+    "AgentToolReturnedInput",
     "AgentTurnEnded",
     "AgentTurnStarted",
     "CallEnded",
@@ -148,9 +145,6 @@ __all__ = [
     "loopback_tool",
     "passthrough_tool",
     "handoff_tool",
-    # Tool context
-    "ToolContext",
-    "ToolResult",
     # Schema converters
     "function_tool_to_openai",
     "function_tool_to_anthropic",
@@ -159,11 +153,9 @@ __all__ = [
     "function_tools_to_anthropic",
     "function_tools_to_gemini",
     "merge_gemini_tools",
-    # Provider base classes
-    "LLM",
-    "LLMStream",
+    # Provider
+    "LLMProvider",
     "Message",
     "StreamChunk",
     "ToolCall",
-    "UsageInfo",
 ]
