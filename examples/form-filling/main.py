@@ -25,7 +25,7 @@ async def handle_new_call(system: VoiceAgentSystem, call_request: CallRequest):
     system.with_speaking_node(form_node, bridge=form_bridge)
 
     form_bridge.on(UserTranscriptionReceived).map(form_node.add_event)
-
+    form_bridge.on(AgentSpeechSent).map(form_node.add_event)
     (
         form_bridge.on(UserStoppedSpeaking)
         .interrupt_on(UserStartedSpeaking, handler=form_node.on_interrupt_generate)
