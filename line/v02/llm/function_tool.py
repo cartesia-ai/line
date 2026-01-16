@@ -1,24 +1,8 @@
 """
 Function tool definitions for LLM agents.
 
-This module provides the Field annotation and @function_tool decorator for defining
-tools that can be used by LLM agents. Tools are automatically converted to the
-appropriate format for each provider (OpenAI, Anthropic, Google).
-
-Example:
-    ```python
-    from line.v02.llm import function_tool, Field
-
-    @function_tool
-    async def get_temperature(
-        ctx: ToolContext,
-        city: Annotated[str, Field(description="The city to find the temperature in")]
-    ) -> str:
-        '''
-        Call this function to find the temperature in Fahrenheit right now in a given city
-        '''
-        return await api.get_temperature(city)
-    ```
+Provides Field annotation and FunctionTool class for defining tools.
+See README.md for examples.
 """
 
 from dataclasses import dataclass
@@ -38,29 +22,18 @@ from typing import (
     get_origin,
     get_type_hints,
 )
+import warnings
 
 
 @dataclass
 class Field:
     """
-    Field annotation for tool parameters.
-
-    Use with Annotated to provide metadata about function parameters for LLM tools.
-
-    Example:
-        ```python
-        async def my_tool(
-            ctx: ToolContext,
-            name: Annotated[str, Field(description="The user's name")],
-            age: Annotated[int, Field(description="The user's age", default=0)]
-        ):
-            ...
-        ```
+    Field annotation for tool parameters. Use with Annotated[type, Field(...)].
 
     Attributes:
-        description: Description of the parameter for the LLM.
-        default: Default value for the parameter (makes it optional).
-        enum: List of allowed values for the parameter.
+        description: Description shown to the LLM.
+        default: Default value (makes parameter optional).
+        enum: List of allowed values.
     """
 
     description: str = ""
@@ -109,12 +82,7 @@ class ParameterInfo:
 
 
 class FunctionTool:
-    """
-    A wrapper around a function that makes it usable as an LLM tool.
-
-    This class extracts metadata from the function signature and docstring
-    to create tool definitions for various LLM providers.
-    """
+    """Wrapper that makes a function usable as an LLM tool."""
 
     def __init__(
         self,
@@ -123,15 +91,6 @@ class FunctionTool:
         description: Optional[str] = None,
         tool_type: ToolType = ToolType.LOOPBACK,
     ):
-        """
-        Initialize a FunctionTool.
-
-        Args:
-            func: The function to wrap.
-            name: Override the tool name (defaults to function name).
-            description: Override the description (defaults to docstring).
-            tool_type: The tool execution paradigm.
-        """
         self._func = func
         self._name = name or func.__name__
         self._description = description or (func.__doc__ or "").strip()
@@ -256,30 +215,12 @@ def function_tool(
     name: Optional[str] = None,
     description: Optional[str] = None,
 ) -> Union[FunctionTool, Callable[[Callable], FunctionTool]]:
-    """
-    Decorator to create a function tool from a function.
-
-    Can be used with or without arguments:
-
-    ```python
-    @function_tool
-    async def my_tool(ctx, param: Annotated[str, Field(description="...")]):
-        '''Tool description'''
-        ...
-
-    @function_tool(name="custom_name", description="Custom description")
-    async def another_tool(ctx, param: str):
-        ...
-    ```
-
-    Args:
-        func: The function to wrap (when used without arguments).
-        name: Override the tool name.
-        description: Override the description.
-
-    Returns:
-        A FunctionTool instance or a decorator.
-    """
+    """Deprecated: Use @loopback_tool instead."""
+    warnings.warn(
+        "function_tool is deprecated, use loopback_tool instead",
+        DeprecationWarning,
+        stacklevel=2,
+    )
 
     def decorator(f: Callable) -> FunctionTool:
         return FunctionTool(f, name=name, description=description)
