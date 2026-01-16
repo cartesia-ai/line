@@ -10,7 +10,7 @@ of events in the agent system:
 
 Example:
     ```python
-    from line.llm import loopback_tool, passthrough_tool, handoff_tool, Field
+    from line.v02.llm import loopback_tool, passthrough_tool, handoff_tool, Field
     from typing import Annotated
 
     # Default behavior - response goes back to LLM
@@ -42,7 +42,7 @@ Example:
 
 from typing import Callable, Optional, Union
 
-from line.llm.function_tool import FunctionTool, ToolType
+from line.v02.llm.function_tool import FunctionTool, ToolType
 
 
 def loopback_tool(

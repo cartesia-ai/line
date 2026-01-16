@@ -10,8 +10,8 @@ calling formats expected by different LLM providers:
 
 Example:
     ```python
-    from line.llm import function_tool, Field
-    from line.llm.schema_converter import (
+    from line.v02.llm import function_tool, Field
+    from line.v02.llm.schema_converter import (
         function_tool_to_openai,
         function_tool_to_anthropic,
         function_tool_to_gemini,
@@ -29,9 +29,9 @@ Example:
 """
 
 from enum import Enum
-from typing import Any, Dict, List, Optional, Type, Union
+from typing import Any, Dict, List, Type, Union
 
-from line.llm.function_tool import FunctionTool, ParameterInfo
+from line.v02.llm.function_tool import FunctionTool, ParameterInfo
 
 
 def python_type_to_json_schema(type_annotation: Type) -> Dict[str, Any]:
@@ -269,8 +269,7 @@ def function_tool_to_gemini(tool: FunctionTool) -> Any:
         from google.genai import types as gemini_types
     except ImportError as e:
         raise ImportError(
-            "google-genai is required for Gemini integration. "
-            "Install with: pip install google-genai"
+            "google-genai is required for Gemini integration. Install with: pip install google-genai"
         ) from e
 
     params_schema = build_parameters_schema(tool.parameters)
@@ -349,8 +348,7 @@ def merge_gemini_tools(tools: List[Any]) -> Any:
         from google.genai import types as gemini_types
     except ImportError as e:
         raise ImportError(
-            "google-genai is required for Gemini integration. "
-            "Install with: pip install google-genai"
+            "google-genai is required for Gemini integration. Install with: pip install google-genai"
         ) from e
 
     all_declarations = []
