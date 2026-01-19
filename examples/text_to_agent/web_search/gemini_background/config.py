@@ -12,7 +12,7 @@ other settings to match your specific agent requirements.
 CHAT_MODEL_ID = "gemini-2.5-flash-lite"
 CHAT_TEMPERATURE = 0.7
 
-SEARCH_MODEL_ID = "gemini-live-2.5-flash-preview"
+SEARCH_MODEL_ID = "gemini-2.5-flash"
 SEARCH_TEMPERATURE = 0.7
 
 
