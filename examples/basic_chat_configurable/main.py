@@ -4,6 +4,7 @@ from chat_node import ChatNode
 from config import INITIAL_MESSAGE, SYSTEM_PROMPT
 from google import genai
 from loguru import logger
+from template_utils import substitute_template_variables
 
 from line import Bridge, CallRequest, VoiceAgentApp, VoiceAgentSystem
 from line.events import AgentSpeechSent, UserStartedSpeaking, UserStoppedSpeaking, UserTranscriptionReceived
@@ -22,9 +23,15 @@ async def handle_new_call(system: VoiceAgentSystem, call_request: CallRequest):
         f"agent.system_prompt: {call_request.agent.system_prompt[:100] if getattr(call_request.agent, 'system_prompt', None) else None}, "
         f"agent.introduction: {call_request.agent.introduction[:100] if getattr(call_request.agent, 'introduction', None) else None}. "
     )
+
+    # Substitute template variables in system prompt and introduction
+    metadata = getattr(call_request, "metadata", None)
+    system_prompt = substitute_template_variables(call_request.agent.system_prompt or SYSTEM_PROMPT, metadata)
+    introduction = substitute_template_variables(call_request.agent.introduction, metadata)
+
     # Main conversation node
     conversation_node = ChatNode(
-        system_prompt=call_request.agent.system_prompt or SYSTEM_PROMPT,
+        system_prompt=system_prompt,
         gemini_client=gemini_client,
     )
     conversation_bridge = Bridge(conversation_node)
@@ -41,12 +48,12 @@ async def handle_new_call(system: VoiceAgentSystem, call_request: CallRequest):
 
     await system.start()
 
-    if call_request.agent.introduction is None:
+    if introduction is None:
         # No introduction configured, use default greeting
         await system.send_initial_message(INITIAL_MESSAGE)
     else:
         # Empty string = agent waits for user to speak first; non-empty = agent speaks first
-        await system.send_initial_message(call_request.agent.introduction)
+        await system.send_initial_message(introduction)
 
     await system.wait_for_shutdown()
 
