@@ -3,6 +3,7 @@ import os
 from chat_node import ChatNode
 from config import SYSTEM_PROMPT
 from google import genai
+from loguru import logger
 
 from line import Bridge, CallRequest, VoiceAgentApp, VoiceAgentSystem
 from line.events import AgentSpeechSent, UserStartedSpeaking, UserStoppedSpeaking, UserTranscriptionReceived
@@ -15,6 +16,9 @@ else:
 
 
 async def handle_new_call(system: VoiceAgentSystem, call_request: CallRequest):
+    if call_request.metadata:
+        logger.info(f"Received metadata in start call request: {call_request.metadata}")
+
     # Main conversation node
     conversation_node = ChatNode(
         system_prompt=SYSTEM_PROMPT,
