@@ -205,11 +205,11 @@ class AgentDTMFSent(SpecificAgentDTMFSent):
     history: List[SpecificInputEvent] = Field(default_factory=list)
 
 
-class AgentToolCalledInput(AgentToolCalled):
+class AgentToolCalledInput(SpecificAgentToolCalled):
     history: List[SpecificInputEvent] = Field(default_factory=list)
 
 
-class AgentToolReturnedInput(AgentToolReturned):
+class AgentToolReturnedInput(SpecificAgentToolReturned):
     history: List[SpecificInputEvent] = Field(default_factory=list)
 
 
@@ -270,6 +270,8 @@ __all__ = [
     "AgentDTMFSent",
     "AgentToolCalledInput",
     "AgentToolReturnedInput",
+    "AgentToolCalled",
+    "AgentToolReturned",
     "AgentTurnEnded",
     "InputEvent",
 ]

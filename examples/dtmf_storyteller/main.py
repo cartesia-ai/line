@@ -6,6 +6,7 @@ from google import genai
 
 from line import Bridge, CallRequest, VoiceAgentApp, VoiceAgentSystem
 from line.events import (
+    AgentSpeechSent,
     DTMFInputEvent,
     UserStartedSpeaking,
     UserStoppedSpeaking,
@@ -30,6 +31,7 @@ async def handle_new_call(system: VoiceAgentSystem, call_request: CallRequest):
 
     # Setup events
     conversation_bridge.on(UserTranscriptionReceived).map(conversation_node.add_event)
+    conversation_bridge.on(AgentSpeechSent).map(conversation_node.add_event)
     conversation_bridge.on(DTMFInputEvent).map(conversation_node.add_event)
     conversation_bridge.on(DTMFInputEvent).map(conversation_node.on_dtmf_event).broadcast()
 

@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "An interviewer agent using Cerebras API"
 requires-python = ">=3.10"
 dependencies = [
-    "cartesia-line",
+    "cartesia-line==0.1.9",
     "cerebras.cloud.sdk",
     "python-dotenv>=1.0.0",
     "loguru>=0.7.0",

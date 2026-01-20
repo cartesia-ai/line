@@ -15,6 +15,7 @@ from unittest.mock import AsyncMock, MagicMock
 from fastapi import WebSocket, WebSocketDisconnect
 import pytest
 
+from line.v02.agent import TurnEnv
 from line.v02.events import (
     AgentSendText,
     CallStarted,
@@ -51,7 +52,7 @@ def create_mock_websocket() -> MagicMock:
     return ws
 
 
-async def noop_agent(env: AgentEnv, event: InputEvent) -> AsyncIterator[OutputEvent]:
+async def noop_agent(env: TurnEnv, event: InputEvent) -> AsyncIterator[OutputEvent]:
     """Agent that yields nothing."""
     return
     yield  # Make this a generator

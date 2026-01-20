@@ -34,7 +34,7 @@ from line.harness_types import (
     TransferOutput,
     UserStateInput,
 )
-from line.v02.agent import Agent, AgentSpec, EventFilter
+from line.v02.agent import Agent, AgentSpec, EventFilter, TurnEnv
 from line.v02.events import (
     AgentDTMFSent,
     AgentEndCall,
@@ -42,7 +42,9 @@ from line.v02.events import (
     AgentSendText,
     AgentTextSent,
     AgentToolCalled,
+    AgentToolCalledInput,
     AgentToolReturned,
+    AgentToolReturnedInput,
     AgentTransferCall,
     AgentTurnEnded,
     AgentTurnStarted,
@@ -165,7 +167,7 @@ class VoiceAgentApp:
         return {
             "status": "ok",
             "timestamp": datetime.now(timezone.utc).isoformat(),
-            "service": "mandolin-agent",
+            "service": "cartesia-line",
         }
 
     async def websocket_endpoint(self, websocket: WebSocket):
@@ -248,7 +250,7 @@ class ConversationRunner:
     def _prepare_agent(
         self, agent_spec: AgentSpec
     ) -> tuple[
-        Callable[[InputEvent], AsyncIterable[OutputEvent]],
+        Callable[[TurnEnv, InputEvent], AsyncIterable[OutputEvent]],
         Callable[[InputEvent], bool],
         Callable[[InputEvent], bool],
     ]:
@@ -274,11 +276,11 @@ class ConversationRunner:
         run_filter = self._normalize_filter(run_spec)
         cancel_filter = self._normalize_filter(cancel_spec)
 
-        def _agent_callable(event: InputEvent) -> AsyncIterable[OutputEvent]:
+        def _agent_callable(turn_env: TurnEnv, event: InputEvent) -> AsyncIterable[OutputEvent]:
             if hasattr(agent_obj, "process") and callable(agent_obj.process):
-                return agent_obj.process(self.env, event)  # type: ignore[return-value]
+                return agent_obj.process(turn_env, event)  # type: ignore[return-value]
             if callable(agent_obj):
-                return agent_obj(self.env, event)  # type: ignore[return-value]
+                return agent_obj(turn_env, event)  # type: ignore[return-value]
             raise TypeError("Agent must be callable or have a callable 'process' method.")
 
         return _agent_callable, run_filter, cancel_filter
@@ -301,7 +303,7 @@ class ConversationRunner:
         """
         # Emit call_started to seed history/context
         start_event, self.history = self._wrap_with_history(self.history, SpecificCallStarted())
-        await self._handle_event(start_event)
+        await self._handle_event(TurnEnv(), start_event)
 
         while not self.shutdown_event.is_set():
             try:
@@ -311,31 +313,35 @@ class ConversationRunner:
 
                 # Map to events
                 ev, self.history = self._map_input_event(self.history, input_msg)
-                await self._handle_event(ev)
+                await self._handle_event(TurnEnv(), ev)
 
             except WebSocketDisconnect:
                 logger.info("WebSocket disconnected in loop")
                 end_event, self.history = self._wrap_with_history(self.history, SpecificCallEnded())
-                await self._handle_event(end_event)
+                await self._handle_event(TurnEnv(), end_event)
                 self.shutdown_event.set()
             except json.JSONDecodeError as e:
                 logger.exception(f"Failed to parse JSON message: {e}")
             except Exception as e:
-                logger.exception(f"Error in websocket loop: {e}")
+                await self.send_error(f"Error processing message: {e}")
 
-    async def _handle_event(self, event: InputEvent) -> None:
+        if self.agent_task:
+            await self.agent_task
+
+    async def _handle_event(self, turn_env: TurnEnv, event: InputEvent) -> None:
         """Apply run/cancel filters for a single event."""
         if self.run_filter(event):
-            await self._start_agent_task(event)
+            await self._start_agent_task(turn_env, event)
         elif self.cancel_filter(event):
             await self._cancel_agent_task()
 
-    async def _start_agent_task(self, event: InputEvent) -> None:
+    async def _start_agent_task(self, turn_env: TurnEnv, event: InputEvent) -> None:
         """Start the agent async iterable for the given event."""
+        await self._cancel_agent_task()
 
         async def runner():
             try:
-                async for output in self.agent_callable(event):
+                async for output in self.agent_callable(turn_env, event):
                     # Buffer AgentSendText content for whitespace interpolation
                     if isinstance(output, AgentSendText):
                         self.emitted_agent_text += output.text
@@ -350,7 +356,7 @@ class ConversationRunner:
                 pass
             except Exception as exc:  # noqa: BLE001
                 logger.exception(f"Agent iterable error: {exc}")
-                self.shutdown_event.set()
+                await self.send_error(f"Unexpected error: {exc}")
 
         self.agent_task = asyncio.create_task(runner())
 
@@ -374,7 +380,7 @@ class ConversationRunner:
     ######### Event Parsing Methods #########
     def _map_input_event(
         self, history: List[SpecificInputEvent], message: InputMessage
-    ) -> tuple[Optional[InputEvent], List[SpecificInputEvent]]:
+    ) -> tuple[InputEvent, List[SpecificInputEvent]]:
         """Pure mapping: history + harness message -> (InputEvent | None, updated history)."""
         if isinstance(message, UserStateInput):
             if message.value == UserState.SPEAKING:
@@ -419,8 +425,7 @@ class ConversationRunner:
             logger.info(f"🔔 DTMF received: {message.button}")
             return self._wrap_with_history(history, SpecificUserDtmfSent(button=message.button))
 
-        logger.warning(f"Unknown message type: {type(message).__name__} ({message.model_dump_json()})")
-        return None, history
+        raise ValueError(f"Unhandled input message type: {type(message).__name__}")
 
     def _turn_content(
         self,
@@ -466,15 +471,15 @@ class ConversationRunner:
         if isinstance(specific_event, SpecificAgentDTMFSent):
             return AgentDTMFSent(history=processed_history, **base_data), raw_history
         if isinstance(specific_event, SpecificAgentToolCalled):
-            return AgentToolCalled(history=processed_history, **base_data), raw_history
+            return AgentToolCalledInput(history=processed_history, **base_data), raw_history
         if isinstance(specific_event, SpecificAgentToolReturned):
-            return AgentToolReturned(history=processed_history, **base_data), raw_history
+            return AgentToolReturnedInput(history=processed_history, **base_data), raw_history
         if isinstance(specific_event, SpecificAgentTurnEnded):
             return AgentTurnEnded(history=processed_history, **base_data), raw_history
 
-        raise ValueError(f"Unhandled specific event type: {type(specific_event).__name__}")
+        raise ValueError(f"Unknown event type: {type(specific_event).__name__}")
 
-    def _map_output_event(self, event: OutputEvent) -> Optional[OutputMessage]:
+    def _map_output_event(self, event: OutputEvent) -> OutputMessage:
         """Convert OutputEvent to websocket OutputMessage."""
         if isinstance(event, AgentSendText):
             logger.info(f'🤖 Agent said: "{event.text}"')
@@ -505,8 +510,7 @@ class ConversationRunner:
             result_str = str(event.result) if event.result is not None else None
             return ToolCallOutput(name=event.tool_name, arguments=event.tool_args, result=result_str)
 
-        logger.warning(f"Unknown event type: {type(event)}")
-        return None
+        return ErrorOutput(content=f"Unhandled output event type: {type(event).__name__}")
 
 
 # Regex to split text into words, whitespace, and punctuation
@@ -522,6 +526,7 @@ def _get_processed_history(pending_text: str, history: List[SpecificInputEvent])
     in the history passed to the agent's process method.
 
     Args:
+        pending_text: Accumulated text from AgentSendText events (with whitespace)
         history: Raw history containing SpecificAgentTextSent with stripped whitespace
 
     Returns:
