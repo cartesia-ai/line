@@ -4,9 +4,9 @@ LlmAgent - An Agent implementation wrapping 100+ LLM providers via LiteLLM.
 See README.md for examples and documentation.
 """
 
+from dataclasses import dataclass, field
 import inspect
 import json
-from dataclasses import dataclass, field
 from typing import Any, AsyncIterable, Dict, List, Optional
 
 from loguru import logger
