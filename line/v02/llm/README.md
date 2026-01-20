@@ -115,11 +115,11 @@ async def search_products(
 
 ## Tool Context
 
-Tools receive a `ToolContext` object:
+Tools receive a `ToolEnv` object:
 
 ```python
 @loopback_tool()
-async def my_tool(ctx: ToolContext, ...) -> str:
+async def my_tool(ctx: ToolEnv, ...) -> str:
     # Access turn environment (session metadata)
     print(ctx.turn_env)
 ```

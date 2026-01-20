@@ -17,7 +17,7 @@ def loopback_tool(
     """
     Decorator for loopback tools. Result is sent back to the LLM.
 
-    Signature: (ctx: ToolContext, **args) -> AsyncIterable[Any] | Awaitable[Any] | Any
+    Signature: (ctx: ToolEnv, **args) -> AsyncIterable[Any] | Awaitable[Any] | Any
 
     Use for information retrieval, calculations, API queries.
     Tool returns a value that the LLM incorporates into its response.
@@ -37,7 +37,7 @@ def passthrough_tool(
     """
     Decorator for passthrough tools. Response bypasses the LLM.
 
-    Signature: (ctx: ToolContext, **args) -> AsyncIterable[OutputEvent] | Awaitable[OutputEvent] | OutputEvent
+    Signature: (ctx: ToolEnv, **args) -> AsyncIterable[OutputEvent] | Awaitable[OutputEvent] | OutputEvent
 
     Use for deterministic actions like EndCall, TransferCall.
     Tool yields OutputEvent objects directly to the caller.
@@ -59,7 +59,7 @@ def handoff_tool(
     """
     Decorator for handoff tools. Transfers control to another process.
 
-    Signature: (ctx: ToolContext, **args) -> AsyncIterable[OutputEvent] | Awaitable[OutputEvent] | OutputEvent
+    Signature: (ctx: ToolEnv, **args) -> AsyncIterable[OutputEvent] | Awaitable[OutputEvent] | OutputEvent
 
     Use for multi-agent workflows or custom handlers.
     Tool yields OutputEvent objects and optionally yields the handoff target (AgentCallable).

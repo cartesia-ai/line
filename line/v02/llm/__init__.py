@@ -49,7 +49,7 @@ from line.v02.llm.agent import (
     SpecificUserTextSent,
     SpecificUserTurnEnded,
     SpecificUserTurnStarted,
-    ToolContext,
+    ToolEnv,
     TurnEnv,
     UserDtmfSent,
     UserTextSent,
@@ -118,7 +118,7 @@ __all__ = [
     "EventFilter",
     "TurnEnv",
     # Tool types
-    "ToolContext",
+    "ToolEnv",
     "LoopbackToolFn",
     "PassthroughToolFn",
     "HandoffToolFn",
