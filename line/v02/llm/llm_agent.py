@@ -6,7 +6,17 @@ See README.md for examples and documentation.
 
 import inspect
 import json
-from typing import AsyncIterable, Awaitable, Callable, Dict, List, Optional, ParamSpec, TypeVar
+from typing import (
+    Any,
+    AsyncIterable,
+    Awaitable,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    TypeVar,
+    Union,
+)
 
 from loguru import logger
 
@@ -30,32 +40,33 @@ from line.v02.llm.function_tool import FunctionTool, ToolType
 from line.v02.llm.provider import LLMProvider, Message, ToolCall
 
 T = TypeVar("T")
-P = ParamSpec("P")
 
 
-async def _normalize_result(result: AsyncIterable[T] | Awaitable[T] | T) -> AsyncIterable[T]:
+async def _normalize_result(
+    result: Union[AsyncIterable[T], Awaitable[T], T],
+) -> AsyncIterable[T]:
     """Normalize any result type to an async iterable.
 
     Converts: AsyncIterable[T] | Awaitable[T] | T => AsyncIterable[T]
     """
     if inspect.iscoroutine(result) or inspect.isawaitable(result):
-        yield await result
+        yield await result  # type: ignore[misc]
     elif hasattr(result, "__aiter__"):
-        async for item in result:
+        async for item in result:  # type: ignore[union-attr]
             yield item
     else:
-        yield result
+        yield result  # type: ignore[misc]
 
 
 def _normalize_to_async_gen(
-    func: Callable[P, AsyncIterable[T] | Awaitable[T] | T],
-) -> Callable[P, AsyncIterable[T]]:
+    func: Callable[..., Union[AsyncIterable[T], Awaitable[T], T]],
+) -> Callable[..., AsyncIterable[T]]:
     """Wrap a function to always return an async generator.
 
-    Converts: Callable[P, AsyncIterable[T] | Awaitable[T] | T] => Callable[P, AsyncIterable[T]]
+    Converts: Callable[..., AsyncIterable[T] | Awaitable[T] | T] => Callable[..., AsyncIterable[T]]
     """
 
-    async def wrapper(*args: P.args, **kwargs: P.kwargs) -> AsyncIterable[T]:
+    async def wrapper(*args: Any, **kwargs: Any) -> AsyncIterable[T]:
         result = func(*args, **kwargs)
         async for item in _normalize_result(result):
             yield item
