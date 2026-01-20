@@ -78,46 +78,46 @@ class LLMProvider:
         **kwargs,
     ) -> "_ChatStream":
         """Start a streaming chat completion."""
-        litellm_messages = self._build_messages(messages)
+        llm_messages = self._build_messages(messages)
 
-        litellm_kwargs: Dict[str, Any] = {
+        llm_kwargs: Dict[str, Any] = {
             "model": self._model,
-            "messages": litellm_messages,
+            "messages": llm_messages,
             "stream": True,
             "num_retries": self._num_retries,
         }
 
         if self._api_key:
-            litellm_kwargs["api_key"] = self._api_key
+            llm_kwargs["api_key"] = self._api_key
         if self._fallbacks:
-            litellm_kwargs["fallbacks"] = self._fallbacks
+            llm_kwargs["fallbacks"] = self._fallbacks
         if self._timeout:
-            litellm_kwargs["timeout"] = self._timeout
+            llm_kwargs["timeout"] = self._timeout
 
         # Add config parameters
         if self._config.temperature is not None:
-            litellm_kwargs["temperature"] = self._config.temperature
+            llm_kwargs["temperature"] = self._config.temperature
         if self._config.max_tokens is not None:
-            litellm_kwargs["max_tokens"] = self._config.max_tokens
+            llm_kwargs["max_tokens"] = self._config.max_tokens
         if self._config.top_p is not None:
-            litellm_kwargs["top_p"] = self._config.top_p
+            llm_kwargs["top_p"] = self._config.top_p
         if self._config.stop:
-            litellm_kwargs["stop"] = self._config.stop
+            llm_kwargs["stop"] = self._config.stop
         if self._config.seed is not None:
-            litellm_kwargs["seed"] = self._config.seed
+            llm_kwargs["seed"] = self._config.seed
         if self._config.presence_penalty is not None:
-            litellm_kwargs["presence_penalty"] = self._config.presence_penalty
+            llm_kwargs["presence_penalty"] = self._config.presence_penalty
         if self._config.frequency_penalty is not None:
-            litellm_kwargs["frequency_penalty"] = self._config.frequency_penalty
+            llm_kwargs["frequency_penalty"] = self._config.frequency_penalty
         if self._config.extra:
-            litellm_kwargs.update(self._config.extra)
+            llm_kwargs.update(self._config.extra)
 
         if tools:
-            litellm_kwargs["tools"] = function_tools_to_openai(tools, strict=False)
+            llm_kwargs["tools"] = function_tools_to_openai(tools, strict=False)
 
-        litellm_kwargs.update(kwargs)
+        llm_kwargs.update(kwargs)
 
-        return _ChatStream(litellm_kwargs)
+        return _ChatStream(llm_kwargs)
 
     def _build_messages(self, messages: List[Message]) -> List[Dict[str, Any]]:
         """Convert Message objects to LiteLLM format."""
@@ -127,13 +127,13 @@ class LLMProvider:
             result.append({"role": "system", "content": self._config.system_prompt})
 
         for msg in messages:
-            litellm_msg: Dict[str, Any] = {"role": msg.role}
+            llm_msg: Dict[str, Any] = {"role": msg.role}
 
             if msg.content is not None:
-                litellm_msg["content"] = msg.content
+                llm_msg["content"] = msg.content
 
             if msg.tool_calls:
-                litellm_msg["tool_calls"] = [
+                llm_msg["tool_calls"] = [
                     {
                         "id": tc.id,
                         "type": "function",
@@ -143,11 +143,11 @@ class LLMProvider:
                 ]
 
             if msg.role == "tool":
-                litellm_msg["tool_call_id"] = msg.tool_call_id
+                llm_msg["tool_call_id"] = msg.tool_call_id
                 if msg.name:
-                    litellm_msg["name"] = msg.name
+                    llm_msg["name"] = msg.name
 
-            result.append(litellm_msg)
+            result.append(llm_msg)
 
         return result
 
@@ -159,15 +159,15 @@ class LLMProvider:
 class _ChatStream:
     """Async context manager for streaming chat responses."""
 
-    def __init__(self, litellm_kwargs: Dict[str, Any]):
-        self._kwargs = litellm_kwargs
+    def __init__(self, llm_kwargs: Dict[str, Any]):
+        self._kwargs = llm_kwargs
         self._response = None
 
     async def __aenter__(self) -> "_ChatStream":
         try:
             from litellm import acompletion
         except ImportError as e:
-            raise ImportError("litellm required. Install: pip install 'cartesia-line[llm]'") from e
+            raise ImportError("litellm required. Install: pip install litellm") from e
 
         self._response = await acompletion(**self._kwargs)
         return self
