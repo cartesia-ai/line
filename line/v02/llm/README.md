@@ -72,7 +72,7 @@ async def transfer_call(ctx, department: Annotated[str, Field(description="Depar
 
 ### Handoff Tools
 
-Transfers control to another agent. Use for multi-agent workflows.
+Transfers control to another process. Use for multi-agent workflows or custom handlers.
 
 ```python
 @handoff_tool()
@@ -168,7 +168,7 @@ async for output in agent.process(env, event):
 - `AgentSendDTMF` - Send DTMF tones
 - `AgentToolCalled` - Tool was called
 - `AgentToolReturned` - Tool returned result
-- `AgentHandoff` - Control transferred to another agent
+- `AgentHandedOff` - Control transferred to another process
 
 ## Testing
 

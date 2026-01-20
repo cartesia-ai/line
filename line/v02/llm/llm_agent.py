@@ -6,13 +6,12 @@ See README.md for examples and documentation.
 
 import inspect
 import json
-from dataclasses import dataclass
 from typing import Any, AsyncIterable, Callable, Dict, List, Optional, TypeVar
 
 from loguru import logger
 
 from line.v02.llm.agent import (
-    Agent,
+    AgentCallable,
     AgentHandedOff,
     AgentSendText,
     AgentToolCalled,
@@ -23,31 +22,12 @@ from line.v02.llm.agent import (
     SpecificAgentTextSent,
     SpecificInputEvent,
     SpecificUserTextSent,
+    ToolContext,
     TurnEnv,
 )
 from line.v02.llm.config import LlmConfig
 from line.v02.llm.function_tool import FunctionTool, ToolType
 from line.v02.llm.provider import LLMProvider, Message, ToolCall
-
-
-@dataclass
-class ToolContext:
-    """Context passed to tool functions."""
-
-    turn_env: TurnEnv
-
-
-@dataclass
-class ToolResult:
-    """Result from a tool execution."""
-
-    value: Any
-    error: Optional[str] = None
-
-    @property
-    def success(self) -> bool:
-        return self.error is None
-
 
 T = TypeVar("T")
 
@@ -66,22 +46,22 @@ async def _normalize_result(result: Any) -> AsyncIterable[Any]:
         yield result
 
 
-def _normalize_to_async_gen(
-    func: Callable[..., Any]
-) -> Callable[..., AsyncIterable[Any]]:
+def _normalize_to_async_gen(func: Callable[..., Any]) -> Callable[..., AsyncIterable[Any]]:
     """Wrap a function to always return an async generator.
 
     Converts: Callable[Args, AsyncIterable[T] | Future[T] | T] => Callable[Args, AsyncIterable[T]]
     """
+
     async def wrapper(*args, **kwargs) -> AsyncIterable[Any]:
         result = func(*args, **kwargs)
         async for item in _normalize_result(result):
             yield item
+
     return wrapper
 
 
-def _is_agent(obj: Any) -> bool:
-    """Check if an object is an Agent (has process method or is a callable with 2+ params)."""
+def _is_handoff_target(obj: Any) -> bool:
+    """Check if an object can be a handoff target (has process method or is a callable with 2+ params)."""
     if hasattr(obj, "process") and callable(obj.process):
         return True
     if callable(obj) and not isinstance(obj, type):
@@ -93,14 +73,18 @@ def _is_agent(obj: Any) -> bool:
     return False
 
 
-async def _delegate_to_agent(agent: Any, env: TurnEnv, event: InputEvent) -> AsyncIterable[OutputEvent]:
-    """Delegate to an agent, handling both .process() style and callable style."""
-    if hasattr(agent, "process"):
-        async for output in agent.process(env, event):
-            yield output
-    elif callable(agent):
-        async for output in agent(env, event):
-            yield output
+def _normalize_to_callable(target: Any) -> AgentCallable:
+    """Normalize a handoff target to a callable process function.
+
+    Accepts either an object with .process() method or a callable (env, event) -> AsyncIterable.
+    Returns a normalized callable.
+    """
+    if hasattr(target, "process") and callable(target.process):
+        return target.process
+    elif callable(target):
+        return target
+    else:
+        raise TypeError(f"Cannot normalize {type(target)} to process function")
 
 
 class LlmAgent:
@@ -136,7 +120,7 @@ class LlmAgent:
         )
 
         self._introduction_sent = False
-        self._handoff_target: Optional[Any] = None  # Agent object (has .process) or callable
+        self._handoff_target: Optional[AgentCallable] = None  # Normalized process function
 
         logger.info(f"LlmAgent initialized with model={self._model}, tools={[t.name for t in self._tools]}")
 
@@ -153,14 +137,15 @@ class LlmAgent:
         return self._config
 
     @property
-    def handoff_target(self) -> Optional[Callable]:
+    def handoff_target(self) -> Optional[AgentCallable]:
+        """The normalized process function we've handed off to, if any."""
         return self._handoff_target
 
     async def process(self, env: TurnEnv, event: InputEvent) -> AsyncIterable[OutputEvent]:
         """Process an input event and yield output events."""
-        # If handoff is active, delegate
+        # If handoff is active, call the handed-off process function
         if self._handoff_target is not None:
-            async for output in _delegate_to_agent(self._handoff_target, env, event):
+            async for output in self._handoff_target(env, event):
                 yield output
             return
 
@@ -171,16 +156,14 @@ class LlmAgent:
                 yield AgentSendText(text=self._config.introduction)
             return
 
-        async for output in self._generate_response(env, event.history):
+        async for output in self._generate_response(env, event):
             yield output
 
-    async def _generate_response(
-        self, env: TurnEnv, history: List[SpecificInputEvent]
-    ) -> AsyncIterable[OutputEvent]:
+    async def _generate_response(self, env: TurnEnv, event: InputEvent) -> AsyncIterable[OutputEvent]:
         """Generate a response using the LLM."""
-        messages = self._build_messages(history)
+        messages = self._build_messages(event.history)
 
-        for iteration in range(self._max_tool_iterations):
+        for _iteration in range(self._max_tool_iterations):
             text_buffer = ""
             tool_calls_dict: Dict[str, ToolCall] = {}
 
@@ -237,17 +220,21 @@ class LlmAgent:
 
                         # Add to messages for next iteration
                         result_str = str(results[0]) if len(results) == 1 else str(results)
-                        messages.append(Message(
-                            role="assistant",
-                            content=text_buffer if text_buffer else None,
-                            tool_calls=[tc],
-                        ))
-                        messages.append(Message(
-                            role="tool",
-                            content=result_str,
-                            tool_call_id=tc.id,
-                            name=tc.name,
-                        ))
+                        messages.append(
+                            Message(
+                                role="assistant",
+                                content=text_buffer if text_buffer else None,
+                                tool_calls=[tc],
+                            )
+                        )
+                        messages.append(
+                            Message(
+                                role="tool",
+                                content=result_str,
+                                tool_call_id=tc.id,
+                                name=tc.name,
+                            )
+                        )
                         should_continue = True
                         text_buffer = ""
 
@@ -262,19 +249,18 @@ class LlmAgent:
                         )
 
                     elif tool.tool_type == ToolType.HANDOFF:
-                        # Execute and filter: yield events, capture agent
-                        handoff_agent = None
+                        # Execute and filter: yield events, capture handoff target
+                        handoff_target = None
                         async for item in normalized_func(ctx, **tool_args):
-                            if _is_agent(item):
-                                handoff_agent = item
+                            if _is_handoff_target(item):
+                                handoff_target = item
                             else:
                                 yield item
 
-                        if handoff_agent:
-                            self._handoff_target = handoff_agent
+                        if handoff_target:
+                            self._handoff_target = _normalize_to_callable(handoff_target)
                             target_name = (
-                                getattr(handoff_agent, "__name__", None)
-                                or type(handoff_agent).__name__
+                                getattr(handoff_target, "__name__", None) or type(handoff_target).__name__
                             )
                             yield AgentHandedOff(target=target_name)
 

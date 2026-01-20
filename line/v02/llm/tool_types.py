@@ -6,7 +6,7 @@ See README.md for examples.
 
 from typing import Callable, Optional
 
-from line.v02.llm.function_tool import construct_function_tool, FunctionTool, ToolType
+from line.v02.llm.function_tool import FunctionTool, ToolType, construct_function_tool
 
 
 def loopback_tool(
@@ -17,11 +17,15 @@ def loopback_tool(
     """
     Decorator for loopback tools. Result is sent back to the LLM.
 
+    Signature: (ctx: ToolContext, **args) -> AsyncIterable[Any] | Awaitable[Any] | Any
+
     Use for information retrieval, calculations, API queries.
     Tool returns a value that the LLM incorporates into its response.
     """
+
     def decorator(func: Callable) -> FunctionTool:
         return construct_function_tool(func, name=name, description=description, tool_type=ToolType.LOOPBACK)
+
     return decorator
 
 
@@ -33,11 +37,17 @@ def passthrough_tool(
     """
     Decorator for passthrough tools. Response bypasses the LLM.
 
+    Signature: (ctx: ToolContext, **args) -> AsyncIterable[OutputEvent] | Awaitable[OutputEvent] | OutputEvent
+
     Use for deterministic actions like EndCall, TransferCall.
-    Tool is an async generator that yields OutputEvent objects.
+    Tool yields OutputEvent objects directly to the caller.
     """
+
     def decorator(func: Callable) -> FunctionTool:
-        return construct_function_tool(func, name=name, description=description, tool_type=ToolType.PASSTHROUGH)
+        return construct_function_tool(
+            func, name=name, description=description, tool_type=ToolType.PASSTHROUGH
+        )
+
     return decorator
 
 
@@ -47,11 +57,15 @@ def handoff_tool(
     description: Optional[str] = None,
 ) -> Callable[[Callable], FunctionTool]:
     """
-    Decorator for handoff tools. Transfers control to another agent.
+    Decorator for handoff tools. Transfers control to another process.
 
-    Use for multi-agent workflows and department transfers.
-    Tool is an async generator that yields events, then yields the target agent.
+    Signature: (ctx: ToolContext, **args) -> AsyncIterable[OutputEvent] | Awaitable[OutputEvent] | OutputEvent
+
+    Use for multi-agent workflows or custom handlers.
+    Tool yields OutputEvent objects and optionally yields the handoff target (AgentCallable).
     """
+
     def decorator(func: Callable) -> FunctionTool:
         return construct_function_tool(func, name=name, description=description, tool_type=ToolType.HANDOFF)
+
     return decorator
