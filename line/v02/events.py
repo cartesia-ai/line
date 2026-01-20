@@ -18,12 +18,14 @@ class AgentSendText(BaseModel):
 
 class AgentToolCalled(BaseModel):
     type: Literal["agent_tool_called"] = "agent_tool_called"
+    tool_call_id: str
     tool_name: str
     tool_args: Dict[str, Any] = Field(default_factory=dict)
 
 
 class AgentToolReturned(BaseModel):
     type: Literal["agent_tool_returned"] = "agent_tool_returned"
+    tool_call_id: str
     tool_name: str
     tool_args: Dict[str, Any] = Field(default_factory=dict)
     result: Any = None
@@ -124,12 +126,14 @@ class SpecificAgentDTMFSent(BaseModel):
 
 class SpecificAgentToolCalled(BaseModel):
     type: Literal["agent_tool_called"] = "agent_tool_called"
+    tool_call_id: str
     tool_name: str
     tool_args: Dict[str, Any] = Field(default_factory=dict)
 
 
 class SpecificAgentToolReturned(BaseModel):
     type: Literal["agent_tool_returned"] = "agent_tool_returned"
+    tool_call_id: str
     tool_name: str
     tool_args: Dict[str, Any] = Field(default_factory=dict)
     result: Any = None
@@ -223,6 +227,7 @@ InputEvent = Union[
     AgentToolCalledInput,
     AgentToolReturnedInput,
     AgentTurnEnded,
+    AgentHandedOff,
     CallEnded,
 ]
 
@@ -235,6 +240,7 @@ __all__ = [
     "AgentTransferCall",
     "AgentToolCalled",
     "AgentToolReturned",
+    "AgentHandedOff",
     "LogMetric",
     "LogMessage",
     "OutputEvent",
@@ -262,8 +268,9 @@ __all__ = [
     "AgentTurnStarted",
     "AgentTextSent",
     "AgentDTMFSent",
-    "AgentToolCalled",
-    "AgentToolReturned",
+    "AgentToolCalledInput",
+    "AgentToolReturnedInput",
     "AgentTurnEnded",
+    "AgentHandedOff",
     "InputEvent",
 ]
