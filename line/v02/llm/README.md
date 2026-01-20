@@ -8,7 +8,7 @@ A unified interface for building LLM-powered voice agents with 100+ provider sup
 from typing import Annotated
 from line.v02.llm import (
     LlmAgent, LlmConfig, loopback_tool, passthrough_tool, handoff_tool,
-    Field, AgentSendText, AgentEndCall,
+    Field, AgentSendText, AgentEndCall, AgentHandedOff,
 )
 
 # Define tools
@@ -72,15 +72,29 @@ async def transfer_call(ctx, department: Annotated[str, Field(description="Depar
 
 ### Handoff Tools
 
-Transfers control to another process. Use for multi-agent workflows or custom handlers.
+Transfers control to another agent. After handoff, all future input events are processed by the
+handoff tool, which routes them to the target agent. Use for multi-agent workflows.
 
 ```python
 @handoff_tool()
-async def transfer_to_billing(ctx):
-    """Transfer to billing agent."""
-    yield AgentSendText(text="Connecting you to billing...")
-    yield BillingAgent()
+async def transfer_to_billing(
+    ctx,
+    reason: Annotated[str, Field(description="Reason for transfer")],
+    event,  # Required: receives AgentHandedOff on first call, then subsequent InputEvents
+):
+    """Transfer to billing department."""
+    # On initial handoff, send a message to the user
+    if isinstance(event, AgentHandedOff):
+        yield AgentSendText(text=f"Transferring you to billing for: {reason}")
+
+    # Route all events (including initial) to the target agent
+    async for output in billing_agent.process(ctx.turn_env, event):
+        yield output
 ```
+
+The `event` parameter is required for handoff tools:
+- **First call**: `event` is `AgentHandedOff` - use this to send initial transfer messages
+- **Subsequent calls**: `event` is the actual input event (e.g., `UserTextSent`) - route to target agent
 
 ## Tool Parameters
 
@@ -160,6 +174,7 @@ async for output in agent.process(env, event):
 - `UserTextSent` - User speech transcribed
 - `UserTurnEnded` - User finished speaking
 - `UserDtmfSent` - DTMF tone pressed
+- `AgentHandedOff` - Passed to handoff tools on initial handoff
 
 **Output Events** (agent yields):
 - `AgentSendText` - Send text to user
@@ -168,7 +183,6 @@ async for output in agent.process(env, event):
 - `AgentSendDTMF` - Send DTMF tones
 - `AgentToolCalled` - Tool was called
 - `AgentToolReturned` - Tool returned result
-- `AgentHandedOff` - Control transferred to another process
 
 ## Testing
 
