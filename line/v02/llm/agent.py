@@ -5,7 +5,7 @@ Re-exports agent and event types from line.v02 for use in the LLM wrapper.
 """
 
 from dataclasses import dataclass
-from typing import Any, AsyncIterable, Awaitable, Callable, Union
+from typing import Any, AsyncIterable, Awaitable, Protocol, Union
 
 # Re-export agent types from v02
 from line.v02.agent import (
@@ -68,16 +68,46 @@ class ToolContext:
     turn_env: TurnEnv
 
 
-# Tool function type aliases
-# Loopback: (ToolContext, **Args) => AsyncIterable[Any] | Awaitable[Any] | Any
-LoopbackToolFn = Callable[..., Union[AsyncIterable[Any], Awaitable[Any], Any]]
+# Tool function protocols
+# These define the expected signatures for each tool type
 
-# Passthrough: (ToolContext, **Args) => AsyncIterable[OutputEvent] | Awaitable[OutputEvent] | OutputEvent
-PassthroughToolFn = Callable[..., Union[AsyncIterable[OutputEvent], Awaitable[OutputEvent], OutputEvent]]
 
-# Handoff: (ToolContext, **Args, InputEvent) =>
-#   AsyncIterable[OutputEvent] | Awaitable[OutputEvent] | OutputEvent
-HandoffToolFn = Callable[..., Union[AsyncIterable[OutputEvent], Awaitable[OutputEvent], OutputEvent]]
+class LoopbackToolFn(Protocol):
+    """Loopback tool: result is sent back to the LLM for continued generation.
+
+    Signature: (ctx: ToolContext, **kwargs) -> AsyncIterable[Any] | Awaitable[Any] | Any
+    """
+
+    def __call__(
+        self, ctx: ToolContext, /, **kwargs: Any
+    ) -> Union[AsyncIterable[Any], Awaitable[Any], Any]: ...
+
+
+class PassthroughToolFn(Protocol):
+    """Passthrough tool: response bypasses the LLM and goes directly to the user.
+
+    Signature: (ctx: ToolContext, **kwargs) ->
+        AsyncIterable[OutputEvent] | Awaitable[OutputEvent] | OutputEvent
+    """
+
+    def __call__(
+        self, ctx: ToolContext, /, **kwargs: Any
+    ) -> Union[AsyncIterable[OutputEvent], Awaitable[OutputEvent], OutputEvent]: ...
+
+
+class HandoffToolFn(Protocol):
+    """Handoff tool: transfers control to another agent.
+
+    Signature: (ctx: ToolContext, event: InputEvent, **kwargs) ->
+        AsyncIterable[OutputEvent] | Awaitable[OutputEvent] | OutputEvent
+
+    The event parameter receives AgentHandedOff on initial handoff,
+    then subsequent InputEvents for continued processing.
+    """
+
+    def __call__(
+        self, ctx: ToolContext, /, event: InputEvent, **kwargs: Any
+    ) -> Union[AsyncIterable[OutputEvent], Awaitable[OutputEvent], OutputEvent]: ...
 
 
 __all__ = [

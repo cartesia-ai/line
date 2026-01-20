@@ -79,7 +79,7 @@ class ParameterInfo:
     enum: Optional[List[Any]] = None
 
 
-def extract_parameters(func: Callable) -> Dict[str, ParameterInfo]:
+def _extract_parameters(func: Callable) -> Dict[str, ParameterInfo]:
     """Extract parameter information from the function signature."""
     params = {}
     sig = signature(func)
@@ -91,8 +91,8 @@ def extract_parameters(func: Callable) -> Dict[str, ParameterInfo]:
         hints = {}
 
     for param_name, param in sig.parameters.items():
-        # Skip 'self', 'cls', and context parameters
-        if param_name in ("self", "cls", "ctx", "context"):
+        # Skip 'self', 'cls', context parameters, and 'event' (for handoff tools)
+        if param_name in ("self", "cls", "ctx", "context", "event"):
             continue
 
         # Get the type annotation
@@ -143,8 +143,38 @@ def extract_parameters(func: Callable) -> Dict[str, ParameterInfo]:
     return params
 
 
+def _validate_tool_signature(func: Callable, tool_type: ToolType) -> None:
+    """Validate that a tool function has the correct signature."""
+    sig = signature(func)
+    param_names = list(sig.parameters.keys())
+
+    # All tools must have ctx/context as first parameter
+    if not param_names:
+        raise TypeError(
+            f"Tool '{func.__name__}' must have 'ctx' as first parameter. "
+            f"Signature: (ctx: ToolContext, ...) -> ..."
+        )
+
+    first_param = param_names[0]
+    if first_param not in ("ctx", "context", "self"):
+        # Allow 'self' for method-based tools
+        raise TypeError(
+            f"Tool '{func.__name__}' must have 'ctx' or 'context' as first parameter, "
+            f"got '{first_param}'. Signature: (ctx: ToolContext, ...) -> ..."
+        )
+
+    # Handoff tools must have 'event' parameter
+    if tool_type == ToolType.HANDOFF:
+        if "event" not in param_names:
+            raise TypeError(
+                f"Handoff tool '{func.__name__}' must have 'event' parameter. "
+                f"Signature: (ctx: ToolContext, ..., event: InputEvent) -> ..."
+            )
+
+
 def construct_function_tool(func, name, description, tool_type):
-    parameters = extract_parameters(func)
+    _validate_tool_signature(func, tool_type)
+    parameters = _extract_parameters(func)
     return FunctionTool(
         name=name or func.__name__,
         description=description or (func.__doc__ or "").strip(),
