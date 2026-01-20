@@ -164,8 +164,6 @@ SpecificInputEvent = Union[
     SpecificAgentToolReturned,
     SpecificAgentTurnEnded,
     SpecificCallEnded,
-    AgentToolCalled,
-    AgentToolReturned,
 ]
 
 
@@ -270,8 +268,6 @@ __all__ = [
     "AgentDTMFSent",
     "AgentToolCalledInput",
     "AgentToolReturnedInput",
-    "AgentToolCalled",
-    "AgentToolReturned",
     "AgentTurnEnded",
     "InputEvent",
 ]
