@@ -204,7 +204,18 @@ class _ChatStream:
                                 tool_calls[idx].name = tc.function.name
 
                         if tc.function and tc.function.arguments:
-                            tool_calls[idx].arguments += tc.function.arguments
+                            # Providers stream tool args differently:
+                            # - OpenAI: incremental chunks ("{\"ci", "ty\":", ...") - must concat
+                            # - Anthropic: incremental chunks like OpenAI - must concat
+                            # - Gemini: complete args repeated each chunk - must dedupe
+                            # Detect by checking if existing args look complete (ends with "}")
+                            existing = tool_calls[idx].arguments
+                            new_args = tc.function.arguments
+                            if not existing:
+                                tool_calls[idx].arguments = new_args
+                            elif not existing.endswith("}"):
+                                tool_calls[idx].arguments += new_args  # Incremental
+                            # else: complete args, skip duplicate
 
             # Check finish reason
             finish_reason = None
