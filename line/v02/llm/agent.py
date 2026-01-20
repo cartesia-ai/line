@@ -24,6 +24,7 @@ from line.v02.events import (
     AgentDTMFSent,
     # Output events
     AgentEndCall,
+    AgentHandedOff,
     AgentSendDTMF,
     AgentSendText,
     AgentTextSent,
@@ -60,15 +61,6 @@ from line.v02.events import (
     UserTurnStarted,
 )
 
-
-class AgentHandoff(BaseModel):
-    """Event emitted when control is transferred to another agent."""
-
-    type: Literal["agent_handoff"] = "agent_handoff"
-    target_agent: str
-    reason: Optional[str] = None
-
-
 __all__ = [
     # Agent types
     "Agent",
@@ -88,7 +80,7 @@ __all__ = [
     "LogMetric",
     "OutputEvent",
     # LLM-specific events
-    "AgentHandoff",
+    "AgentHandedOff",
     # Input events with history
     "AgentDTMFSent",
     "AgentTextSent",
