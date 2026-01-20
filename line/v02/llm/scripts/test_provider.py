@@ -39,6 +39,7 @@ from line.v02.llm import (
     LlmConfig,
     LLMProvider,
     Message,
+    SpecificUserTextSent,
     UserTextSent,
     loopback_tool,
 )
@@ -48,7 +49,7 @@ from line.v02.llm import (
 # =============================================================================
 
 
-@loopback_tool
+@loopback_tool()
 async def get_weather(ctx, city: Annotated[str, Field(description="City name")]) -> str:
     """Get the current weather for a city."""
     # Simulated weather data
@@ -62,7 +63,7 @@ async def get_weather(ctx, city: Annotated[str, Field(description="City name")])
     return weather_data.get(city_lower, f"Weather data not available for {city}")
 
 
-@loopback_tool
+@loopback_tool()
 async def calculate(ctx, expression: Annotated[str, Field(description="Math expression to evaluate")]) -> str:
     """Evaluate a mathematical expression."""
     try:
@@ -139,9 +140,10 @@ async def test_tool_calling(model: str):
     )
 
     env = TurnEnv()
+    user_message = "What's the weather in Tokyo? Also, what's 25 * 4?"
     event = UserTextSent(
-        content="What's the weather in Tokyo? Also, what's 25 * 4?",
-        history=[],
+        content=user_message,
+        history=[SpecificUserTextSent(content=user_message)],
     )
 
     print("User: What's the weather in Tokyo? Also, what's 25 * 4?")

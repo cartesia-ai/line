@@ -12,12 +12,12 @@ from line.v02.llm import (
 )
 
 # Define tools
-@loopback_tool
+@loopback_tool()
 async def get_weather(ctx, city: Annotated[str, Field(description="City name")]) -> str:
     """Get weather for a city."""
     return f"72°F in {city}"
 
-@passthrough_tool
+@passthrough_tool()
 async def end_call(ctx, message: Annotated[str, Field(description="Goodbye message")]):
     """End the call."""
     yield AgentSendText(text=message)
@@ -51,7 +51,7 @@ See [LiteLLM docs](https://docs.litellm.ai/docs/providers) for 100+ more provide
 Result is sent back to the LLM for continued generation. Use for information retrieval.
 
 ```python
-@loopback_tool
+@loopback_tool()
 async def lookup_order(ctx, order_id: Annotated[str, Field(description="Order ID")]) -> str:
     """Look up order status."""
     order = await db.get_order(order_id)
@@ -63,7 +63,7 @@ async def lookup_order(ctx, order_id: Annotated[str, Field(description="Order ID
 Response bypasses the LLM and goes directly to the user. Use for deterministic actions.
 
 ```python
-@passthrough_tool
+@passthrough_tool()
 async def transfer_call(ctx, department: Annotated[str, Field(description="Department name")]):
     """Transfer to another department."""
     yield AgentSendText(text=f"Transferring to {department}...")
@@ -75,7 +75,7 @@ async def transfer_call(ctx, department: Annotated[str, Field(description="Depar
 Transfers control to another agent. Use for multi-agent workflows.
 
 ```python
-@handoff_tool
+@handoff_tool()
 async def transfer_to_billing(ctx):
     """Transfer to billing agent."""
     yield AgentSendText(text="Connecting you to billing...")
@@ -87,7 +87,7 @@ async def transfer_to_billing(ctx):
 Use `Annotated` with `Field` to define parameters:
 
 ```python
-@loopback_tool
+@loopback_tool()
 async def search_products(
     ctx,
     query: Annotated[str, Field(description="Search query")],
@@ -101,23 +101,13 @@ async def search_products(
 
 ## Tool Context
 
-Tools receive a `ctx` dict with access to:
+Tools receive a `ToolContext` object:
 
 ```python
-@loopback_tool
-async def my_tool(ctx, ...) -> str:
-    # Conversation history
-    for event in ctx["conversation_history"]:
-        print(event)
-
-    # Current tool call info
-    print(ctx["tool_call_id"], ctx["tool_name"])
-
-    # Turn environment (session metadata)
-    print(ctx["turn_env"])
-
-    # LLM config (system prompt, etc.)
-    print(ctx["config"].system_prompt)
+@loopback_tool()
+async def my_tool(ctx: ToolContext, ...) -> str:
+    # Access turn environment (session metadata)
+    print(ctx.turn_env)
 ```
 
 ## Configuration

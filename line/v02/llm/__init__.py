@@ -18,7 +18,7 @@ from line.v02.llm.agent import (
     # Output events
     AgentEndCall,
     # LLM-specific events
-    AgentHandoff,
+    AgentHandedOff,
     AgentSendDTMF,
     AgentSendText,
     AgentSpec,
@@ -62,10 +62,10 @@ from line.v02.llm.agent import (
 from line.v02.llm.config import LlmConfig
 
 # Function tool definitions
-from line.v02.llm.function_tool import Field, FunctionTool, ToolType, function_tool
+from line.v02.llm.function_tool import Field, FunctionTool, ToolType, construct_function_tool
 
 # LLM Agent
-from line.v02.llm.llm_agent import LlmAgent
+from line.v02.llm.llm_agent import LlmAgent, ToolContext, ToolResult
 
 # Provider
 from line.v02.llm.provider import LLMProvider, Message, StreamChunk, ToolCall
@@ -87,6 +87,8 @@ from line.v02.llm.tool_types import handoff_tool, loopback_tool, passthrough_too
 __all__ = [
     # LLM Agent
     "LlmAgent",
+    "ToolContext",
+    "ToolResult",
     # Agent protocol
     "Agent",
     "AgentCallable",
@@ -105,7 +107,7 @@ __all__ = [
     "LogMetric",
     "OutputEvent",
     # LLM-specific events
-    "AgentHandoff",
+    "AgentHandedOff",
     # Input events with history
     "AgentDTMFSent",
     "AgentTextSent",
@@ -140,7 +142,7 @@ __all__ = [
     "Field",
     "FunctionTool",
     "ToolType",
-    "function_tool",
+    "construct_function_tool",
     # Tool type decorators
     "loopback_tool",
     "passthrough_tool",

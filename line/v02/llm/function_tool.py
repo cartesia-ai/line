@@ -59,7 +59,7 @@ class ToolType(Enum):
 
 
 @dataclass
-class FunctionToolInfo:
+class FunctionTool:
     """Information about a function tool."""
 
     name: str
@@ -81,151 +81,69 @@ class ParameterInfo:
     enum: Optional[List[Any]] = None
 
 
-class FunctionTool:
-    """Wrapper that makes a function usable as an LLM tool."""
+def extract_parameters(func: Callable) -> Dict[str, ParameterInfo]:
+    """Extract parameter information from the function signature."""
+    params = {}
+    sig = signature(func)
 
-    def __init__(
-        self,
-        func: Callable,
-        name: Optional[str] = None,
-        description: Optional[str] = None,
-        tool_type: ToolType = ToolType.LOOPBACK,
-    ):
-        self._func = func
-        self._name = name or func.__name__
-        self._description = description or (func.__doc__ or "").strip()
-        self._tool_type = tool_type
-        self._parameters = self._extract_parameters()
-        self._is_async = iscoroutinefunction(func)
+    # Get type hints, handling forward references
+    try:
+        hints = get_type_hints(func, include_extras=True)
+    except Exception:
+        hints = {}
 
-    @property
-    def name(self) -> str:
-        """Get the tool name."""
-        return self._name
+    for param_name, param in sig.parameters.items():
+        # Skip 'self', 'cls', and context parameters
+        if param_name in ("self", "cls", "ctx", "context"):
+            continue
 
-    @property
-    def description(self) -> str:
-        """Get the tool description."""
-        return self._description
+        # Get the type annotation
+        type_hint = hints.get(param_name, param.annotation)
+        if type_hint is Parameter.empty:
+            type_hint = str  # Default to string
 
-    @property
-    def tool_type(self) -> ToolType:
-        """Get the tool type."""
-        return self._tool_type
+        # Check if it's an Annotated type with Field metadata
+        field_info = None
+        actual_type = type_hint
 
-    @property
-    def parameters(self) -> Dict[str, ParameterInfo]:
-        """Get the tool parameters."""
-        return self._parameters
+        if get_origin(type_hint) is Annotated:
+            args = get_args(type_hint)
+            actual_type = args[0]
+            for arg in args[1:]:
+                if isinstance(arg, Field):
+                    field_info = arg
+                    break
 
-    @property
-    def func(self) -> Callable:
-        """Get the underlying function."""
-        return self._func
+        # Determine if required and get default
+        required = True
+        default_value = None
 
-    @property
-    def is_async(self) -> bool:
-        """Check if the function is async."""
-        return self._is_async
+        if param.default is not Parameter.empty:
+            required = False
+            default_value = param.default
+        elif field_info and not isinstance(field_info.default, _MissingSentinel):
+            required = False
+            default_value = field_info.default
 
-    def _extract_parameters(self) -> Dict[str, ParameterInfo]:
-        """Extract parameter information from the function signature."""
-        params = {}
-        sig = signature(self._func)
+        # Get description and enum from Field
+        description = ""
+        enum_values = None
 
-        # Get type hints, handling forward references
-        try:
-            hints = get_type_hints(self._func, include_extras=True)
-        except Exception:
-            hints = {}
+        if field_info:
+            description = field_info.description
+            enum_values = field_info.enum
 
-        for param_name, param in sig.parameters.items():
-            # Skip 'self', 'cls', and context parameters
-            if param_name in ("self", "cls", "ctx", "context"):
-                continue
-
-            # Get the type annotation
-            type_hint = hints.get(param_name, param.annotation)
-            if type_hint is Parameter.empty:
-                type_hint = str  # Default to string
-
-            # Check if it's an Annotated type with Field metadata
-            field_info = None
-            actual_type = type_hint
-
-            if get_origin(type_hint) is Annotated:
-                args = get_args(type_hint)
-                actual_type = args[0]
-                for arg in args[1:]:
-                    if isinstance(arg, Field):
-                        field_info = arg
-                        break
-
-            # Determine if required and get default
-            required = True
-            default_value = None
-
-            if param.default is not Parameter.empty:
-                required = False
-                default_value = param.default
-            elif field_info and not isinstance(field_info.default, _MissingSentinel):
-                required = False
-                default_value = field_info.default
-
-            # Get description and enum from Field
-            description = ""
-            enum_values = None
-
-            if field_info:
-                description = field_info.description
-                enum_values = field_info.enum
-
-            params[param_name] = ParameterInfo(
-                name=param_name,
-                type_annotation=actual_type,
-                description=description,
-                required=required,
-                default=default_value,
-                enum=enum_values,
-            )
-
-        return params
-
-    async def __call__(self, ctx: Any, **kwargs) -> Any:
-        """Call the underlying function."""
-        if self._is_async:
-            return await self._func(ctx, **kwargs)
-        else:
-            return self._func(ctx, **kwargs)
-
-    def get_info(self) -> FunctionToolInfo:
-        """Get the tool information."""
-        return FunctionToolInfo(
-            name=self._name,
-            description=self._description,
-            func=self._func,
-            parameters=self._parameters,
-            tool_type=self._tool_type,
+        params[param_name] = ParameterInfo(
+            name=param_name,
+            type_annotation=actual_type,
+            description=description,
+            required=required,
+            default=default_value,
+            enum=enum_values,
         )
 
+    return params
 
-def function_tool(
-    func: Optional[Callable] = None,
-    *,
-    name: Optional[str] = None,
-    description: Optional[str] = None,
-) -> Union[FunctionTool, Callable[[Callable], FunctionTool]]:
-    """Deprecated: Use @loopback_tool instead."""
-    warnings.warn(
-        "function_tool is deprecated, use loopback_tool instead",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-
-    def decorator(f: Callable) -> FunctionTool:
-        return FunctionTool(f, name=name, description=description)
-
-    if func is not None:
-        return decorator(func)
-
-    return decorator
+def construct_function_tool(func, name, description, tool_type):
+    parameters = extract_parameters(func)
+    return FunctionTool(name=name or func.__name__, description=description or (func.__doc__ or "").strip(), func=func, parameters=parameters, tool_type=tool_type)
