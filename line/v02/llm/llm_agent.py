@@ -22,7 +22,7 @@ from line.v02.llm.agent import (
     SpecificAgentTextSent,
     SpecificInputEvent,
     SpecificUserTextSent,
-    ToolContext,
+    ToolEnv,
     TurnEnv,
 )
 from line.v02.llm.config import LlmConfig
@@ -160,7 +160,7 @@ class LlmAgent:
                             tool_calls_dict[tc.id] = tc
 
             should_continue = False
-            ctx = ToolContext(turn_env=env)
+            ctx = ToolEnv(turn_env=env)
 
             for tc in tool_calls_dict.values():
                 if not tc.is_complete:
@@ -235,7 +235,7 @@ class LlmAgent:
                             env: TurnEnv,
                             event: InputEvent,
                         ) -> AsyncIterable[OutputEvent]:
-                            tool_env = ToolContext(turn_env=env)
+                            tool_env = ToolEnv(turn_env=env)
                             return normalized_func(tool_env, **tool_args, event=event)
 
                         self._handoff_target = handoff_target

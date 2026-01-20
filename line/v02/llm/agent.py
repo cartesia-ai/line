@@ -62,7 +62,7 @@ from line.v02.events import (
 
 
 @dataclass
-class ToolContext:
+class ToolEnv:
     """Context passed to tool functions."""
 
     turn_env: TurnEnv
@@ -75,30 +75,30 @@ class ToolContext:
 class LoopbackToolFn(Protocol):
     """Loopback tool: result is sent back to the LLM for continued generation.
 
-    Signature: (ctx: ToolContext, **kwargs) -> AsyncIterable[Any] | Awaitable[Any] | Any
+    Signature: (ctx: ToolEnv, **kwargs) -> AsyncIterable[Any] | Awaitable[Any] | Any
     """
 
     def __call__(
-        self, ctx: ToolContext, /, **kwargs: Any
+        self, ctx: ToolEnv, /, **kwargs: Any
     ) -> Union[AsyncIterable[Any], Awaitable[Any], Any]: ...
 
 
 class PassthroughToolFn(Protocol):
     """Passthrough tool: response bypasses the LLM and goes directly to the user.
 
-    Signature: (ctx: ToolContext, **kwargs) ->
+    Signature: (ctx: ToolEnv, **kwargs) ->
         AsyncIterable[OutputEvent] | Awaitable[OutputEvent] | OutputEvent
     """
 
     def __call__(
-        self, ctx: ToolContext, /, **kwargs: Any
+        self, ctx: ToolEnv, /, **kwargs: Any
     ) -> Union[AsyncIterable[OutputEvent], Awaitable[OutputEvent], OutputEvent]: ...
 
 
 class HandoffToolFn(Protocol):
     """Handoff tool: transfers control to another agent.
 
-    Signature: (ctx: ToolContext, event: InputEvent, **kwargs) ->
+    Signature: (ctx: ToolEnv, event: InputEvent, **kwargs) ->
         AsyncIterable[OutputEvent] | Awaitable[OutputEvent] | OutputEvent
 
     The event parameter receives AgentHandedOff on initial handoff,
@@ -106,7 +106,7 @@ class HandoffToolFn(Protocol):
     """
 
     def __call__(
-        self, ctx: ToolContext, /, event: InputEvent, **kwargs: Any
+        self, ctx: ToolEnv, /, event: InputEvent, **kwargs: Any
     ) -> Union[AsyncIterable[OutputEvent], Awaitable[OutputEvent], OutputEvent]: ...
 
 
@@ -119,7 +119,7 @@ __all__ = [
     "EventFilter",
     "TurnEnv",
     # Tool types
-    "ToolContext",
+    "ToolEnv",
     "LoopbackToolFn",
     "PassthroughToolFn",
     "HandoffToolFn",

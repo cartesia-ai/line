@@ -152,7 +152,7 @@ def _validate_tool_signature(func: Callable, tool_type: ToolType) -> None:
     if not param_names:
         raise TypeError(
             f"Tool '{func.__name__}' must have 'ctx' as first parameter. "
-            f"Signature: (ctx: ToolContext, ...) -> ..."
+            f"Signature: (ctx: ToolEnv, ...) -> ..."
         )
 
     first_param = param_names[0]
@@ -160,7 +160,7 @@ def _validate_tool_signature(func: Callable, tool_type: ToolType) -> None:
         # Allow 'self' for method-based tools
         raise TypeError(
             f"Tool '{func.__name__}' must have 'ctx' or 'context' as first parameter, "
-            f"got '{first_param}'. Signature: (ctx: ToolContext, ...) -> ..."
+            f"got '{first_param}'. Signature: (ctx: ToolEnv, ...) -> ..."
         )
 
     # Handoff tools must have 'event' parameter
@@ -168,7 +168,7 @@ def _validate_tool_signature(func: Callable, tool_type: ToolType) -> None:
         if "event" not in param_names:
             raise TypeError(
                 f"Handoff tool '{func.__name__}' must have 'event' parameter. "
-                f"Signature: (ctx: ToolContext, ..., event: InputEvent) -> ..."
+                f"Signature: (ctx: ToolEnv, ..., event: InputEvent) -> ..."
             )
 
 
