@@ -151,9 +151,7 @@ class StagehandFormFiller:
                 model_api_key=os.environ.get("GEMINI_API_KEY"),
             )
 
-            self.session = await self.client.sessions.create(
-                model_name="google/gemini-3-flash-preview"
-            )
+            self.session = await self.client.sessions.create(model_name="google/gemini-3-flash-preview")
 
             logger.info(f"Session started: {self.session.id}")
 
