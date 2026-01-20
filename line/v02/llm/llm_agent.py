@@ -6,7 +6,7 @@ See README.md for examples and documentation.
 
 import inspect
 import json
-from typing import Any, AsyncIterable, Callable, Dict, List, Optional, TypeVar
+from typing import AsyncIterable, Awaitable, Callable, Dict, List, Optional, ParamSpec, TypeVar
 
 from loguru import logger
 
@@ -30,12 +30,13 @@ from line.v02.llm.function_tool import FunctionTool, ToolType
 from line.v02.llm.provider import LLMProvider, Message, ToolCall
 
 T = TypeVar("T")
+P = ParamSpec("P")
 
 
-async def _normalize_result(result: Any) -> AsyncIterable[Any]:
+async def _normalize_result(result: AsyncIterable[T] | Awaitable[T] | T) -> AsyncIterable[T]:
     """Normalize any result type to an async iterable.
 
-    Converts: AsyncIterable[T] | Future[T] | T => AsyncIterable[T]
+    Converts: AsyncIterable[T] | Awaitable[T] | T => AsyncIterable[T]
     """
     if inspect.iscoroutine(result) or inspect.isawaitable(result):
         yield await result
@@ -46,45 +47,20 @@ async def _normalize_result(result: Any) -> AsyncIterable[Any]:
         yield result
 
 
-def _normalize_to_async_gen(func: Callable[..., Any]) -> Callable[..., AsyncIterable[Any]]:
+def _normalize_to_async_gen(
+    func: Callable[P, AsyncIterable[T] | Awaitable[T] | T],
+) -> Callable[P, AsyncIterable[T]]:
     """Wrap a function to always return an async generator.
 
-    Converts: Callable[Args, AsyncIterable[T] | Future[T] | T] => Callable[Args, AsyncIterable[T]]
+    Converts: Callable[P, AsyncIterable[T] | Awaitable[T] | T] => Callable[P, AsyncIterable[T]]
     """
 
-    async def wrapper(*args, **kwargs) -> AsyncIterable[Any]:
+    async def wrapper(*args: P.args, **kwargs: P.kwargs) -> AsyncIterable[T]:
         result = func(*args, **kwargs)
         async for item in _normalize_result(result):
             yield item
 
     return wrapper
-
-
-def _is_handoff_target(obj: Any) -> bool:
-    """Check if an object can be a handoff target (has process method or is a callable with 2+ params)."""
-    if hasattr(obj, "process") and callable(obj.process):
-        return True
-    if callable(obj) and not isinstance(obj, type):
-        try:
-            sig = inspect.signature(obj)
-            return len(sig.parameters) >= 2
-        except (ValueError, TypeError):
-            pass
-    return False
-
-
-def _normalize_to_callable(target: Any) -> AgentCallable:
-    """Normalize a handoff target to a callable process function.
-
-    Accepts either an object with .process() method or a callable (env, event) -> AsyncIterable.
-    Returns a normalized callable.
-    """
-    if hasattr(target, "process") and callable(target.process):
-        return target.process
-    elif callable(target):
-        return target
-    else:
-        raise TypeError(f"Cannot normalize {type(target)} to process function")
 
 
 class LlmAgent:
@@ -249,20 +225,22 @@ class LlmAgent:
                         )
 
                     elif tool.tool_type == ToolType.HANDOFF:
-                        # Execute and filter: yield events, capture handoff target
-                        handoff_target = None
-                        async for item in normalized_func(ctx, **tool_args):
-                            if _is_handoff_target(item):
-                                handoff_target = item
-                            else:
-                                yield item
+                        # AgentHandedOff input event is passed to the handoff target to execute the tool
+                        async for item in normalized_func(ctx, **tool_args, event=AgentHandedOff()):
+                            yield item
 
-                        if handoff_target:
-                            self._handoff_target = _normalize_to_callable(handoff_target)
-                            target_name = (
-                                getattr(handoff_target, "__name__", None) or type(handoff_target).__name__
-                            )
-                            yield AgentHandedOff(target=target_name)
+                        # Format the handoff target to be called on all future events
+                        # Use default args to bind loop variables
+                        def handoff_target(
+                            env: TurnEnv,
+                            event: InputEvent,
+                            _func=normalized_func,
+                            _ctx=ctx,
+                            _tool_args=tool_args,
+                        ) -> AsyncIterable[OutputEvent]:
+                            return _func(_ctx, **_tool_args, event=event)
+
+                        self._handoff_target = handoff_target
 
                         yield AgentToolReturned(
                             tool_call_id=tc.id,
