@@ -13,7 +13,7 @@ import pytest
 
 from line.v02.llm.agent import (
     AgentEndCall,
-    AgentHandoff,
+    AgentHandedOff,
     AgentSendText,
     AgentToolCalled,
     AgentToolReturned,
@@ -173,7 +173,9 @@ async def test_simple_text_response(turn_env):
 
     agent, mock_llm = create_agent_with_mock(responses)
 
-    outputs = await collect_outputs(agent, turn_env, UserTextSent(content="Hi", history=[]))
+    outputs = await collect_outputs(
+        agent, turn_env, UserTextSent(content="Hi", history=[SpecificUserTextSent(content="Hi")])
+    )
 
     # Should have two AgentSendText events
     assert len(outputs) == 2
@@ -182,7 +184,7 @@ async def test_simple_text_response(turn_env):
     assert isinstance(outputs[1], AgentSendText)
     assert outputs[1].text == "world!"
 
-    # LLM should have been called once with user message
+    # LLM should have been called once with user message from history
     assert mock_llm._call_count == 1
     assert len(mock_llm._recorded_messages[0]) == 1
     assert mock_llm._recorded_messages[0][0].role == "user"
@@ -198,7 +200,7 @@ async def test_loopback_tool_feeds_result_back_to_llm(turn_env):
     """Test that loopback tool results are fed back to the LLM."""
 
     # Define a loopback tool
-    @loopback_tool
+    @loopback_tool()
     async def get_weather(ctx, city: Annotated[str, Field(description="City name")]) -> str:
         """Get weather for a city."""
         return f"72°F in {city}"
@@ -229,7 +231,7 @@ async def test_loopback_tool_feeds_result_back_to_llm(turn_env):
     agent, mock_llm = create_agent_with_mock(responses, tools=[get_weather])
 
     outputs = await collect_outputs(
-        agent, turn_env, UserTextSent(content="What's the weather in NYC?", history=[])
+        agent, turn_env, UserTextSent(content="What's the weather in NYC?", history=[SpecificUserTextSent(content="What's the weather in NYC?")])
     )
 
     # Expected outputs:
@@ -271,7 +273,7 @@ async def test_loopback_tool_feeds_result_back_to_llm(turn_env):
 async def test_loopback_tool_multiple_iterations(turn_env):
     """Test multiple loopback tool calls in sequence."""
 
-    @loopback_tool
+    @loopback_tool()
     async def get_weather(ctx, city: Annotated[str, Field(description="City")]) -> str:
         """Get weather."""
         temps = {"NYC": "72°F", "LA": "85°F"}
@@ -306,7 +308,7 @@ async def test_loopback_tool_multiple_iterations(turn_env):
     agent, mock_llm = create_agent_with_mock(responses, tools=[get_weather])
 
     outputs = await collect_outputs(
-        agent, turn_env, UserTextSent(content="Weather in NYC and LA?", history=[])
+        agent, turn_env, UserTextSent(content="Weather in NYC and LA?", history=[SpecificUserTextSent(content="Weather in NYC and LA?")])
     )
 
     # Should have: ToolCall, ToolResult, ToolCall, ToolResult, AgentSendText
@@ -333,7 +335,7 @@ async def test_loopback_tool_multiple_iterations(turn_env):
 async def test_passthrough_tool_bypasses_llm(turn_env):
     """Test that passthrough tool events go directly to output, not back to LLM."""
 
-    @passthrough_tool
+    @passthrough_tool()
     async def end_call(ctx, message: Annotated[str, Field(description="Goodbye message")]):
         """End the call."""
         yield AgentSendText(text=message)
@@ -358,7 +360,7 @@ async def test_passthrough_tool_bypasses_llm(turn_env):
 
     agent, mock_llm = create_agent_with_mock(responses, tools=[end_call])
 
-    outputs = await collect_outputs(agent, turn_env, UserTextSent(content="Bye", history=[]))
+    outputs = await collect_outputs(agent, turn_env, UserTextSent(content="Bye", history=[SpecificUserTextSent(content="Bye")]))
 
     # Expected outputs:
     # 1. AgentSendText "Goodbye! "
@@ -392,7 +394,7 @@ async def test_passthrough_tool_bypasses_llm(turn_env):
 
 
 async def test_handoff_tool_emits_handoff_event(turn_env):
-    """Test that handoff tool emits AgentHandoff event and sets handoff target."""
+    """Test that handoff tool emits AgentHandedOff event and sets handoff target."""
 
     class BillingAgent:
         """A mock billing agent."""
@@ -402,7 +404,7 @@ async def test_handoff_tool_emits_handoff_event(turn_env):
 
     billing_agent = BillingAgent()
 
-    @handoff_tool
+    @handoff_tool()
     async def transfer_to_billing(ctx, reason: Annotated[str, Field(description="Reason")]):
         """Transfer to billing department."""
         # Handoff tools are async generators that yield events and the target agent
@@ -429,11 +431,11 @@ async def test_handoff_tool_emits_handoff_event(turn_env):
     agent, mock_llm = create_agent_with_mock(responses, tools=[transfer_to_billing])
 
     outputs = await collect_outputs(
-        agent, turn_env, UserTextSent(content="I have a billing question", history=[])
+        agent, turn_env, UserTextSent(content="I have a billing question", history=[SpecificUserTextSent(content="I have a billing question")])
     )
 
     # Expected: AgentSendText (LLM), AgentToolCalled, AgentSendText (from tool),
-    # AgentHandoff, AgentToolReturned
+    # AgentHandedOff, AgentToolReturned
     assert len(outputs) == 5
 
     assert isinstance(outputs[0], AgentSendText)
@@ -445,9 +447,8 @@ async def test_handoff_tool_emits_handoff_event(turn_env):
     assert isinstance(outputs[2], AgentSendText)
     assert outputs[2].text == "Transferring you now..."
 
-    assert isinstance(outputs[3], AgentHandoff)
-    assert outputs[3].target_agent == "BillingAgent"  # String identifier
-    assert "transfer_to_billing" in outputs[3].reason
+    assert isinstance(outputs[3], AgentHandedOff)
+    assert outputs[3].target == "BillingAgent"  # String identifier
 
     assert isinstance(outputs[4], AgentToolReturned)
 
@@ -472,7 +473,7 @@ async def test_handoff_delegates_subsequent_calls(turn_env):
 
     billing_agent = BillingAgent()
 
-    @handoff_tool
+    @handoff_tool()
     async def transfer_to_billing(ctx):
         """Transfer to billing."""
         yield billing_agent
@@ -491,10 +492,10 @@ async def test_handoff_delegates_subsequent_calls(turn_env):
     agent, mock_llm = create_agent_with_mock(responses, tools=[transfer_to_billing])
 
     # First call triggers handoff
-    await collect_outputs(agent, turn_env, UserTextSent(content="Transfer me", history=[]))
+    await collect_outputs(agent, turn_env, UserTextSent(content="Transfer me", history=[SpecificUserTextSent(content="Transfer me")]))
 
     # Second call should go to billing agent, not the LLM
-    outputs2 = await collect_outputs(agent, turn_env, UserTextSent(content="Follow up question", history=[]))
+    outputs2 = await collect_outputs(agent, turn_env, UserTextSent(content="Follow up question", history=[SpecificUserTextSent(content="Follow up question")]))
 
     assert len(outputs2) == 1
     assert isinstance(outputs2[0], AgentSendText)
@@ -507,50 +508,6 @@ async def test_handoff_delegates_subsequent_calls(turn_env):
     assert len(handoff_events_received) == 1
     assert isinstance(handoff_events_received[0], UserTextSent)
 
-
-async def test_reset_handoff_returns_control(turn_env):
-    """Test that reset_handoff() returns control to the LlmAgent."""
-
-    class OtherAgent:
-        async def process(self, env, event):
-            yield AgentSendText(text="Other agent")
-
-    @handoff_tool
-    async def transfer_away(ctx):
-        """Transfer to other agent."""
-        yield OtherAgent()
-
-    responses = [
-        [
-            StreamChunk(
-                tool_calls=[ToolCall(id="call_1", name="transfer_away", arguments="{}", is_complete=True)]
-            ),
-            StreamChunk(is_final=True),
-        ],
-        [
-            StreamChunk(text="Back to LLM!"),
-            StreamChunk(is_final=True),
-        ],
-    ]
-
-    agent, mock_llm = create_agent_with_mock(responses, tools=[transfer_away])
-
-    # Trigger handoff
-    await collect_outputs(agent, turn_env, UserTextSent(content="Transfer", history=[]))
-    assert agent.handoff_target is not None
-
-    # Reset handoff
-    agent.reset_handoff()
-    assert agent.handoff_target is None
-
-    # Now calls should go back to the LLM
-    outputs = await collect_outputs(agent, turn_env, UserTextSent(content="Hello again", history=[]))
-
-    assert len(outputs) == 1
-    assert outputs[0].text == "Back to LLM!"
-    assert mock_llm._call_count == 2  # Called again after reset
-
-
 # =============================================================================
 # Tests: Max Tool Iterations
 # =============================================================================
@@ -559,7 +516,7 @@ async def test_reset_handoff_returns_control(turn_env):
 async def test_max_tool_iterations_prevents_infinite_loop(turn_env):
     """Test that max_tool_iterations stops runaway loops."""
 
-    @loopback_tool
+    @loopback_tool()
     async def infinite_tool(ctx) -> str:
         """Tool that always gets called again."""
         return "call me again"
@@ -581,7 +538,7 @@ async def test_max_tool_iterations_prevents_infinite_loop(turn_env):
 
     agent, mock_llm = create_agent_with_mock(responses, tools=[infinite_tool], max_tool_iterations=3)
 
-    outputs = await collect_outputs(agent, turn_env, UserTextSent(content="Start", history=[]))
+    outputs = await collect_outputs(agent, turn_env, UserTextSent(content="Start", history=[SpecificUserTextSent(content="Start")]))
 
     # Should have stopped after 3 iterations
     assert mock_llm._call_count == 3
@@ -636,7 +593,7 @@ async def test_introduction_only_sent_once(turn_env):
 async def test_tool_error_is_captured(turn_env):
     """Test that tool execution errors are captured in AgentToolReturned."""
 
-    @loopback_tool
+    @loopback_tool()
     async def failing_tool(ctx) -> str:
         """Tool that always fails."""
         raise ValueError("Something went wrong!")
@@ -656,7 +613,7 @@ async def test_tool_error_is_captured(turn_env):
 
     agent, mock_llm = create_agent_with_mock(responses, tools=[failing_tool])
 
-    outputs = await collect_outputs(agent, turn_env, UserTextSent(content="Do something", history=[]))
+    outputs = await collect_outputs(agent, turn_env, UserTextSent(content="Do something", history=[SpecificUserTextSent(content="Do something")]))
 
     # Find the AgentToolReturned
     tool_result = next((o for o in outputs if isinstance(o, AgentToolReturned)), None)
@@ -672,10 +629,11 @@ async def test_tool_error_is_captured(turn_env):
 
 async def test_conversation_history_passed_to_llm(turn_env):
     """Test that conversation history is included in messages to LLM."""
-    # Pre-populate history on the event
+    # Pre-populate history on the event (including current user message)
     history = [
         SpecificUserTextSent(content="Hi"),
         SpecificAgentTextSent(content="Hello!"),
+        SpecificUserTextSent(content="How are you?"),
     ]
 
     responses = [[StreamChunk(text="I'm doing well!"), StreamChunk(is_final=True)]]
@@ -705,7 +663,7 @@ async def test_conversation_history_passed_to_llm(turn_env):
 async def test_streaming_tool_call_accumulation(turn_env):
     """Test that tool call arguments are accumulated across chunks."""
 
-    @loopback_tool
+    @loopback_tool()
     async def greet(ctx, name: Annotated[str, Field(description="Name")]) -> str:
         """Greet someone."""
         return f"Hello, {name}!"
@@ -732,7 +690,7 @@ async def test_streaming_tool_call_accumulation(turn_env):
 
     agent, mock_llm = create_agent_with_mock(responses, tools=[greet])
 
-    outputs = await collect_outputs(agent, turn_env, UserTextSent(content="Greet Alice", history=[]))
+    outputs = await collect_outputs(agent, turn_env, UserTextSent(content="Greet Alice", history=[SpecificUserTextSent(content="Greet Alice")]))
 
     # Tool should have been called with complete arguments
     tool_result = next((o for o in outputs if isinstance(o, AgentToolReturned)), None)
@@ -758,7 +716,7 @@ async def test_loopback_tool_returns_coroutine(turn_env):
         await asyncio.sleep(0)  # Simulate async operation
         return "fetched data"
 
-    @loopback_tool
+    @loopback_tool()
     async def async_fetcher(ctx) -> str:
         """Fetch data asynchronously."""
         # Return a coroutine (simulating delegating to another async function)
@@ -779,7 +737,7 @@ async def test_loopback_tool_returns_coroutine(turn_env):
 
     agent, mock_llm = create_agent_with_mock(responses, tools=[async_fetcher])
 
-    outputs = await collect_outputs(agent, turn_env, UserTextSent(content="Fetch", history=[]))
+    outputs = await collect_outputs(agent, turn_env, UserTextSent(content="Fetch", history=[SpecificUserTextSent(content="Fetch")]))
 
     tool_result = next((o for o in outputs if isinstance(o, AgentToolReturned)), None)
     assert tool_result is not None
@@ -794,7 +752,7 @@ async def test_loopback_tool_returns_async_iterable(turn_env):
         yield "item2"
         yield "item3"
 
-    @loopback_tool
+    @loopback_tool()
     def streaming_tool(ctx):
         """Return a stream of items."""
         return stream_items()
@@ -814,12 +772,14 @@ async def test_loopback_tool_returns_async_iterable(turn_env):
 
     agent, mock_llm = create_agent_with_mock(responses, tools=[streaming_tool])
 
-    outputs = await collect_outputs(agent, turn_env, UserTextSent(content="Stream", history=[]))
+    outputs = await collect_outputs(agent, turn_env, UserTextSent(content="Stream", history=[SpecificUserTextSent(content="Stream")]))
 
-    tool_result = next((o for o in outputs if isinstance(o, AgentToolReturned)), None)
-    assert tool_result is not None
-    # Multiple items are collected into a list
-    assert tool_result.result == ["item1", "item2", "item3"]
+    # New behavior: yields AgentToolReturned for each item in the stream
+    tool_results = [o for o in outputs if isinstance(o, AgentToolReturned)]
+    assert len(tool_results) == 3
+    assert tool_results[0].result == "item1"
+    assert tool_results[1].result == "item2"
+    assert tool_results[2].result == "item3"
 
 
 async def test_loopback_tool_returns_single_item_async_iterable(turn_env):
@@ -828,7 +788,7 @@ async def test_loopback_tool_returns_single_item_async_iterable(turn_env):
     async def single_item():
         yield "only one"
 
-    @loopback_tool
+    @loopback_tool()
     def single_item_tool(ctx):
         """Return a single item stream."""
         return single_item()
@@ -848,7 +808,7 @@ async def test_loopback_tool_returns_single_item_async_iterable(turn_env):
 
     agent, mock_llm = create_agent_with_mock(responses, tools=[single_item_tool])
 
-    outputs = await collect_outputs(agent, turn_env, UserTextSent(content="Get", history=[]))
+    outputs = await collect_outputs(agent, turn_env, UserTextSent(content="Get", history=[SpecificUserTextSent(content="Get")]))
 
     tool_result = next((o for o in outputs if isinstance(o, AgentToolReturned)), None)
     assert tool_result is not None
@@ -859,7 +819,7 @@ async def test_loopback_tool_returns_single_item_async_iterable(turn_env):
 async def test_loopback_tool_returns_bare_value(turn_env):
     """Test that loopback tools can return a plain value."""
 
-    @loopback_tool
+    @loopback_tool()
     def sync_tool(ctx) -> str:
         """Return a plain string."""
         return "plain value"
@@ -879,7 +839,7 @@ async def test_loopback_tool_returns_bare_value(turn_env):
 
     agent, mock_llm = create_agent_with_mock(responses, tools=[sync_tool])
 
-    outputs = await collect_outputs(agent, turn_env, UserTextSent(content="Do", history=[]))
+    outputs = await collect_outputs(agent, turn_env, UserTextSent(content="Do", history=[SpecificUserTextSent(content="Do")]))
 
     tool_result = next((o for o in outputs if isinstance(o, AgentToolReturned)), None)
     assert tool_result is not None
