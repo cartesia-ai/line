@@ -4,9 +4,8 @@ Agent types and events for the LLM module.
 Re-exports agent and event types from line.v02 for use in the LLM wrapper.
 """
 
-from typing import Literal, Optional
-
-from pydantic import BaseModel
+from dataclasses import dataclass
+from typing import Any, AsyncIterable, Awaitable, Callable, Union
 
 # Re-export agent types from v02
 from line.v02.agent import (
@@ -61,6 +60,25 @@ from line.v02.events import (
     UserTurnStarted,
 )
 
+
+@dataclass
+class ToolContext:
+    """Context passed to tool functions."""
+
+    turn_env: TurnEnv
+
+
+# Tool function type aliases
+# Loopback: (ToolContext, **Args) => AsyncIterable[Any] | Awaitable[Any] | Any
+LoopbackToolFn = Callable[..., Union[AsyncIterable[Any], Awaitable[Any], Any]]
+
+# Passthrough: (ToolContext, **Args) => AsyncIterable[OutputEvent] | Awaitable[OutputEvent] | OutputEvent
+PassthroughToolFn = Callable[..., Union[AsyncIterable[OutputEvent], Awaitable[OutputEvent], OutputEvent]]
+
+# Handoff: (ToolContext, **Args) => AsyncIterable[OutputEvent] | Awaitable[OutputEvent] | OutputEvent
+HandoffToolFn = Callable[..., Union[AsyncIterable[OutputEvent], Awaitable[OutputEvent], OutputEvent]]
+
+
 __all__ = [
     # Agent types
     "Agent",
@@ -69,6 +87,11 @@ __all__ = [
     "AgentSpec",
     "EventFilter",
     "TurnEnv",
+    # Tool types
+    "ToolContext",
+    "LoopbackToolFn",
+    "PassthroughToolFn",
+    "HandoffToolFn",
     # Output events
     "AgentEndCall",
     "AgentSendDTMF",

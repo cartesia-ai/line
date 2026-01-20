@@ -44,11 +44,13 @@ class AgentSendDTMF(BaseModel):
     type: Literal["agent_send_dtmf"] = "agent_send_dtmf"
     button: str
 
+
 class AgentHandedOff(BaseModel):
     """Event emitted when control is transferred to the tool target."""
 
     type: Literal["agent_handed_off"] = "agent_handed_off"
     target: str
+
 
 class LogMetric(BaseModel):
     type: Literal["log_metric"] = "log_metric"

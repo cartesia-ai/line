@@ -8,7 +8,7 @@ See README.md for examples.
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
 from enum import Enum
-from inspect import Parameter, iscoroutinefunction, signature
+from inspect import Parameter, signature
 from typing import (
     Annotated,
     Any,
@@ -17,12 +17,10 @@ from typing import (
     List,
     Optional,
     Type,
-    Union,
     get_args,
     get_origin,
     get_type_hints,
 )
-import warnings
 
 
 @dataclass
@@ -144,6 +142,13 @@ def extract_parameters(func: Callable) -> Dict[str, ParameterInfo]:
 
     return params
 
+
 def construct_function_tool(func, name, description, tool_type):
     parameters = extract_parameters(func)
-    return FunctionTool(name=name or func.__name__, description=description or (func.__doc__ or "").strip(), func=func, parameters=parameters, tool_type=tool_type)
+    return FunctionTool(
+        name=name or func.__name__,
+        description=description or (func.__doc__ or "").strip(),
+        func=func,
+        parameters=parameters,
+        tool_type=tool_type,
+    )

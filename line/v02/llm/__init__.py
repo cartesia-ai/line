@@ -7,17 +7,13 @@ tool calling paradigms: loopback, passthrough, and handoff.
 See README.md for examples and detailed documentation.
 """
 
-# Agent types and events from v02
+# Agent types, events, and tool types
 from line.v02.llm.agent import (
-    # Agent protocol
     Agent,
     AgentCallable,
     AgentClass,
-    # Input events with history
     AgentDTMFSent,
-    # Output events
     AgentEndCall,
-    # LLM-specific events
     AgentHandedOff,
     AgentSendDTMF,
     AgentSendText,
@@ -33,11 +29,13 @@ from line.v02.llm.agent import (
     CallEnded,
     CallStarted,
     EventFilter,
+    HandoffToolFn,
     InputEvent,
     LogMessage,
     LogMetric,
+    LoopbackToolFn,
     OutputEvent,
-    # Specific events (used in history lists)
+    PassthroughToolFn,
     SpecificAgentDTMFSent,
     SpecificAgentTextSent,
     SpecificAgentToolCalled,
@@ -51,6 +49,7 @@ from line.v02.llm.agent import (
     SpecificUserTextSent,
     SpecificUserTurnEnded,
     SpecificUserTurnStarted,
+    ToolContext,
     TurnEnv,
     UserDtmfSent,
     UserTextSent,
@@ -65,7 +64,7 @@ from line.v02.llm.config import LlmConfig
 from line.v02.llm.function_tool import Field, FunctionTool, ToolType, construct_function_tool
 
 # LLM Agent
-from line.v02.llm.llm_agent import LlmAgent, ToolContext, ToolResult
+from line.v02.llm.llm_agent import LlmAgent
 
 # Provider
 from line.v02.llm.provider import LLMProvider, Message, StreamChunk, ToolCall
@@ -87,15 +86,42 @@ from line.v02.llm.tool_types import handoff_tool, loopback_tool, passthrough_too
 __all__ = [
     # LLM Agent
     "LlmAgent",
-    "ToolContext",
-    "ToolResult",
-    # Agent protocol
+    # Configuration
+    "LlmConfig",
+    # Tool definitions
+    "Field",
+    "FunctionTool",
+    "ToolType",
+    "construct_function_tool",
+    # Tool type decorators
+    "loopback_tool",
+    "passthrough_tool",
+    "handoff_tool",
+    # Schema converters
+    "function_tool_to_openai",
+    "function_tool_to_anthropic",
+    "function_tool_to_gemini",
+    "function_tools_to_openai",
+    "function_tools_to_anthropic",
+    "function_tools_to_gemini",
+    "merge_gemini_tools",
+    # Provider
+    "LLMProvider",
+    "Message",
+    "StreamChunk",
+    "ToolCall",
+    # Agent types
     "Agent",
     "AgentCallable",
     "AgentClass",
     "AgentSpec",
     "EventFilter",
     "TurnEnv",
+    # Tool types
+    "ToolContext",
+    "LoopbackToolFn",
+    "PassthroughToolFn",
+    "HandoffToolFn",
     # Output events
     "AgentEndCall",
     "AgentSendDTMF",
@@ -136,28 +162,4 @@ __all__ = [
     "SpecificUserTextSent",
     "SpecificUserTurnEnded",
     "SpecificUserTurnStarted",
-    # Configuration
-    "LlmConfig",
-    # Tool definitions
-    "Field",
-    "FunctionTool",
-    "ToolType",
-    "construct_function_tool",
-    # Tool type decorators
-    "loopback_tool",
-    "passthrough_tool",
-    "handoff_tool",
-    # Schema converters
-    "function_tool_to_openai",
-    "function_tool_to_anthropic",
-    "function_tool_to_gemini",
-    "function_tools_to_openai",
-    "function_tools_to_anthropic",
-    "function_tools_to_gemini",
-    "merge_gemini_tools",
-    # Provider
-    "LLMProvider",
-    "Message",
-    "StreamChunk",
-    "ToolCall",
 ]
