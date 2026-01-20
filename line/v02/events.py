@@ -193,11 +193,11 @@ class AgentDTMFSent(SpecificAgentDTMFSent):
     history: List[SpecificInputEvent] = Field(default_factory=list)
 
 
-class AgentToolCalled(SpecificAgentToolCalled):
+class AgentToolCalledInput(SpecificAgentToolCalled):
     history: List[SpecificInputEvent] = Field(default_factory=list)
 
 
-class AgentToolReturned(SpecificAgentToolReturned):
+class AgentToolReturnedInput(SpecificAgentToolReturned):
     history: List[SpecificInputEvent] = Field(default_factory=list)
 
 
@@ -214,8 +214,8 @@ InputEvent = Union[
     AgentTurnStarted,
     AgentTextSent,
     AgentDTMFSent,
-    AgentToolCalled,
-    AgentToolReturned,
+    AgentToolCalledInput,
+    AgentToolReturnedInput,
     AgentTurnEnded,
     CallEnded,
 ]

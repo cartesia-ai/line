@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import AsyncIterable, Callable, Optional, Protocol, Sequence, Tuple, Union
+from typing import AsyncIterable, Callable, Protocol, Sequence, Union
 
 from line.v02.events import InputEvent, OutputEvent
 
@@ -22,8 +22,10 @@ Agent = Union[AgentCallable, AgentClass]
 EventFilter = Union[Callable[[InputEvent], bool], Sequence[type[InputEvent]]]
 
 # get_agent may return just the Agent or Agent plus run/cancel filters.
-AgentSpec = Union[Agent, Tuple[Agent, Optional[EventFilter], Optional[EventFilter]]]
+AgentSpec = Union[Agent, tuple[Agent, EventFilter, EventFilter]]
 
 
+# Intentionally empty for now
+# We can add more context here later as needed.
 class TurnEnv:
     pass
