@@ -3,7 +3,7 @@ name = "web-search-gemini-live"
 version = "0.1.0"
 description = "Web search agent using Gemini Live"
 dependencies = [
-    "cartesia-line",
+    "cartesia-line==0.1.10",
     "google-genai",
     "loguru",
     "fastapi",

@@ -116,7 +116,6 @@ class ReasoningNode(Node):
         ctx = self._build_conversation_context()
 
         # 2. Let subclass do specialized processing
-        logger.info(f"💬 Processing context: {ctx.events}")
         async for chunk in self.process_context(ctx):
             # Save the event to the conversation history.
             self.add_event(chunk)
