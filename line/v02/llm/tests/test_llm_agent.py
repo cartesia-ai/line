@@ -432,7 +432,8 @@ async def test_handoff_tool_emits_handoff_event(turn_env):
         agent, turn_env, UserTextSent(content="I have a billing question", history=[])
     )
 
-    # Expected: AgentSendText (LLM), AgentToolCalled, AgentSendText (from tool), AgentHandoff, AgentToolReturned
+    # Expected: AgentSendText (LLM), AgentToolCalled, AgentSendText (from tool),
+    # AgentHandoff, AgentToolReturned
     assert len(outputs) == 5
 
     assert isinstance(outputs[0], AgentSendText)

@@ -14,37 +14,39 @@ The script will test whichever providers have API keys set.
 """
 
 import asyncio
+import logging
 import os
 import sys
 from typing import Annotated
 import warnings
-import logging
-from loguru import logger
-import litellm
-# Add parent to path for imports
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))))
 
+import litellm
+from loguru import logger
+
+# Add parent to path for imports
+sys.path.insert(
+    0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))))
+)
+
+from line.v02.agent import TurnEnv
 from line.v02.llm import (
-    LLMProvider,
-    LlmAgent,
-    LlmConfig,
-    Message,
-    loopback_tool,
-    passthrough_tool,
-    Field,
     AgentSendText,
-    AgentEndCall,
-    CallStarted,
-    UserTextSent,
     AgentToolCalled,
     AgentToolReturned,
+    CallStarted,
+    Field,
+    LlmAgent,
+    LlmConfig,
+    LLMProvider,
+    Message,
+    UserTextSent,
+    loopback_tool,
 )
-from line.v02.agent import TurnEnv
-
 
 # =============================================================================
 # Test Tools
 # =============================================================================
+
 
 @loopback_tool
 async def get_weather(ctx, city: Annotated[str, Field(description="City name")]) -> str:
@@ -61,10 +63,7 @@ async def get_weather(ctx, city: Annotated[str, Field(description="City name")])
 
 
 @loopback_tool
-async def calculate(
-    ctx,
-    expression: Annotated[str, Field(description="Math expression to evaluate")]
-) -> str:
+async def calculate(ctx, expression: Annotated[str, Field(description="Math expression to evaluate")]) -> str:
     """Evaluate a mathematical expression."""
     try:
         # Safe eval for simple math
@@ -81,11 +80,12 @@ async def calculate(
 # Test Functions
 # =============================================================================
 
+
 async def test_api_key(model: str) -> bool:
     """Test that API key is valid and has permissions."""
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"Testing API key for {model}")
-    print("="*60)
+    print("=" * 60)
 
     provider = LLMProvider(model=model)
     # from line.v02.llm.provider import Message
@@ -107,9 +107,9 @@ async def test_api_key(model: str) -> bool:
 
 async def test_streaming_text(model: str):
     """Test basic streaming text response."""
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"Testing streaming text with {model}")
-    print("="*60)
+    print("=" * 60)
 
     provider = LLMProvider(model=model)
     # from line.v02.llm.provider import Message
@@ -126,9 +126,9 @@ async def test_streaming_text(model: str):
 
 async def test_tool_calling(model: str):
     """Test tool calling with LlmAgent."""
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"Testing tool calling with {model}")
-    print("="*60)
+    print("=" * 60)
 
     agent = LlmAgent(
         model=model,
@@ -150,7 +150,7 @@ async def test_tool_calling(model: str):
     tool_calls_made = []
     async for output in agent.process(env, event):
         if isinstance(output, AgentSendText):
-            print(output.text, end="", flush=True) # Prints the entire text response
+            print(output.text, end="", flush=True)  # Prints the entire text response
         elif isinstance(output, AgentToolCalled):
             tool_calls_made.append(output.tool_name)
             print(f"\n  [Tool call]: {output.tool_name}({output.tool_args})]")
@@ -167,9 +167,9 @@ async def test_tool_calling(model: str):
 
 async def test_introduction(model: str):
     """Test introduction message on CallStarted."""
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"Testing introduction with {model}")
-    print("="*60)
+    print("=" * 60)
 
     agent = LlmAgent(
         model=model,
@@ -217,14 +217,14 @@ async def main():
 
     if not available:
         print("\n⚠ No API keys found. Set at least one of:")
-        for env_var, model in MODELS:
+        for env_var, _model in MODELS:
             print(f"  export {env_var}=your-key-here")
         return 1
 
     # First, validate all API keys
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print("PHASE 1: Validating API Keys")
-    print("="*60)
+    print("=" * 60)
 
     valid_models = []
     for env_var, model in available:
@@ -236,11 +236,11 @@ async def main():
         return 1
 
     # Run full tests only for models with valid keys
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print("PHASE 2: Running Full Tests")
-    print("="*60)
+    print("=" * 60)
 
-    for env_var, model in valid_models:
+    for _env_var, model in valid_models:
         try:
             await test_streaming_text(model)
             await test_introduction(model)
@@ -248,17 +248,16 @@ async def main():
         except Exception as e:
             print(f"\n✗ Error testing {model}: {e}")
             import traceback
+
             traceback.print_exc()
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print("All tests completed!")
-    print("="*60)
+    print("=" * 60)
     return 0
 
 
 if __name__ == "__main__":
-    
-
     # Suppress noisy warnings from litellm/pydantic
     warnings.filterwarnings("ignore", category=ResourceWarning)
     warnings.filterwarnings("ignore", category=UserWarning, module="pydantic")
@@ -278,6 +277,6 @@ if __name__ == "__main__":
         exit_code = 1
     finally:
         # Suppress SSL cleanup errors on exit
-        sys.stderr = open(os.devnull, 'w')
+        sys.stderr = open(os.devnull, "w")
 
     sys.exit(exit_code)
