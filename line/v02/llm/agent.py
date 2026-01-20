@@ -75,7 +75,8 @@ LoopbackToolFn = Callable[..., Union[AsyncIterable[Any], Awaitable[Any], Any]]
 # Passthrough: (ToolContext, **Args) => AsyncIterable[OutputEvent] | Awaitable[OutputEvent] | OutputEvent
 PassthroughToolFn = Callable[..., Union[AsyncIterable[OutputEvent], Awaitable[OutputEvent], OutputEvent]]
 
-# Handoff: (ToolContext, **Args) => AsyncIterable[OutputEvent] | Awaitable[OutputEvent] | OutputEvent
+# Handoff: (ToolContext, **Args, InputEvent) =>
+#   AsyncIterable[OutputEvent] | Awaitable[OutputEvent] | OutputEvent
 HandoffToolFn = Callable[..., Union[AsyncIterable[OutputEvent], Awaitable[OutputEvent], OutputEvent]]
 
 

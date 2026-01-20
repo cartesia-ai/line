@@ -416,11 +416,15 @@ async def test_handoff_tool_emits_handoff_event(turn_env):
     billing_agent = BillingAgent()
 
     @handoff_tool()
-    async def transfer_to_billing(ctx, reason: Annotated[str, Field(description="Reason")]):
+    async def transfer_to_billing(ctx, reason: Annotated[str, Field(description="Reason")], event):
         """Transfer to billing department."""
-        # Handoff tools are async generators that yield events and the handoff target
-        yield AgentSendText(text="Transferring you now...")
-        yield billing_agent  # The handoff target
+
+        if isinstance(event, AgentHandedOff):
+            # Handoff tools are async generators that yield events and the handoff target
+            yield AgentSendText(text="Transferring you now...")
+
+        async for output in billing_agent.process(ctx.turn_env, event):
+            yield output
 
     responses = [
         [
@@ -451,7 +455,7 @@ async def test_handoff_tool_emits_handoff_event(turn_env):
     )
 
     # Expected: AgentSendText (LLM), AgentToolCalled, AgentSendText (from tool),
-    # AgentHandedOff, AgentToolReturned
+    # AgentSendText (from billing_agent.process), AgentToolReturned
     assert len(outputs) == 5
 
     assert isinstance(outputs[0], AgentSendText)
@@ -463,8 +467,8 @@ async def test_handoff_tool_emits_handoff_event(turn_env):
     assert isinstance(outputs[2], AgentSendText)
     assert outputs[2].text == "Transferring you now..."
 
-    assert isinstance(outputs[3], AgentHandedOff)
-    assert outputs[3].target == "BillingAgent"  # String identifier
+    assert isinstance(outputs[3], AgentSendText)
+    assert outputs[3].text == "Billing agent here!"
 
     assert isinstance(outputs[4], AgentToolReturned)
 
@@ -491,9 +495,10 @@ async def test_handoff_delegates_subsequent_calls(turn_env):
     billing_agent = BillingAgent()
 
     @handoff_tool()
-    async def transfer_to_billing(ctx):
+    async def transfer_to_billing(ctx, event):
         """Transfer to billing."""
-        yield billing_agent
+        async for output in billing_agent.process(ctx.turn_env, event):
+            yield output
 
     responses = [
         [
@@ -531,9 +536,10 @@ async def test_handoff_delegates_subsequent_calls(turn_env):
     # LLM should NOT have been called again
     assert mock_llm._call_count == 1
 
-    # Billing agent should have received the event
-    assert len(handoff_events_received) == 1
-    assert isinstance(handoff_events_received[0], UserTextSent)
+    # Billing agent should have received both events (initial handoff + follow-up)
+    assert len(handoff_events_received) == 2
+    assert isinstance(handoff_events_received[0], AgentHandedOff)
+    assert isinstance(handoff_events_received[1], UserTextSent)
 
 
 # =============================================================================

@@ -49,7 +49,6 @@ class AgentHandedOff(BaseModel):
     """Event emitted when control is transferred to the tool target."""
 
     type: Literal["agent_handed_off"] = "agent_handed_off"
-    target: str
 
 
 class LogMetric(BaseModel):
