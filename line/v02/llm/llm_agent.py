@@ -175,11 +175,15 @@ class LlmAgent:
                         yield AgentSendText(text=chunk.text)
 
                     if chunk.tool_calls:
+                        # Tool call streaming differs by provider:
+                        # - OpenAI: sends args incrementally ("{\"ci", "ty\":", "\"Tokyo\"}")
+                        # - Anthropic: incremental chunks like OpenAI
+                        # - Gemini: sends complete args each chunk ("{\"city\":\"Tokyo\"}")
+                        # Provider handles accumulation; we just replace with latest version.
                         for tc in chunk.tool_calls:
-                            existing = next((t for t in tool_calls if t.id == tc.id), None)
-                            if existing:
-                                existing.arguments += tc.arguments
-                                existing.is_complete = tc.is_complete
+                            existing_idx = next((i for i, t in enumerate(tool_calls) if t.id == tc.id), None)
+                            if existing_idx is not None:
+                                tool_calls[existing_idx] = tc
                             else:
                                 tool_calls.append(tc)
 

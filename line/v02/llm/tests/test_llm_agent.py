@@ -39,14 +39,35 @@ pytestmark = [pytest.mark.anyio, pytest.mark.parametrize("anyio_backend", ["asyn
 
 
 class MockStream:
-    """Mock stream that yields predefined chunks."""
+    """Mock stream that yields chunks, accumulating tool call arguments like the real provider."""
 
     def __init__(self, chunks: List[StreamChunk]):
         self._chunks = chunks
 
     async def __aiter__(self):
+        # Accumulate tool calls like the real provider does
+        accumulated_tools: dict = {}
         for chunk in self._chunks:
-            yield chunk
+            if chunk.tool_calls:
+                for tc in chunk.tool_calls:
+                    if tc.id not in accumulated_tools:
+                        accumulated_tools[tc.id] = ToolCall(
+                            id=tc.id, name=tc.name, arguments=tc.arguments, is_complete=tc.is_complete
+                        )
+                    else:
+                        # Accumulate arguments (like real provider for incremental streaming)
+                        existing = accumulated_tools[tc.id]
+                        if not existing.arguments.endswith("}"):
+                            existing.arguments += tc.arguments
+                        existing.is_complete = tc.is_complete
+                # Yield with accumulated tool calls
+                yield StreamChunk(
+                    text=chunk.text,
+                    tool_calls=list(accumulated_tools.values()),
+                    is_final=chunk.is_final,
+                )
+            else:
+                yield chunk
 
     async def __aenter__(self):
         return self
