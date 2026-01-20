@@ -227,6 +227,7 @@ InputEvent = Union[
     AgentToolCalledInput,
     AgentToolReturnedInput,
     AgentTurnEnded,
+    AgentHandedOff,
     CallEnded,
 ]
 
@@ -239,6 +240,7 @@ __all__ = [
     "AgentTransferCall",
     "AgentToolCalled",
     "AgentToolReturned",
+    "AgentHandedOff",
     "LogMetric",
     "LogMessage",
     "OutputEvent",
@@ -269,5 +271,6 @@ __all__ = [
     "AgentToolCalledInput",
     "AgentToolReturnedInput",
     "AgentTurnEnded",
+    "AgentHandedOff",
     "InputEvent",
 ]
