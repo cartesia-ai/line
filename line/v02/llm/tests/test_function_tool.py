@@ -4,13 +4,13 @@ Tests for FunctionTool validation and parameter extraction.
 uv run pytest line/v02/llm/tests/test_function_tool.py -v
 """
 
-from typing import Annotated
+from typing import Annotated, Literal, Optional
 
 import pytest
 
 from line.v02.llm.agent import AgentSendText
-from line.v02.llm.function_tool import Field
 from line.v02.llm.tool_types import handoff_tool, loopback_tool, passthrough_tool
+from line.v02.llm.schema_converter import function_tool_to_openai
 
 # =============================================================================
 # Tests: Tool Signature Validation
@@ -76,7 +76,7 @@ def test_loopback_tool_with_ctx_succeeds():
     """Test that loopback tool with ctx parameter succeeds."""
 
     @loopback_tool()
-    async def good_tool(ctx, city: Annotated[str, Field(description="City name")]) -> str:
+    async def good_tool(ctx, city: Annotated[str, "City name"]) -> str:
         """Valid loopback tool."""
         return f"Weather in {city}"
 
@@ -102,7 +102,7 @@ def test_passthrough_tool_with_ctx_succeeds():
     """Test that passthrough tool with ctx parameter succeeds."""
 
     @passthrough_tool()
-    async def good_tool(ctx, message: Annotated[str, Field(description="Message")]):
+    async def good_tool(ctx, message: Annotated[str, "Message"]):
         """Valid passthrough tool."""
         yield AgentSendText(text=message)
 
@@ -115,7 +115,7 @@ def test_handoff_tool_with_ctx_and_event_succeeds():
     """Test that handoff tool with both ctx and event parameters succeeds."""
 
     @handoff_tool()
-    async def good_tool(ctx, reason: Annotated[str, Field(description="Reason")], event):
+    async def good_tool(ctx, reason: Annotated[str, "Reason"], event):
         """Valid handoff tool."""
         yield AgentSendText(text="Transferring...")
 
@@ -130,7 +130,7 @@ def test_handoff_tool_event_not_in_parameters():
     """Test that event parameter is filtered out of handoff tool parameters."""
 
     @handoff_tool()
-    async def transfer(ctx, department: Annotated[str, Field(description="Dept")], event):
+    async def transfer(ctx, department: Annotated[str, "Dept"], event):
         """Transfer to department."""
         pass
 
@@ -149,8 +149,8 @@ def test_parameter_with_default_is_optional():
     @loopback_tool()
     async def tool_with_default(
         ctx,
-        required_param: Annotated[str, Field(description="Required")],
-        optional_param: Annotated[int, Field(description="Optional", default=10)],
+        required_param: Annotated[str, "Required"],
+        optional_param: Annotated[int, "Optional"] = 10,
     ) -> str:
         """Tool with optional parameter."""
         return "done"
@@ -160,18 +160,37 @@ def test_parameter_with_default_is_optional():
     assert tool_with_default.parameters["optional_param"].default == 10
 
 
-def test_parameter_with_enum():
-    """Test that enum constraint is extracted from Field."""
+def test_optional_type_is_optional():
+    """Test that Optional[X] types are marked as not required."""
+
+    @loopback_tool()
+    async def tool_with_optional(
+        ctx,
+        required_param: Annotated[str, "Required"],
+        optional_param: Annotated[Optional[str], "Optional"],
+    ) -> str:
+        """Tool with Optional type parameter."""
+        return "done"
+
+    assert tool_with_optional.parameters["required_param"].required is True
+    assert tool_with_optional.parameters["optional_param"].required is False
+
+
+def test_parameter_with_literal_enum():
+    """Test that Literal types create enum constraints."""
 
     @loopback_tool()
     async def tool_with_enum(
         ctx,
-        category: Annotated[str, Field(description="Category", enum=["a", "b", "c"])],
+        category: Annotated[Literal["a", "b", "c"], "Category"],
     ) -> str:
         """Tool with enum parameter."""
         return category
 
-    assert tool_with_enum.parameters["category"].enum == ["a", "b", "c"]
+    # Check that the schema has enum values
+    schema = function_tool_to_openai(tool_with_enum)
+    props = schema["function"]["parameters"]["properties"]
+    assert props["category"]["enum"] == ["a", "b", "c"]
 
 
 def test_custom_tool_name_and_description():

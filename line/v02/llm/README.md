@@ -5,20 +5,20 @@ A unified interface for building LLM-powered voice agents with 100+ provider sup
 ## Quick Start
 
 ```python
-from typing import Annotated
+from typing import Annotated, Literal, Optional
 from line.v02.llm import (
     LlmAgent, LlmConfig, loopback_tool, passthrough_tool, handoff_tool,
-    Field, AgentSendText, AgentEndCall, AgentHandedOff,
+    AgentSendText, AgentEndCall, AgentHandedOff,
 )
 
 # Define tools
 @loopback_tool()
-async def get_weather(ctx, city: Annotated[str, Field(description="City name")]) -> str:
+async def get_weather(ctx, city: Annotated[str, "City name"]) -> str:
     """Get weather for a city."""
     return f"72°F in {city}"
 
 @passthrough_tool()
-async def end_call(ctx, message: Annotated[str, Field(description="Goodbye message")]):
+async def end_call(ctx, message: Annotated[str, "Goodbye message"]):
     """End the call."""
     yield AgentSendText(text=message)
     yield AgentEndCall()
@@ -52,7 +52,7 @@ Result is sent back to the LLM for continued generation. Use for information ret
 
 ```python
 @loopback_tool()
-async def lookup_order(ctx, order_id: Annotated[str, Field(description="Order ID")]) -> str:
+async def lookup_order(ctx, order_id: Annotated[str, "Order ID"]) -> str:
     """Look up order status."""
     order = await db.get_order(order_id)
     return f"Order {order_id}: {order.status}"
@@ -64,7 +64,7 @@ Response bypasses the LLM and goes directly to the user. Use for deterministic a
 
 ```python
 @passthrough_tool()
-async def transfer_call(ctx, department: Annotated[str, Field(description="Department name")]):
+async def transfer_call(ctx, department: Annotated[str, "Department name"]):
     """Transfer to another department."""
     yield AgentSendText(text=f"Transferring to {department}...")
     yield AgentTransferCall(target_phone_number=DEPT_NUMBERS[department])
@@ -79,7 +79,7 @@ handoff tool, which routes them to the target agent. Use for multi-agent workflo
 @handoff_tool()
 async def transfer_to_billing(
     ctx,
-    reason: Annotated[str, Field(description="Reason for transfer")],
+    reason: Annotated[str, "Reason for transfer"],
     event,  # Required: receives AgentHandedOff on first call, then subsequent InputEvents
 ):
     """Transfer to billing department."""
@@ -98,18 +98,18 @@ The `event` parameter is required for handoff tools:
 
 ## Tool Parameters
 
-Use `Annotated` with `Field` to define parameters:
+Use `Annotated` with a string description to define parameters:
 
 ```python
 @loopback_tool()
 async def search_products(
     ctx,
-    query: Annotated[str, Field(description="Search query")],
-    category: Annotated[str, Field(description="Category", enum=["electronics", "clothing", "home"])],
-    limit: Annotated[int, Field(description="Max results", default=10)]
+    query: Annotated[str, "Search query"],                                    # Required
+    category: Annotated[Literal["electronics", "clothing", "home"], "Category"],  # Required with enum
+    limit: Annotated[int, "Max results"] = 10,                                # Optional with default
+    note: Annotated[Optional[str], "Optional note"],                          # Optional (None if not provided)
 ) -> str:
     """Search products."""
-    # query is required, category is required with enum constraint, limit defaults to 10
     ...
 ```
 

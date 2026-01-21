@@ -61,7 +61,7 @@ from line.v02.llm.agent import (
 from line.v02.llm.config import LlmConfig
 
 # Function tool definitions
-from line.v02.llm.function_tool import Field, FunctionTool, ToolType, construct_function_tool
+from line.v02.llm.function_tool import FunctionTool, ToolType, construct_function_tool
 
 # LLM Agent
 from line.v02.llm.llm_agent import LlmAgent
@@ -89,7 +89,6 @@ __all__ = [
     # Configuration
     "LlmConfig",
     # Tool definitions
-    "Field",
     "FunctionTool",
     "ToolType",
     "construct_function_tool",
