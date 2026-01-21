@@ -37,10 +37,43 @@ from line.v02.llm.agent import (
     TurnEnv,
 )
 from line.v02.llm.config import LlmConfig
-from line.v02.llm.function_tool import FunctionTool, ToolType
+from line.v02.llm.tool_utils import FunctionTool, ToolType, construct_function_tool
 from line.v02.llm.provider import LLMProvider, Message, ToolCall
+from line.v02.llm.tools import WebSearchTool
 
 T = TypeVar("T")
+
+# Type alias for tools that can be passed to LlmAgent
+ToolSpec = Union[FunctionTool, WebSearchTool]
+
+
+def _check_web_search_support(model: str) -> bool:
+    """Check if a model supports native web search via litellm.
+
+    Returns True if the model supports web_search_options, False otherwise.
+    """
+    try:
+        import litellm
+
+        return litellm.supports_web_search(model=model)
+    except (ImportError, AttributeError, Exception):
+        # If litellm doesn't have supports_web_search or any error occurs,
+        # fall back to the tool-based approach
+        return False
+
+
+def _web_search_tool_to_function_tool(web_search_tool: WebSearchTool) -> FunctionTool:
+    """Convert a WebSearchTool to a FunctionTool for use as a fallback.
+
+    When the LLM doesn't support native web search, we use the WebSearchTool's
+    search method as a regular loopback tool.
+    """
+    return construct_function_tool(
+        func=web_search_tool.search,
+        name="web_search",
+        description="Search the web for real-time information. Use this when you need current information that may not be in your training data.",
+        tool_type=ToolType.LOOPBACK,
+    )
 
 
 async def _normalize_result(
@@ -80,6 +113,8 @@ class LlmAgent:
     Agent wrapping LLM providers via LiteLLM with tool calling support.
 
     Supports loopback, passthrough, and handoff tool paradigms.
+    Also supports web search via native LLM capabilities or fallback to DuckDuckGo.
+
     See README.md for examples.
     """
 
@@ -87,15 +122,33 @@ class LlmAgent:
         self,
         model: str,
         api_key: Optional[str] = None,
-        tools: Optional[List[FunctionTool]] = None,
+        tools: Optional[List[ToolSpec]] = None,
         config: Optional[LlmConfig] = None,
         max_tool_iterations: int = 10,
     ):
         self._model = model
         self._api_key = api_key
-        self._tools = tools or []
         self._config = config or LlmConfig()
         self._max_tool_iterations = max_tool_iterations
+
+        # Process tools: separate WebSearchTool from regular FunctionTools
+        self._web_search_options: Optional[Dict[str, Any]] = None
+        self._tools: List[FunctionTool] = []
+
+        for tool in tools or []:
+            if isinstance(tool, WebSearchTool):
+                # Check if model supports native web search
+                if _check_web_search_support(model):
+                    # Use native web search via web_search_options
+                    self._web_search_options = tool.get_web_search_options()
+                    logger.info(f"Model {model} supports native web search, using web_search_options")
+                else:
+                    # Fall back to tool-based web search
+                    fallback_tool = _web_search_tool_to_function_tool(tool)
+                    self._tools.append(fallback_tool)
+                    logger.info(f"Model {model} doesn't support native web search, using fallback tool")
+            else:
+                self._tools.append(tool)
 
         self._tool_map: Dict[str, FunctionTool] = {t.name: t for t in self._tools}
         self._llm = LLMProvider(
@@ -159,7 +212,16 @@ class LlmAgent:
             text_buffer = ""
             tool_calls_dict: Dict[str, ToolCall] = {}
 
-            stream = self._llm.chat(messages, self._tools if self._tools else None)
+            # Build kwargs for LLM chat, including web_search_options if available
+            chat_kwargs: Dict[str, Any] = {}
+            if self._web_search_options:
+                chat_kwargs["web_search_options"] = self._web_search_options
+
+            stream = self._llm.chat(
+                messages,
+                self._tools if self._tools else None,
+                **chat_kwargs,
+            )
             async with stream:
                 async for chunk in stream:
                     if chunk.text:

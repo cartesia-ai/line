@@ -6,7 +6,7 @@ See README.md for examples.
 
 from typing import Callable, Optional
 
-from line.v02.llm.function_tool import FunctionTool, ToolType, construct_function_tool
+from line.v02.llm.tool_utils import FunctionTool, ToolType, construct_function_tool
 
 
 def loopback_tool(

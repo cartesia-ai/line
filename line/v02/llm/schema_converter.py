@@ -32,7 +32,7 @@ Example:
 from enum import Enum
 from typing import Any, Dict, List, Literal, Type, Union, get_args, get_origin
 
-from line.v02.llm.function_tool import FunctionTool, ParameterInfo
+from line.v02.llm.tool_utils import FunctionTool, ParameterInfo
 
 
 def python_type_to_json_schema(type_annotation: Type) -> Dict[str, Any]:

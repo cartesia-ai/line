@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Dict, List, Optional
 
 from line.v02.llm.config import LlmConfig
-from line.v02.llm.function_tool import FunctionTool
+from line.v02.llm.tool_utils import FunctionTool
 from line.v02.llm.schema_converter import function_tools_to_openai
 
 
