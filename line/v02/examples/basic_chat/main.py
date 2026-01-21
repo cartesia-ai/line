@@ -3,17 +3,24 @@ import os
 from line.call_request import CallRequest
 from line.v02.llm import LlmAgent, LlmConfig
 from line.v02.voice_agent_app import AgentEnv, VoiceAgentApp
+from loguru import logger
 
 #  GEMINI_API_KEY=your-key uv python main.py
 
 async def get_agent(env: AgentEnv, call_request: CallRequest):
-    print('Call request', call_request.agent)
+    logger.info(
+        f"Starting new call for {call_request.call_id}. "
+        f"Agent system prompt: {call_request.agent.system_prompt}" 
+        f"Agent introduction: {call_request.agent.introduction}"
+    )
+
     return LlmAgent(
         model="gemini/gemini-2.0-flash",
         api_key=os.getenv("GEMINI_API_KEY"),
         config=LlmConfig(
-            system_prompt="You are a friendly and helpful assistant. Have a natural conversation with the user.",
-            introduction="Hello! I'm your AI assistant. How can I help you today?",
+            system_prompt=call_request.agent.system_prompt or "You are a friendly and helpful assistant. Have a natural conversation with the user.",
+            # Empty string = agent waits for user to speak first; non-empty = agent speaks first
+            introduction=call_request.agent.introduction if call_request.agent.introduction is not None else "Hello! I'm your AI assistant. How can I help you today?",
         ),
     )
 
