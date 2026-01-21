@@ -245,13 +245,11 @@ class LlmAgent:
                         def handoff_target(
                             env: TurnEnv,
                             event: InputEvent,
-                            _func=normalized_func,
-                            _ctx=ctx,
-                            _tool_args=tool_args,
+                            _tool_args=tool_args.copy(),
+                            _normalized_func=normalized_func,
                         ) -> AsyncIterable[OutputEvent]:
                             tool_env = ToolEnv(turn_env=env)
-                            return _func(tool_env, **_tool_args, event=event)
-
+                            return _normalized_func(tool_env, **_tool_args, event=event)
                         self._handoff_target = handoff_target
 
                         yield AgentToolReturned(
