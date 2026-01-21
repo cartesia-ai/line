@@ -143,7 +143,7 @@ class LlmAgent:
                 self._introduction_sent = True
                 yield AgentSendText(text=self._config.introduction)
             return
-        
+
         # Handle CallEnded
         if isinstance(event, CallEnded):
             return
