@@ -16,7 +16,7 @@ from loguru import logger
 from pydantic import TypeAdapter
 import uvicorn
 
-from line.call_request import CallRequest, PreCallResult
+from line.call_request import AgentConfig, CallRequest, PreCallResult
 from line.harness_types import (
     AgentSpeechInput,
     AgentStateInput,
@@ -126,6 +126,7 @@ class VoiceAgentApp:
             from_=body.get("from_", "unknown"),
             to=body.get("to", "unknown"),
             agent_call_id=body.get("agent_call_id", body.get("call_id", "unknown")),
+            agent=AgentConfig(**body.get("agent", {})),
             metadata=body.get("metadata", {}),
         )
 
@@ -150,6 +151,7 @@ class VoiceAgentApp:
             "from": call_request.from_,
             "to": call_request.to,
             "agent_call_id": call_request.agent_call_id,
+            "agent": json.dumps(call_request.agent.model_dump()),
             "metadata": json.dumps(call_request.metadata),
         }
 
@@ -185,11 +187,20 @@ class VoiceAgentApp:
                 logger.warning(f"Invalid metadata JSON: {query_params['metadata']}")
                 metadata = {}
 
+        agent_data = {}
+        if "agent" in query_params:
+            try:
+                agent_data = json.loads(query_params["agent"])
+            except (json.JSONDecodeError, TypeError):
+                logger.warning(f"Invalid agent JSON: {query_params['agent']}")
+                agent_data = {}
+
         call_request = CallRequest(
             call_id=query_params.get("call_id", "unknown"),
             from_=query_params.get("from", "unknown"),
             to=query_params.get("to", "unknown"),
             agent_call_id=query_params.get("agent_call_id", "unknown"),
+            agent=AgentConfig(**agent_data),
             metadata=metadata,
         )
 
