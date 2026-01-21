@@ -109,6 +109,8 @@ class LLMProvider:
             llm_kwargs["presence_penalty"] = self._config.presence_penalty
         if self._config.frequency_penalty is not None:
             llm_kwargs["frequency_penalty"] = self._config.frequency_penalty
+        if self._config.web_search_options:
+            llm_kwargs["web_search_options"] = self._config.web_search_options
         if self._config.extra:
             llm_kwargs.update(self._config.extra)
 

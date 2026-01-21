@@ -13,6 +13,7 @@ from typing import (
     Callable,
     Dict,
     List,
+    Literal,
     Optional,
     TypeVar,
     Union,
@@ -89,12 +90,19 @@ class LlmAgent:
         tools: Optional[List[FunctionTool]] = None,
         config: Optional[LlmConfig] = None,
         max_tool_iterations: int = 10,
+        web_search: Union[bool, Literal["low", "medium", "high"]] = False,
     ):
         self._model = model
         self._api_key = api_key
         self._tools = tools or []
         self._config = config or LlmConfig()
         self._max_tool_iterations = max_tool_iterations
+        self._web_search = web_search
+
+        # Apply web_search setting to config if enabled
+        if self._web_search:
+            context_size = self._web_search if isinstance(self._web_search, str) else "medium"
+            self._config.web_search_options = {"search_context_size": context_size}
 
         self._tool_map: Dict[str, FunctionTool] = {t.name: t for t in self._tools}
         self._llm = LLMProvider(
@@ -109,7 +117,7 @@ class LlmAgent:
         self._introduction_sent = False
         self._handoff_target: Optional[AgentCallable] = None  # Normalized process function
 
-        logger.info(f"LlmAgent initialized with model={self._model}, tools={[t.name for t in self._tools]}")
+        logger.info(f"LlmAgent initialized with model={self._model}, tools={[t.name for t in self._tools]}, web_search={self._web_search}")
 
     @property
     def model(self) -> str:
