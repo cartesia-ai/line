@@ -117,7 +117,11 @@ class LlmAgent:
         self._introduction_sent = False
         self._handoff_target: Optional[AgentCallable] = None  # Normalized process function
 
-        logger.info(f"LlmAgent initialized with model={self._model}, tools={[t.name for t in self._tools]}, web_search={self._web_search}")
+        logger.info(
+            f"LlmAgent initialized with model={self._model}, "
+            f"tools={[t.name for t in self._tools]}, "
+            f"web_search={self._web_search}"
+        )
 
     @property
     def model(self) -> str:
