@@ -10,7 +10,7 @@ __all__ = [
 ]
 
 @passthrough_tool()
-async def end_call(ctx, message: str = "Goodbye!"):
     """End the call."""
+async def end_call(ctx, message: Annotated[Optional[str], Field(description="The message to say before ending the call")]):
     yield AgentSendText(text=message)
     yield AgentEndCall()
