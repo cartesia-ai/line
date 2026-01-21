@@ -12,7 +12,7 @@ import os
 from typing import Dict, List, Optional
 
 from loguru import logger
-from stagehand import Stagehand, StagehandConfig
+from stagehand import AsyncStagehand
 
 
 class FieldType(Enum):
@@ -127,8 +127,8 @@ class StagehandFormFiller:
 
     def __init__(self, form_url: str):
         self.form_url = form_url
-        self.stagehand: Optional[Stagehand] = None
-        self.page = None
+        self.client: Optional[AsyncStagehand] = None
+        self.session = None
         self.is_initialized = False
         self.field_mapper = FormFieldMapping()
         self.collected_data: Dict[str, str] = {}
@@ -145,22 +145,19 @@ class StagehandFormFiller:
         try:
             logger.info("Initializing Stagehand browser automation")
 
-            # Configure Stagehand
-            config = StagehandConfig(
-                env="BROWSERBASE",
-                # Fast model for form filling
-                model_name="google/gemini-2.0-flash-exp",
-                model_api_key=os.getenv("GEMINI_API_KEY"),
+            self.client = AsyncStagehand(
+                browserbase_api_key=os.environ.get("BROWSERBASE_API_KEY"),
+                browserbase_project_id=os.environ.get("BROWSERBASE_PROJECT_ID"),
+                model_api_key=os.environ.get("GEMINI_API_KEY"),
             )
 
-            self.stagehand = Stagehand(config)
-            await self.stagehand.init()
+            self.session = await self.client.sessions.create(model_name="google/gemini-3-flash-preview")
 
-            self.page = self.stagehand.page
+            logger.info(f"Session started: {self.session.id}")
 
             # Navigate to form
             logger.info(f"Opening form: {self.form_url}")
-            await self.page.goto(self.form_url)
+            await self.session.navigate(url=self.form_url)
 
             # Wait for form to load
             await asyncio.sleep(2)
@@ -200,33 +197,26 @@ class StagehandFormFiller:
 
             logger.info(f"Async filling field '{field.label}' with: {answer}")
 
-            # Create async task for the actual field filling
-            fill_action = None
-
             # Use Stagehand's natural language API to fill the field
             if field.field_type in [FieldType.TEXT, FieldType.EMAIL, FieldType.PHONE]:
-                fill_action = self.page.act(f"Fill in the '{field.label}' field with: {answer}")
+                await self.session.act(input=f"Fill in the '{field.label}' field with: {answer}")
 
             elif field.field_type == FieldType.TEXTAREA:
-                fill_action = self.page.act(f"Type in the '{field.label}' text area: {answer}")
+                await self.session.act(input=f"Type in the '{field.label}' text area: {answer}")
 
             elif field.field_type in [FieldType.SELECT, FieldType.RADIO]:
-                fill_action = self.page.act(f"Select '{answer}' for the '{field.label}' field")
+                await self.session.act(input=f"Select '{answer}' for the '{field.label}' field")
 
             elif field.field_type == FieldType.CHECKBOX:
                 # For role selection, check the specific role checkbox
                 if question_id == "role_selection":
-                    fill_action = self.page.act(f"Check the '{answer}' checkbox")
+                    await self.session.act(input=f"Check the '{answer}' checkbox")
                 else:
                     # For other checkboxes, check/uncheck based on answer
                     if answer.lower() in ["yes", "true"]:
-                        fill_action = self.page.act(f"Check the '{field.label}' checkbox")
+                        await self.session.act(input=f"Check the '{field.label}' checkbox")
                     else:
-                        fill_action = self.page.act(f"Uncheck the '{field.label}' checkbox")
-
-            # Execute the fill action asynchronously
-            if fill_action:
-                await fill_action
+                        await self.session.act(input=f"Uncheck the '{field.label}' checkbox")
 
             return True
 
@@ -244,7 +234,7 @@ class StagehandFormFiller:
             logger.info("Submitting the form")
             logger.info(f"Form has {len(self.collected_data)} fields filled")
 
-            await self.page.act("Find and click the Submit button to submit the form")
+            await self.session.act(input="Find and click the Submit button to submit the form")
 
             # Wait for submission to process
             await asyncio.sleep(1)
@@ -262,9 +252,9 @@ class StagehandFormFiller:
         Returns:
             None.
         """
-        if self.stagehand or self.page:
+        if self.session:
             try:
-                await self.stagehand.close()
-                logger.info("Browser closed")
+                await self.session.end()
+                logger.info("Session ended")
             except Exception as e:
-                logger.error(f"Error closing browser: {e}")
+                logger.error(f"Error ending session: {e}")
