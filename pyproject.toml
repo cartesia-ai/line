@@ -59,6 +59,9 @@ gemini = [
 openai = [
     "openai>=1.70.0",
 ]
+llm = [
+    "litellm>=1.56.0",
+]
 
 [tool.setuptools.packages.find]
 where = ["."]
