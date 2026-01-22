@@ -546,19 +546,25 @@ def _get_processed_history(pending_text: str, history: List[SpecificInputEvent])
         Processed history with whitespace restored in SpecificAgentTextSent events
     """
     processed_events: List[SpecificInputEvent] = []
+    committed_text_buffer = ""
     for event in history:
         if isinstance(event, SpecificAgentTextSent):
-            committed_text, pending_text = _parse_committed(pending_text, event.content)
+            committed_text_buffer += event.content
+        else:
+            committed_text, committed_text_buffer, pending_text = _parse_committed(
+                committed_text_buffer, pending_text
+            )
             if committed_text:
                 processed_events.append(SpecificAgentTextSent(content=committed_text))
-            # If no committed_text (empty after strip), skip this event
-        else:
             processed_events.append(event)
 
+    committed_text, _, _ = _parse_committed(committed_text_buffer, pending_text)
+    if committed_text:
+        processed_events.append(SpecificAgentTextSent(content=committed_text))
     return processed_events
 
 
-def _parse_committed(pending_text: str, speech_text: str) -> tuple[str, str]:
+def _parse_committed(committed_buffer_text: str, pending_text: str) -> tuple[str, str, str]:
     """
     Parse committed text by matching speech_text against pending_text to recover whitespace.
 
@@ -567,33 +573,35 @@ def _parse_committed(pending_text: str, speech_text: str) -> tuple[str, str]:
     the properly formatted committed text.
 
     Args:
+        committed_buffer_text: Confirmed speech from TTS (whitespace stripped)
         pending_text: Accumulated text from AgentSendText events (with whitespace)
-        speech_text: Confirmed speech from TTS (whitespace stripped)
 
     Returns:
         Tuple of (committed_text_with_whitespace, remaining_pending_text)
     """
+    committed_buffer_parts = list(
+        filter(lambda x: x != "", re.split(NORMAL_CHARACTERS_REGEX, committed_buffer_text))
+    )
     pending_parts = list(filter(lambda x: x != "", re.split(NORMAL_CHARACTERS_REGEX, pending_text)))
-    speech_parts = list(filter(lambda x: x != "", re.split(NORMAL_CHARACTERS_REGEX, speech_text)))
 
     # If the pending text has no spaces (ex. non-latin languages), commit the entire speech text.
     if len([x for x in pending_parts if x.isspace()]) == 0:
-        match_index = pending_text.find(speech_text)
-        return speech_text, pending_text[match_index + len(speech_text) :]
+        match_index = pending_text.find(committed_buffer_text)
+        return committed_buffer_text, "", pending_text[match_index + len(committed_buffer_text) :]
 
     committed_parts: list[str] = []
     still_pending_parts: list[str] = []
     for pending_part in pending_parts:
         # If speech_text is empty, treat remaining pending parts as still pending.
-        if not speech_parts:
+        if not committed_buffer_parts:
             still_pending_parts.append(pending_part)
         # If the next pending text matches the start of what's been marked committed (as sent by TTS),
-        # add it to committed and trim it from speech_parts.
-        elif speech_parts[0].startswith(pending_part):
-            speech_parts[0] = speech_parts[0][len(pending_part) :]
+        # add it to committed and trim it from committed_buffer_parts.
+        elif committed_buffer_parts[0].startswith(pending_part):
+            committed_buffer_parts[0] = committed_buffer_parts[0][len(pending_part) :]
             committed_parts.append(pending_part)
-            if len(speech_parts[0]) == 0:
-                speech_parts.pop(0)
+            if len(committed_buffer_parts[0]) == 0:
+                committed_buffer_parts.pop(0)
         # If the part is purely whitespace, add it directly to committed_parts.
         elif pending_part.isspace():
             committed_parts.append(pending_part)
@@ -603,4 +611,4 @@ def _parse_committed(pending_text: str, speech_text: str) -> tuple[str, str]:
             pass
 
     committed_str = "".join(committed_parts).strip()
-    return committed_str, "".join(still_pending_parts)
+    return committed_str, "".join(committed_buffer_parts), "".join(still_pending_parts)

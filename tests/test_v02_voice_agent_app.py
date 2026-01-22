@@ -426,9 +426,8 @@ class TestGetProcessedHistory:
             SpecificAgentTextSent(content="cd"),
         ]
         result = _get_processed_history("a b c d", history)
-        assert len(result) == 2
-        assert result[0].content == "a b"
-        assert result[1].content == "c d"
+        assert len(result) == 1
+        assert result[0].content == "a b c d"
 
     def test_no_spaces_passthrough(self):
         result = _get_processed_history("ab", [SpecificAgentTextSent(content="ab")])
@@ -458,35 +457,35 @@ class TestParseCommitted:
 
     def test_exact_match(self):
         """When speech exactly matches pending (minus whitespace)."""
-        committed, remaining = _parse_committed("a b c", "abc")
+        committed, _, remaining = _parse_committed("abc", "a b c")
         assert committed == "a b c"
         assert remaining == ""
 
     def test_partial_match(self):
         """When speech matches only the beginning of pending."""
-        committed, remaining = _parse_committed("a b c d", "abc")
+        committed, _, remaining = _parse_committed("abc", "a b c d")
         assert committed == "a b c"
         assert remaining == " d"
 
     def test_empty_pending(self):
         """Empty pending text returns speech text for non-latin handling."""
-        committed, remaining = _parse_committed("abc", "abc")
+        committed, _, remaining = _parse_committed("abc", "abc")
         assert committed == "abc"
         assert remaining == ""
 
     def test_preserves_punctuation(self):
         """Punctuation is preserved during matching."""
-        committed, remaining = _parse_committed("a!", "a!")
+        committed, _, remaining = _parse_committed("a!", "a!")
         assert committed == "a!"
         assert remaining == ""
 
     def test_non_space_commit_preserves_remaining(self):
         """Partial commit of non-latin text should preserve remaining."""
         # Pending has two "sentences", only first is committed
-        pending = "ab"
         speech = "a"
+        pending = "ab"
 
-        committed, remaining = _parse_committed(pending, speech)
+        committed, _, remaining = _parse_committed(speech, pending)
 
         assert committed == "a"
         assert remaining == "b", (
@@ -497,10 +496,10 @@ class TestParseCommitted:
     def test_non_space_commit_preserves_skips_as_necessary(self):
         """Partial commit of non-latin text should preserve remaining."""
         # Pending has two "sentences", only first is committed
-        pending = "abc"
         speech = "b"
+        pending = "abc"
 
-        committed, remaining = _parse_committed(pending, speech)
+        committed, _, remaining = _parse_committed(speech, pending)
 
         assert committed == "b"
         assert remaining == "c", (
