@@ -129,16 +129,13 @@ class WebSearchTool:
             from duckduckgo_search import DDGS
         except ImportError:
             return (
-                "Error: duckduckgo-search package not installed. "
-                "Install with: pip install duckduckgo-search"
+                "Error: duckduckgo-search package not installed. Install with: pip install duckduckgo-search"
             )
 
         try:
             with DDGS() as ddgs:
                 # Map context size to number of results
-                num_results = {"low": 3, "medium": 5, "high": 10}.get(
-                    self.search_context_size, 5
-                )
+                num_results = {"low": 3, "medium": 5, "high": 10}.get(self.search_context_size, 5)
 
                 results = list(ddgs.text(query, max_results=num_results))
 

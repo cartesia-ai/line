@@ -25,10 +25,10 @@ from line.v02.llm.agent import (
     UserTextSent,
 )
 from line.v02.llm.config import LlmConfig
-from line.v02.llm.tool_utils import FunctionTool
 from line.v02.llm.llm_agent import LlmAgent
 from line.v02.llm.provider import Message, StreamChunk, ToolCall
 from line.v02.llm.tool_types import handoff_tool, loopback_tool, passthrough_tool
+from line.v02.llm.tool_utils import FunctionTool
 
 # Use anyio for async test support with asyncio backend only (trio not installed)
 pytestmark = [pytest.mark.anyio, pytest.mark.parametrize("anyio_backend", ["asyncio"])]
