@@ -328,13 +328,15 @@ class ConversationRunner:
 
             except WebSocketDisconnect:
                 logger.info("WebSocket disconnected in loop")
+                self.shutdown_event.set()
                 end_event, self.history = self._wrap_with_history(self.history, SpecificCallEnded())
                 await self._handle_event(TurnEnv(), end_event)
-                self.shutdown_event.set()
             except json.JSONDecodeError as e:
                 logger.exception(f"Failed to parse JSON message: {e}")
             except Exception as e:
+                self.shutdown_event.set()
                 await self.send_error(f"Error processing message: {e}")
+                await self.websocket.close()
 
         if self.agent_task:
             await self.agent_task
