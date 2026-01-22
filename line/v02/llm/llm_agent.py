@@ -445,7 +445,8 @@ def _build_full_history(
     - Concatenates contiguous SpecificAgentTextSent events in input_history
 
     Rules:
-    1. Observable events: AgentSendDtmf, AgentSendText, AgentEndCall
+    1 ) An event is considered "observable" if the external harness tracks it and
+        returns it to us in input_history: AgentSendDtmf, AgentSendText, AgentEndCall
          - These can be matched between local and input history
     2. Other events are unobservable (e.g., AgentToolReturned)
     3. Match observable local events to input_history events ("observed")
