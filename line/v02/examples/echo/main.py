@@ -1,12 +1,14 @@
 import os
 
+from tools import echo
+
 from line.call_request import CallRequest
 from line.v02.llm import LlmAgent, LlmConfig
 from line.v02.tools import end_call
 from line.v02.voice_agent_app import AgentEnv, VoiceAgentApp
-from tools import echo
 
 #  GEMINI_API_KEY=your-key uv python main.py
+
 
 async def get_agent(env: AgentEnv, call_request: CallRequest):
     return LlmAgent(
@@ -14,10 +16,9 @@ async def get_agent(env: AgentEnv, call_request: CallRequest):
         api_key=os.getenv("GEMINI_API_KEY"),
         tools=[end_call, echo],
         config=LlmConfig(
-            system_prompt=
-            """You are a friendly and helpful assistant. Have a natural conversation with the user. 
-            Once the user says `I'm ready to talk to myself`, call the echo tool to echo back what the user says.""",
-            # Empty string = agent waits for user to speak first; non-empty = agent speaks first
+            system_prompt="""
+            You are a friendly and helpful assistant. Have a natural conversation with the user. 
+Once the user says `I'm ready to talk to myself`, call the echo tool to echo back what the user says.""",
             introduction="Hello! I'm your Echo Agent. How can I help you today?",
         ),
     )

@@ -1,16 +1,14 @@
 from typing import Annotated
 
-from line.v02.llm import handoff_tool
-from line.v02.llm.agent import ToolEnv
-from line.v02.events import AgentHandedOff, AgentSendText, UserTurnEnded, SpecificUserTextSent
 from loguru import logger
 
+from line.v02.events import AgentHandedOff, AgentSendText, SpecificUserTextSent, UserTurnEnded
+from line.v02.llm import handoff_tool
+from line.v02.llm.agent import ToolEnv
+
+
 @handoff_tool()
-async def echo(
-    ctx: ToolEnv,
-    prefix: Annotated[str, "A prefix to add before each echoed message"],
-    event
-):
+async def echo(ctx: ToolEnv, prefix: Annotated[str, "A prefix to add before each echoed message"], event):
     """Echo the user's message back to them with a prefix."""
     if isinstance(event, AgentHandedOff):
         yield AgentSendText(text=f"Echo mode activated! I'll prefix everything with '{prefix}'")
