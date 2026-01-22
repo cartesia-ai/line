@@ -26,6 +26,7 @@ from line.v02.llm.agent import (
     AgentSendText,
     AgentToolCalled,
     AgentToolReturned,
+    CallEnded,
     CallStarted,
     InputEvent,
     OutputEvent,
@@ -141,6 +142,10 @@ class LlmAgent:
             if self._config.introduction and not self._introduction_sent:
                 self._introduction_sent = True
                 yield AgentSendText(text=self._config.introduction)
+            return
+
+        # Handle CallEnded
+        if isinstance(event, CallEnded):
             return
 
         async for output in self._generate_response(env, event):
