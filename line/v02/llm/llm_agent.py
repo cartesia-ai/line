@@ -4,6 +4,7 @@ LlmAgent - An Agent implementation wrapping 100+ LLM providers via LiteLLM.
 See README.md for examples and documentation.
 """
 
+import asyncio
 import inspect
 import json
 from typing import (
@@ -172,6 +173,7 @@ class LlmAgent:
         self._introduction_sent = False
         self._local_history: List[OutputEvent] = []
         self._handoff_target: Optional[AgentCallable] = None  # Normalized process function
+        self._background_tasks: List[asyncio.Task[Any]] = []  # Backgroundable tool tasks
 
         logger.info(f"LlmAgent initialized with model={self._model}, tools={[t.name for t in self._tools]}")
 
@@ -278,20 +280,29 @@ class LlmAgent:
                     normalized_func = _normalize_to_async_gen(tool.func)
 
                     if tool.tool_type == ToolType.LOOPBACK:
-                        # Collect results to send back to LLM
-                        results = []
-                        async for value in normalized_func(ctx, **tool_args):
-                            results.append(value)
-                            tool_returned_output = AgentToolReturned(
-                                tool_call_id=tc.id,
-                                tool_name=tc.name,
-                                tool_args=tool_args,
-                                result=value,
-                            )
-                            self._append_to_local_history(tool_returned_output)
-                            yield tool_returned_output
+                        if tool.is_backgroundable:
+                            # Backgroundable tool: run in a shielded task that survives cancellation
+                            results = []
+                            async for event in self._execute_backgroundable_tool(
+                                normalized_func, ctx, tool_args, tc.id, tc.name
+                            ):
+                                results.append(event.result)
+                                yield event
+                        else:
+                            # Regular loopback tool: collect results to send back to LLM
+                            results = []
+                            async for value in normalized_func(ctx, **tool_args):
+                                results.append(value)
+                                tool_returned_output = AgentToolReturned(
+                                    tool_call_id=tc.id,
+                                    tool_name=tc.name,
+                                    tool_args=tool_args,
+                                    result=value,
+                                )
+                                self._append_to_local_history(tool_returned_output)
+                                yield tool_returned_output
 
-                        # Add to messages for next iteration
+                        # Add to messages for next iteration (common to both branches)
                         result_str = str(results[0]) if len(results) == 1 else str(results)
                         messages.append(
                             Message(
@@ -375,7 +386,7 @@ class LlmAgent:
         1. Observable events can be matched between local and input history
         2. Unobservable events are interpolated based on their relative position
            to observable events
-        3. Unobserved observable events are excluded from the merged history 
+        3. Unobserved observable events are excluded from the merged history
            (because the audio harness is the source of truth for them)
 
         The full_history contains:
@@ -424,6 +435,57 @@ class LlmAgent:
                 )
         return messages
 
+    async def _execute_backgroundable_tool(
+        self,
+        normalized_func: Callable[..., AsyncIterable[Any]],
+        ctx: ToolEnv,
+        tool_args: Dict[str, Any],
+        tc_id: str,
+        tc_name: str,
+    ) -> AsyncIterable[AgentToolReturned]:
+        """Execute a backgroundable tool in a shielded task, streaming events.
+
+        The task is protected from cancellation. If the calling coroutine is
+        cancelled, the task continues running and stores results to local_history.
+
+        Yields:
+            AgentToolReturned events as they are produced by the tool.
+        """
+        queue: asyncio.Queue[Optional[AgentToolReturned]] = asyncio.Queue()
+
+        async def run_tool() -> None:
+            try:
+                async for value in normalized_func(ctx, **tool_args):
+                    event = AgentToolReturned(
+                        tool_call_id=tc_id,
+                        tool_name=tc_name,
+                        tool_args=tool_args,
+                        result=value,
+                    )
+                    self._append_to_local_history(event)
+                    await queue.put(event)
+            finally:
+                await queue.put(None)  # Sentinel to signal completion
+
+        task = asyncio.create_task(run_tool())
+        self._background_tasks.append(task)
+
+        try:
+            while True:
+                # Shield each queue.get() to allow task to continue on cancellation
+                event = await asyncio.shield(queue.get())
+                if event is None:
+                    # Task completed, check for exceptions
+                    self._background_tasks.remove(task)
+                    exc = task.exception()
+                    if exc is not None:
+                        raise exc
+                    return
+                yield event
+        except asyncio.CancelledError:
+            # Task continues in background, don't remove from list
+            raise
+
     def _append_to_local_history(self, event: OutputEvent) -> None:
         """Append an output event to local history."""
         self._local_history.append(event)
@@ -431,6 +493,10 @@ class LlmAgent:
     async def cleanup(self) -> None:
         """Clean up resources."""
         self._handoff_target = None
+        # Wait for any remaining background tasks to complete
+        if self._background_tasks:
+            await asyncio.gather(*self._background_tasks, return_exceptions=True)
+            self._background_tasks.clear()
         await self._llm.aclose()
 
 
