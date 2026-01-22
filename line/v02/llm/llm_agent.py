@@ -30,6 +30,7 @@ from line.v02.llm.agent import (
     CallStarted,
     InputEvent,
     OutputEvent,
+    SpecificAgentDtmfSent,
     SpecificAgentTextSent,
     SpecificInputEvent,
     SpecificUserTextSent,

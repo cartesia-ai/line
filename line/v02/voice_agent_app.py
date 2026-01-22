@@ -36,15 +36,13 @@ from line.harness_types import (
 )
 from line.v02.agent import Agent, AgentSpec, EventFilter, TurnEnv
 from line.v02.events import (
-    AgentDTMFSent,
+    AgentDtmfSent,
     AgentEndCall,
-    AgentSendDTMF,
+    AgentSendDtmf,
     AgentSendText,
     AgentTextSent,
     AgentToolCalled,
-    AgentToolCalledInput,
     AgentToolReturned,
-    AgentToolReturnedInput,
     AgentTransferCall,
     AgentTurnEnded,
     AgentTurnStarted,
@@ -54,10 +52,8 @@ from line.v02.events import (
     LogMessage,
     LogMetric,
     OutputEvent,
-    SpecificAgentDTMFSent,
+    SpecificAgentDtmfSent,
     SpecificAgentTextSent,
-    SpecificAgentToolCalled,
-    SpecificAgentToolReturned,
     SpecificAgentTurnEnded,
     SpecificAgentTurnStarted,
     SpecificCallEnded,
@@ -397,10 +393,10 @@ class ConversationRunner:
         """Pure mapping: history + harness message -> (InputEvent | None, updated history)."""
         if isinstance(message, UserStateInput):
             if message.value == UserState.SPEAKING:
-                logger.info("🎤 User started speaking")
+                logger.info("-> 🎤 User started speaking")
                 return self._wrap_with_history(history, SpecificUserTurnStarted())
             if message.value == UserState.IDLE:
-                logger.info("🔇 User stopped speaking")
+                logger.info("-> 🔇 User stopped speaking")
                 content = self._turn_content(
                     history,
                     SpecificUserTurnStarted,
@@ -409,33 +405,31 @@ class ConversationRunner:
                 return self._wrap_with_history(history, SpecificUserTurnEnded(content=content))
 
         elif isinstance(message, TranscriptionInput):
-            logger.info(f'📝 User said: "{message.content}"')
+            logger.info(f'-> 📝 User said: "{message.content}"')
             return self._wrap_with_history(history, SpecificUserTextSent(content=message.content))
 
         elif isinstance(message, AgentStateInput):
             if message.value == UserState.SPEAKING:
-                logger.info("🎤 Agent started speaking")
+                logger.info("-> 🎤 Agent started speaking")
                 return self._wrap_with_history(history, SpecificAgentTurnStarted())
             if message.value == UserState.IDLE:
-                logger.info("🔇 Agent stopped speaking")
+                logger.info("-> 🔇 Agent stopped speaking")
                 content = self._turn_content(
                     history,
                     SpecificAgentTurnStarted,
                     (
                         SpecificAgentTextSent,
-                        SpecificAgentDTMFSent,
-                        SpecificAgentToolCalled,
-                        SpecificAgentToolReturned,
+                        SpecificAgentDtmfSent,
                     ),
                 )
                 return self._wrap_with_history(history, SpecificAgentTurnEnded(content=content))
 
         elif isinstance(message, AgentSpeechInput):
-            logger.info(f'🗣️ Agent speech sent: "{message.content}"')
+            logger.info(f'-> 🗣️ Agent speech sent: "{message.content}"')
             return self._wrap_with_history(history, SpecificAgentTextSent(content=message.content))
 
         elif isinstance(message, DTMFInput):
-            logger.info(f"🔔 DTMF received: {message.button}")
+            logger.info(f"-> 🔔 DTMF received: {message.button}")
             return self._wrap_with_history(history, SpecificUserDtmfSent(button=message.button))
 
         raise ValueError(f"Unhandled input message type: {type(message).__name__}")
@@ -481,12 +475,8 @@ class ConversationRunner:
             return AgentTurnStarted(history=processed_history, **base_data), raw_history
         if isinstance(specific_event, SpecificAgentTextSent):
             return AgentTextSent(history=processed_history, **base_data), raw_history
-        if isinstance(specific_event, SpecificAgentDTMFSent):
-            return AgentDTMFSent(history=processed_history, **base_data), raw_history
-        if isinstance(specific_event, SpecificAgentToolCalled):
-            return AgentToolCalledInput(history=processed_history, **base_data), raw_history
-        if isinstance(specific_event, SpecificAgentToolReturned):
-            return AgentToolReturnedInput(history=processed_history, **base_data), raw_history
+        if isinstance(specific_event, SpecificAgentDtmfSent):
+            return AgentDtmfSent(history=processed_history, **base_data), raw_history
         if isinstance(specific_event, SpecificAgentTurnEnded):
             return AgentTurnEnded(history=processed_history, **base_data), raw_history
 
@@ -495,31 +485,31 @@ class ConversationRunner:
     def _map_output_event(self, event: OutputEvent) -> OutputMessage:
         """Convert OutputEvent to websocket OutputMessage."""
         if isinstance(event, AgentSendText):
-            logger.info(f'🤖 Agent said: "{event.text}"')
+            logger.info(f'<- 🤖 Agent said: "{event.text}"')
             return MessageOutput(content=event.text)
-        if isinstance(event, AgentSendDTMF):
-            logger.info(f"🔢 DTMF output: {event.button}")
+        if isinstance(event, AgentSendDtmf):
+            logger.info(f"<- 🔢 DTMF output: {event.button}")
             return DTMFOutput(button=event.button)
         if isinstance(event, AgentEndCall):
-            logger.info("📞 End call")
+            logger.info("<- 📞 End call")
             return EndCallOutput()
         if isinstance(event, AgentTransferCall):
-            logger.info(f"📱 Transfer to: {event.target_phone_number}")
+            logger.info(f"<- 📱 Transfer to: {event.target_phone_number}")
             return TransferOutput(target_phone_number=event.target_phone_number)
         if isinstance(event, LogMetric):
-            logger.debug(f"📈 Log metric: {event.name}={event.value}")
+            logger.debug(f"<- 📈 Log metric: {event.name}={event.value}")
             return LogMetricOutput(name=event.name, value=event.value)
         if isinstance(event, LogMessage):
-            logger.debug(f"🪵 Log message: {event.name} [{event.level}] {event.message}")
+            logger.debug(f"<- 🪵 Log message: {event.name} [{event.level}] {event.message}")
             return LogEventOutput(
                 event=event.name,
                 metadata={"level": event.level, "message": event.message, "metadata": event.metadata},
             )
         if isinstance(event, AgentToolCalled):
-            logger.info(f"🔧 Tool called: {event.tool_name}({event.tool_args})")
+            logger.info(f"<- 🔧 Tool called: {event.tool_name}({event.tool_args})")
             return ToolCallOutput(name=event.tool_name, arguments=event.tool_args)
         if isinstance(event, AgentToolReturned):
-            logger.info(f"🔧 Tool returned: {event.tool_name}({event.tool_args}) -> {event.result}")
+            logger.info(f"<- 🔧 Tool returned: {event.tool_name}({event.tool_args}) -> {event.result}")
             result_str = str(event.result) if event.result is not None else None
             return ToolCallOutput(name=event.tool_name, arguments=event.tool_args, result=result_str)
 

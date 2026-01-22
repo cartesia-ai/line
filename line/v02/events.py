@@ -40,7 +40,7 @@ class AgentTransferCall(BaseModel):
     target_phone_number: str
 
 
-class AgentSendDTMF(BaseModel):
+class AgentSendDtmf(BaseModel):
     type: Literal["agent_send_dtmf"] = "agent_send_dtmf"
     button: str
 
@@ -67,7 +67,7 @@ class LogMessage(BaseModel):
 
 OutputEvent = Union[
     AgentSendText,
-    AgentSendDTMF,
+    AgentSendDtmf,
     AgentEndCall,
     AgentTransferCall,
     AgentToolCalled,
@@ -119,24 +119,10 @@ class SpecificAgentTextSent(BaseModel):
     content: str
 
 
-class SpecificAgentDTMFSent(BaseModel):
+class SpecificAgentDtmfSent(BaseModel):
     type: Literal["agent_dtmf_sent"] = "agent_dtmf_sent"
     button: str
 
-
-class SpecificAgentToolCalled(BaseModel):
-    type: Literal["agent_tool_called"] = "agent_tool_called"
-    tool_call_id: str
-    tool_name: str
-    tool_args: Dict[str, Any] = Field(default_factory=dict)
-
-
-class SpecificAgentToolReturned(BaseModel):
-    type: Literal["agent_tool_returned"] = "agent_tool_returned"
-    tool_call_id: str
-    tool_name: str
-    tool_args: Dict[str, Any] = Field(default_factory=dict)
-    result: Any = None
 
 
 class SpecificAgentTurnEnded(BaseModel):
@@ -144,9 +130,7 @@ class SpecificAgentTurnEnded(BaseModel):
     content: List[
         Union[
             SpecificAgentTextSent,
-            SpecificAgentDTMFSent,
-            SpecificAgentToolCalled,
-            SpecificAgentToolReturned,
+            SpecificAgentDtmfSent,
         ]
     ] = Field(default_factory=list)
 
@@ -159,9 +143,7 @@ SpecificInputEvent = Union[
     SpecificUserTurnEnded,
     SpecificAgentTurnStarted,
     SpecificAgentTextSent,
-    SpecificAgentDTMFSent,
-    SpecificAgentToolCalled,
-    SpecificAgentToolReturned,
+    SpecificAgentDtmfSent,
     SpecificAgentTurnEnded,
     SpecificCallEnded,
 ]
@@ -199,15 +181,7 @@ class AgentTextSent(SpecificAgentTextSent):
     history: List[SpecificInputEvent] = Field(default_factory=list)
 
 
-class AgentDTMFSent(SpecificAgentDTMFSent):
-    history: List[SpecificInputEvent] = Field(default_factory=list)
-
-
-class AgentToolCalledInput(SpecificAgentToolCalled):
-    history: List[SpecificInputEvent] = Field(default_factory=list)
-
-
-class AgentToolReturnedInput(SpecificAgentToolReturned):
+class AgentDtmfSent(SpecificAgentDtmfSent):
     history: List[SpecificInputEvent] = Field(default_factory=list)
 
 
@@ -223,9 +197,7 @@ InputEvent = Union[
     UserTurnEnded,
     AgentTurnStarted,
     AgentTextSent,
-    AgentDTMFSent,
-    AgentToolCalledInput,
-    AgentToolReturnedInput,
+    AgentDtmfSent,
     AgentTurnEnded,
     AgentHandedOff,
     CallEnded,
@@ -235,7 +207,7 @@ InputEvent = Union[
 __all__ = [
     # Output
     "AgentSendText",
-    "AgentSendDTMF",
+    "AgentSendDtmf",
     "AgentEndCall",
     "AgentTransferCall",
     "AgentToolCalled",
@@ -253,9 +225,7 @@ __all__ = [
     "SpecificUserTurnEnded",
     "SpecificAgentTurnStarted",
     "SpecificAgentTextSent",
-    "SpecificAgentDTMFSent",
-    "SpecificAgentToolCalled",
-    "SpecificAgentToolReturned",
+    "SpecificAgentDtmfSent",
     "SpecificAgentTurnEnded",
     "SpecificInputEvent",
     # Input with history
@@ -267,9 +237,7 @@ __all__ = [
     "UserTurnEnded",
     "AgentTurnStarted",
     "AgentTextSent",
-    "AgentDTMFSent",
-    "AgentToolCalledInput",
-    "AgentToolReturnedInput",
+    "AgentDtmfSent",
     "AgentTurnEnded",
     "AgentHandedOff",
     "InputEvent",

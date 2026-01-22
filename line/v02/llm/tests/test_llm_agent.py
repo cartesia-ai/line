@@ -19,6 +19,7 @@ from line.v02.llm.agent import (
     AgentToolReturned,
     CallStarted,
     OutputEvent,
+    SpecificAgentDtmfSent,
     SpecificAgentTextSent,
     SpecificUserTextSent,
     TurnEnv,
