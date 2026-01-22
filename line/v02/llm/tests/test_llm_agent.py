@@ -19,7 +19,6 @@ from line.v02.llm.agent import (
     AgentToolReturned,
     CallStarted,
     OutputEvent,
-    SpecificAgentDtmfSent,
     SpecificAgentTextSent,
     SpecificCallEnded,
     SpecificUserTextSent,
@@ -27,6 +26,7 @@ from line.v02.llm.agent import (
     UserTextSent,
 )
 from line.v02.llm.config import LlmConfig
+from line.v02.llm.function_tool import FunctionTool
 from line.v02.llm.llm_agent import LlmAgent, _build_full_history
 from line.v02.llm.provider import Message, StreamChunk, ToolCall
 from line.v02.llm.tool_types import handoff_tool, loopback_tool, passthrough_tool
