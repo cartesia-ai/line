@@ -25,7 +25,7 @@ from line.v02.llm.agent import (
     UserTextSent,
 )
 from line.v02.llm.config import LlmConfig
-from line.v02.llm.function_tool import Field, FunctionTool
+from line.v02.llm.function_tool import FunctionTool
 from line.v02.llm.llm_agent import LlmAgent
 from line.v02.llm.provider import Message, StreamChunk, ToolCall
 from line.v02.llm.tool_types import handoff_tool, loopback_tool, passthrough_tool
@@ -201,7 +201,7 @@ async def test_loopback_tool_feeds_result_back_to_llm(turn_env):
 
     # Define a loopback tool
     @loopback_tool()
-    async def get_weather(ctx, city: Annotated[str, Field(description="City name")]) -> str:
+    async def get_weather(ctx, city: Annotated[str, "City name"]) -> str:
         """Get weather for a city."""
         return f"72°F in {city}"
 
@@ -279,7 +279,7 @@ async def test_loopback_tool_multiple_iterations(turn_env):
     """Test multiple loopback tool calls in sequence."""
 
     @loopback_tool()
-    async def get_weather(ctx, city: Annotated[str, Field(description="City")]) -> str:
+    async def get_weather(ctx, city: Annotated[str, "City"]) -> str:
         """Get weather."""
         temps = {"NYC": "72°F", "LA": "85°F"}
         return temps.get(city, "Unknown")
@@ -345,7 +345,7 @@ async def test_passthrough_tool_bypasses_llm(turn_env):
     """Test that passthrough tool events go directly to output, not back to LLM."""
 
     @passthrough_tool()
-    async def end_call(ctx, message: Annotated[str, Field(description="Goodbye message")]):
+    async def end_call(ctx, message: Annotated[str, "Goodbye message"]):
         """End the call."""
         yield AgentSendText(text=message)
         yield AgentEndCall()
@@ -416,7 +416,7 @@ async def test_handoff_tool_emits_handoff_event(turn_env):
     billing_agent = BillingAgent()
 
     @handoff_tool()
-    async def transfer_to_billing(ctx, reason: Annotated[str, Field(description="Reason")], event):
+    async def transfer_to_billing(ctx, reason: Annotated[str, "Reason"], event):
         """Transfer to billing department."""
 
         if isinstance(event, AgentHandedOff):
@@ -704,7 +704,7 @@ async def test_streaming_tool_call_accumulation(turn_env):
     """Test that tool call arguments are accumulated across chunks."""
 
     @loopback_tool()
-    async def greet(ctx, name: Annotated[str, Field(description="Name")]) -> str:
+    async def greet(ctx, name: Annotated[str, "Name"]) -> str:
         """Greet someone."""
         return f"Hello, {name}!"
 
