@@ -1152,9 +1152,11 @@ class TestBuildFullHistory:
         # Expected: UserText, ToolCalled, ToolReturned, AgentTextSent (canonical)
         assert len(result) == 4
         assert isinstance(result[0], SpecificUserTextSent)
+        assert result[0].content, "What's the weather?"
         assert isinstance(result[1], AgentToolCalled)
         assert isinstance(result[2], AgentToolReturned)
         assert isinstance(result[3], SpecificAgentTextSent)
+        assert result[3].content, "The weather is sunny."
 
     async def test_multiple_tool_calls_interleaved(self):
         """Test multiple tool calls with responses interleaved."""

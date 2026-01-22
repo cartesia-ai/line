@@ -375,7 +375,7 @@ class LlmAgent:
         1. Observable events can be matched between local and input history
         2. Unobservable events are interpolated based on their relative position
            to observable events
-        3. Unobserved observable events are excluded from the merged history 
+        3. Unobserved observable events are excluded from the merged history
            (because the audio harness is the source of truth for them)
 
         The full_history contains:
