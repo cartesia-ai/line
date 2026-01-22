@@ -124,7 +124,6 @@ class SpecificAgentDtmfSent(BaseModel):
     button: str
 
 
-
 class SpecificAgentTurnEnded(BaseModel):
     type: Literal["agent_turn_ended"] = "agent_turn_ended"
     content: List[
