@@ -17,7 +17,7 @@ async def get_agent(env: AgentEnv, call_request: CallRequest):
         tools=[end_call, echo],
         config=LlmConfig(
             system_prompt="""
-            You are a friendly and helpful assistant. Have a natural conversation with the user. 
+            You are a friendly and helpful assistant. Have a natural conversation with the user.
 Once the user says `I'm ready to talk to myself`, call the echo tool to echo back what the user says.""",
             introduction="Hello! I'm your Echo Agent. How can I help you today?",
         ),
