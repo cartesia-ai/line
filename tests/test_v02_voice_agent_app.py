@@ -89,6 +89,58 @@ class TestConversationRunner:
 
         assert runner.shutdown_event.is_set()
 
+    # ============================================================
+    # Fatal error handling
+    # ============================================================
+    @pytest.mark.asyncio
+    async def test_fatal_error_closes_websocket(self):
+        """Verify websocket is closed when a fatal exception occurs during message processing."""
+        ws = create_mock_websocket()
+        ws.close = AsyncMock()
+
+        # First call raises a generic exception, simulating a fatal error
+        ws.receive_json.side_effect = RuntimeError("Simulated fatal error")
+
+        runner = ConversationRunner(ws, noop_agent, env)
+        await runner.run()
+
+        # Verify shutdown_event is set
+        assert runner.shutdown_event.is_set()
+
+        # Verify error was sent
+        ws.send_json.assert_called()
+        sent_data = ws.send_json.call_args[0][0]
+        assert "error" in sent_data.get("type", "") or "content" in sent_data
+        assert "Simulated fatal error" in str(sent_data)
+
+        # Verify websocket was closed
+        ws.close.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_fatal_error_stops_loop(self):
+        """Verify the run loop exits after a fatal error."""
+        ws = create_mock_websocket()
+        ws.close = AsyncMock()
+        call_count = 0
+
+        async def receive_with_error():
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return {"type": "message", "content": "hello"}
+            # Second call raises a fatal error
+            raise ValueError("Something went wrong")
+
+        ws.receive_json = receive_with_error
+
+        runner = ConversationRunner(ws, noop_agent, env)
+        await runner.run()
+
+        # Loop should have exited after the error
+        assert call_count == 2
+        assert runner.shutdown_event.is_set()
+        ws.close.assert_called_once()
+
     @pytest.mark.asyncio
     async def test_disconnect_stops_loop(self):
         """Verify the run loop exits after disconnect."""
