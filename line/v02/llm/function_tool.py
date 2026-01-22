@@ -1,12 +1,28 @@
 """
 Function tool definitions for LLM agents.
 
-Provides Field annotation and FunctionTool class for defining tools.
+Provides FunctionTool class for defining tools with simple Annotated syntax.
 See README.md for examples.
+
+Parameter syntax:
+    # Required parameter with description
+    def my_tool(ctx: ToolEnv, arg: Annotated[str, "this field is required"]):
+        ...
+
+    # Optional parameter (using Optional type)
+    def my_tool(ctx: ToolEnv, arg: Annotated[Optional[str], "this field is optional"]):
+        ...
+
+    # Optional parameter with default value
+    def my_tool(ctx: ToolEnv, arg: Annotated[str, "has a default"] = "default"):
+        ...
+
+    # Enum constraint using Literal
+    def my_tool(ctx: ToolEnv, category: Annotated[Literal["a", "b", "c"], "pick one"]):
+        ...
 """
 
 from dataclasses import dataclass
-from dataclasses import field as dataclass_field
 from enum import Enum
 from inspect import Parameter, signature
 from typing import (
@@ -17,35 +33,11 @@ from typing import (
     List,
     Optional,
     Type,
+    Union,
     get_args,
     get_origin,
     get_type_hints,
 )
-
-
-@dataclass
-class Field:
-    """
-    Field annotation for tool parameters. Use with Annotated[type, Field(...)].
-
-    Attributes:
-        description: Description shown to the LLM.
-        default: Default value (makes parameter optional).
-        enum: List of allowed values.
-    """
-
-    description: str = ""
-    default: Any = dataclass_field(default_factory=lambda: _MISSING)
-    enum: Optional[List[Any]] = None
-
-
-class _MissingSentinel:
-    """Sentinel class to indicate a missing value (distinct from None)."""
-
-    pass
-
-
-_MISSING = _MissingSentinel()
 
 
 class ToolType(Enum):
@@ -79,8 +71,34 @@ class ParameterInfo:
     enum: Optional[List[Any]] = None
 
 
+def _is_optional_type(type_hint: Type) -> bool:
+    """Check if a type is Optional[X] (i.e., Union[X, None])."""
+    origin = get_origin(type_hint)
+    if origin is Union:
+        args = get_args(type_hint)
+        return type(None) in args
+    return False
+
+
+def _unwrap_optional(type_hint: Type) -> Type:
+    """Unwrap Optional[X] to X."""
+    if _is_optional_type(type_hint):
+        args = get_args(type_hint)
+        non_none_args = [a for a in args if a is not type(None)]
+        if len(non_none_args) == 1:
+            return non_none_args[0]
+    return type_hint
+
+
 def _extract_parameters(func: Callable) -> Dict[str, ParameterInfo]:
-    """Extract parameter information from the function signature."""
+    """Extract parameter information from the function signature.
+
+    Supports:
+        - Annotated[type, "description"] for required parameters
+        - Annotated[Optional[type], "description"] for optional parameters
+        - param: type = default for optional parameters with defaults
+        - Annotated[Literal["a", "b"], "description"] for enum constraints
+    """
     params = {}
     sig = signature(func)
 
@@ -100,36 +118,28 @@ def _extract_parameters(func: Callable) -> Dict[str, ParameterInfo]:
         if type_hint is Parameter.empty:
             type_hint = str  # Default to string
 
-        # Check if it's an Annotated type with Field metadata
-        field_info = None
+        # Check if it's an Annotated type
+        description = ""
         actual_type = type_hint
 
         if get_origin(type_hint) is Annotated:
             args = get_args(type_hint)
             actual_type = args[0]
+            # Look for a string description in the annotation
             for arg in args[1:]:
-                if isinstance(arg, Field):
-                    field_info = arg
+                if isinstance(arg, str):
+                    description = arg
                     break
 
+        # Check if the actual type is Optional[X]
+        is_optional_type = _is_optional_type(actual_type)
+        if is_optional_type:
+            actual_type = _unwrap_optional(actual_type)
+
         # Determine if required and get default
-        required = True
-        default_value = None
-
-        if param.default is not Parameter.empty:
-            required = False
-            default_value = param.default
-        elif field_info and not isinstance(field_info.default, _MissingSentinel):
-            required = False
-            default_value = field_info.default
-
-        # Get description and enum from Field
-        description = ""
-        enum_values = None
-
-        if field_info:
-            description = field_info.description
-            enum_values = field_info.enum
+        has_default = param.default is not Parameter.empty
+        required = not has_default and not is_optional_type
+        default_value = param.default if has_default else None
 
         params[param_name] = ParameterInfo(
             name=param_name,
@@ -137,7 +147,7 @@ def _extract_parameters(func: Callable) -> Dict[str, ParameterInfo]:
             description=description,
             required=required,
             default=default_value,
-            enum=enum_values,
+            enum=None,  # Enum handling moved to schema_converter via Literal types
         )
 
     return params

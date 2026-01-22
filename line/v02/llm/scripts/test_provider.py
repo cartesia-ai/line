@@ -34,7 +34,6 @@ from line.v02.llm import (
     AgentToolCalled,
     AgentToolReturned,
     CallStarted,
-    Field,
     LlmAgent,
     LlmConfig,
     LLMProvider,
@@ -50,7 +49,7 @@ from line.v02.llm import (
 
 
 @loopback_tool()
-async def get_weather(ctx, city: Annotated[str, Field(description="City name")]) -> str:
+async def get_weather(ctx, city: Annotated[str, "City name"]) -> str:
     """Get the current weather for a city."""
     # Simulated weather data
     weather_data = {
@@ -64,7 +63,7 @@ async def get_weather(ctx, city: Annotated[str, Field(description="City name")])
 
 
 @loopback_tool()
-async def calculate(ctx, expression: Annotated[str, Field(description="Math expression to evaluate")]) -> str:
+async def calculate(ctx, expression: Annotated[str, "Math expression to evaluate"]) -> str:
     """Evaluate a mathematical expression."""
     try:
         # Safe eval for simple math

@@ -10,15 +10,16 @@ calling formats expected by different LLM providers:
 
 Example:
     ```python
-    from line.v02.llm import function_tool, Field
+    from typing import Annotated
+    from line.v02.llm import loopback_tool
     from line.v02.llm.schema_converter import (
         function_tool_to_openai,
         function_tool_to_anthropic,
         function_tool_to_gemini,
     )
 
-    @function_tool
-    async def my_tool(ctx, param: Annotated[str, Field(description="...")]):
+    @loopback_tool()
+    async def my_tool(ctx, param: Annotated[str, "Parameter description"]):
         '''Tool description'''
         ...
 
@@ -29,7 +30,7 @@ Example:
 """
 
 from enum import Enum
-from typing import Any, Dict, List, Type, Union
+from typing import Any, Dict, List, Literal, Type, Union, get_args, get_origin
 
 from line.v02.llm.function_tool import FunctionTool, ParameterInfo
 
@@ -62,9 +63,10 @@ def python_type_to_json_schema(type_annotation: Type) -> Dict[str, Any]:
         return type_map[type_annotation]
 
     # Handle List[X]
-    origin = getattr(type_annotation, "__origin__", None)
+    origin = get_origin(type_annotation)
+    args = get_args(type_annotation)
+
     if origin is list:
-        args = getattr(type_annotation, "__args__", ())
         if args:
             return {"type": "array", "items": python_type_to_json_schema(args[0])}
         return {"type": "array"}
@@ -73,9 +75,22 @@ def python_type_to_json_schema(type_annotation: Type) -> Dict[str, Any]:
     if origin is dict:
         return {"type": "object"}
 
+    # Handle Literal types (e.g., Literal["a", "b", "c"])
+    if origin is Literal:
+        values = list(args)
+        # Infer type from the literal values
+        if all(isinstance(v, str) for v in values):
+            return {"type": "string", "enum": values}
+        elif all(isinstance(v, int) for v in values):
+            return {"type": "integer", "enum": values}
+        elif all(isinstance(v, bool) for v in values):
+            return {"type": "boolean", "enum": values}
+        else:
+            # Mixed types - just return enum without type
+            return {"enum": values}
+
     # Handle Union types (including Optional)
     if origin is Union:
-        args = getattr(type_annotation, "__args__", ())
         # Filter out NoneType for Optional handling
         non_none_args = [a for a in args if a is not type(None)]
         if len(non_none_args) == 1:
@@ -146,8 +161,8 @@ def function_tool_to_openai(
 
     Example:
         ```python
-        @function_tool
-        async def get_weather(ctx, city: Annotated[str, Field(description="City name")]):
+        @loopback_tool()
+        async def get_weather(ctx, city: Annotated[str, "City name"]):
             '''Get the weather'''
             ...
 
@@ -219,8 +234,8 @@ def function_tool_to_anthropic(tool: FunctionTool) -> Dict[str, Any]:
 
     Example:
         ```python
-        @function_tool
-        async def get_weather(ctx, city: Annotated[str, Field(description="City name")]):
+        @loopback_tool()
+        async def get_weather(ctx, city: Annotated[str, "City name"]):
             '''Get the weather'''
             ...
 
@@ -256,8 +271,8 @@ def function_tool_to_gemini(tool: FunctionTool) -> Any:
 
     Example:
         ```python
-        @function_tool
-        async def get_weather(ctx, city: Annotated[str, Field(description="City name")]):
+        @loopback_tool()
+        async def get_weather(ctx, city: Annotated[str, "City name"]):
             '''Get the weather'''
             ...
 
