@@ -71,7 +71,8 @@ def _web_search_tool_to_function_tool(web_search_tool: WebSearchTool) -> Functio
     return construct_function_tool(
         func=web_search_tool.search,
         name="web_search",
-        description="Search the web for real-time information. Use this when you need current information that may not be in your training data.",
+        description="Search the web for real-time information."
+        + " Use this when you need current information that may not be in your training data.",
         tool_type=ToolType.LOOPBACK,
     )
 

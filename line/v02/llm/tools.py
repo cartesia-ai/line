@@ -1,20 +1,5 @@
 """
 Built-in tools for LLM agents.
-
-Provides web_search tool that:
-- Uses native LLM web search when supported (via web_search_options)
-- Falls back to DuckDuckGo search for LLMs without native web search
-
-Usage:
-    # Default settings
-    LlmAgent(tools=[web_search])
-
-    # Custom settings
-    LlmAgent(tools=[web_search(search_context_size="high")])
-    LlmAgent(tools=[web_search(
-        search_context_size="medium",
-        user_location={"city": "San Francisco", "country": "US"}
-    )])
 """
 
 from dataclasses import dataclass, field
