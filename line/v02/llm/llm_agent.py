@@ -285,6 +285,7 @@ class LlmAgent:
                 messages.append(Message(role="user", content=event.content))
             elif isinstance(event, SpecificAgentTextSent):
                 messages.append(Message(role="assistant", content=event.content))
+        return messages
 
     async def cleanup(self) -> None:
         """Clean up resources."""
