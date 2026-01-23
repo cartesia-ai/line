@@ -5,8 +5,8 @@ FormFiller - Loads questions from YAML and provides a loopback tool for recordin
 from pathlib import Path
 from typing import Annotated, Any, Optional
 
-import yaml
 from loguru import logger
+import yaml
 
 from line.v02.llm import loopback_tool
 from line.v02.llm.agent import ToolEnv
@@ -144,14 +144,23 @@ class FormFiller:
 
         @loopback_tool(
             name="record_answer",
-            description="Record a VALID answer to the current form question. Only call this when the user has clearly provided an answer that matches the question being asked. Do NOT call if the user said something unrelated, unclear, or did not answer the question - instead ask for clarification.",
+            description="""Record a VALID answer to the current form question.
+Only call this when the user has clearly provided an answer that matches the question being asked.
+Do NOT call if the user said something unrelated, unclear, or did not answer the question - instead ask for clarification.""",
         )
-        async def record_answer(ctx: ToolEnv, answer: Annotated[str, "The user's actual answer extracted from their response - must be relevant to the current question"]):
+        async def record_answer(
+            ctx: ToolEnv,
+            answer: Annotated[
+                str,
+                """The user's actual answer extracted from their response
+ - must be relevant to the current question""",
+            ],
+        ):
             return form.record_answer(answer)
 
         return record_answer
 
-    @property
+    @propertyß
     def tool(self):
         """The loopback tool for recording answers."""
         return self._tool
@@ -193,7 +202,8 @@ class FormFiller:
                     q_desc += f" (between {q['min']} and {q['max']})"
             if q.get("dependsOn"):
                 dep = q["dependsOn"]
-                q_desc += f" [conditional: only if {dep['questionId']} {dep.get('operator', 'equals')} {dep['value']}]"
+                q_desc += f" [conditional: only if {dep['questionId']} \
+                    {dep.get('operator', 'equals')} {dep['value']}]"
             questions_overview.append(q_desc)
 
         form_prompt = f"""## Form: {form_title}
