@@ -144,9 +144,13 @@ class FormFiller:
 
         @loopback_tool(
             name="record_answer",
-            description="""Record a VALID answer to the current form question.
-Only call this when the user has clearly provided an answer that matches the question being asked.
-Do NOT call if the user said something unrelated, unclear, or did not answer the question - instead ask for clarification.""",
+            description=(
+                "Record a VALID answer to the current form question. "
+                "Only call this when the user has clearly provided an answer \
+                    that matches the question being asked. "
+                "Do NOT call if the user said something unrelated, unclear, \
+                    or did not answer the question - instead ask for clarification."
+            ),
         )
         async def record_answer(
             ctx: ToolEnv,
@@ -160,7 +164,7 @@ Do NOT call if the user said something unrelated, unclear, or did not answer the
 
         return record_answer
 
-    @propertyß
+    @property
     def tool(self):
         """The loopback tool for recording answers."""
         return self._tool
