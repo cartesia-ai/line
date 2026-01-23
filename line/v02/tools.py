@@ -15,8 +15,10 @@ __all__ = [
 
 @passthrough_tool()
 async def end_call(
-    ctx: ToolEnv, message: Annotated[Optional[str], "The message to say before ending the call"]
+    ctx: ToolEnv, 
+    message: Annotated[[str], "The message to say before ending the call"] = None
 ):
     """End the call."""
-    yield AgentSendText(text=message)
+    if message is not None:
+        yield AgentSendText(text=message)
     yield AgentEndCall()
