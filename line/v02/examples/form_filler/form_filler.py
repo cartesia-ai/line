@@ -22,7 +22,6 @@ class FormFiller:
         self._questions = self._flatten_questions(self._config["questionnaire"]["questions"])
         self._answers: dict = {}
         self._current_index: int = 0
-        self._tool = None
         logger.info(f"FormFiller initialized with {len(self._questions)} questions")
 
     def _load_config(self) -> dict:
@@ -125,9 +124,6 @@ class FormFiller:
 
     @property
     def record_answer_tool(self):
-        if self._tool is not None:
-            return self._tool
-
         form = self
 
         @loopback_tool()
@@ -143,7 +139,6 @@ class FormFiller:
 
             return form._record_answer(answer)
 
-        self._tool = record_answer
         return record_answer
 
     @property
