@@ -25,11 +25,9 @@ async def get_agent(env: AgentEnv, call_request: CallRequest):
             system_prompt=call_request.agent.system_prompt
             or "You are a friendly and helpful assistant. Have a natural conversation with the user.",
             # Empty string = agent waits for user to speak first; non-empty = agent speaks first
-            introduction=(
-                "Hello! I'm your AI assistant. How can I help you today?"
-                if call_request.agent.introduction is None
-                else call_request.agent.introduction
-            ),
+            introduction=call_request.agent.introduction
+            if call_request.agent.introduction is not None
+            else "Hello! I'm your AI assistant. How can I help you today?",
         ),
     )
 
