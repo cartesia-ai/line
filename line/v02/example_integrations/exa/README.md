@@ -14,66 +14,39 @@ This example uses the Line v0.2 SDK with the simplified `LlmAgent` and `@loopbac
 
 ### Environment Variables
 
-Create a `.env` file in this directory with your API keys:
+Make sure to add these API keys to your `.env` file or Cartesia dashboard:
 
-```bash
-OPENAI_API_KEY=your-openai-key-here
-EXA_API_KEY=your-exa-key-here
-```
+| Variable | Description | Required |
+|----------|-------------|----------|
+| `OPENAI_API_KEY` | OpenAI API key for conversation | Yes |
+| `EXA_API_KEY` | Exa API key for web search | Yes |
 
 ### Installation
 
 ```bash
-# Install dependencies
-pip install exa-py openai cartesia-line python-dotenv loguru
+# Using uv (recommended)
+uv sync
 
-# Or using uv (recommended)
-uv add exa-py openai cartesia-line python-dotenv loguru
-```
-
-## Running the Agent
-
-```bash
-# Run the agent
-python main.py
-
-# Or using uv
-uv run python main.py
-```
-
-Then connect with the Cartesia chat client:
-
-```bash
-cartesia chat 8000
+# Or install dependencies manually
+pip install exa-py python-dotenv
 ```
 
 ## Architecture
 
-This example demonstrates the v0.2 SDK patterns:
+### Core Components
 
-### LlmAgent
+1. **LlmAgent** (`main.py`)
+   - Unified interface to LLM providers via LiteLLM
+   - Automatic conversation history management
+   - Tool calling with automatic result processing
+   - Streaming responses
 
-The `LlmAgent` class provides a unified interface to 100+ LLM providers via LiteLLM. It handles:
-- Conversation history management
-- Tool calling with automatic result processing
-- Streaming responses
+2. **Web Search Tool** (`exa_tools.py`)
+   - `@loopback_tool` decorator for automatic schema generation
+   - Async Exa API calls via `asyncio.to_thread`
+   - Formats search results for LLM synthesis
 
-### Loopback Tools
-
-The Exa web search is implemented as a `@loopback_tool`. Loopback tools:
-- Return results back to the LLM for further processing
-- Are ideal for information retrieval where the LLM needs to synthesize the response
-- Support async operations via `asyncio.to_thread`
-
-### Files
-
-| File | Description |
-|------|-------------|
-| `main.py` | Entry point - creates `VoiceAgentApp` with `LlmAgent` |
-| `exa_utils.py` | Exa web search tool using `@loopback_tool` decorator |
-| `config.py` | System prompts and configuration constants |
-
-## Key Differences from v0.1 SDK
+### Key Differences from v0.1 SDK
 
 | v0.1 SDK | v0.2 SDK |
 |----------|----------|
@@ -111,12 +84,31 @@ LlmConfig(
 )
 ```
 
+## Local Development
+
+1. **Set up environment variables**:
+   ```bash
+   # Create .env with your API keys
+   OPENAI_API_KEY=your-openai-key-here
+   EXA_API_KEY=your-exa-key-here
+   ```
+
+2. **Run locally**:
+   ```bash
+   python main.py
+   ```
+
+3. **Test with voice**:
+   ```bash
+   cartesia chat 8000
+   ```
+
 ## Deployment
 
 Deploy to Cartesia's platform:
 
-1. Add API keys to your Cartesia dashboard
-2. Upload the integration files
-3. Deploy and start talking to your research agent
+1. **Add API keys** to your Cartesia dashboard
+2. **Upload the integration** files
+3. **Deploy** and start talking to your research agent
 
 Perfect for building voice-powered research tools, fact-checking assistants, and information discovery applications.
