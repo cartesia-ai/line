@@ -160,20 +160,40 @@ def test_parameter_with_default_is_optional():
     assert tool_with_default.parameters["optional_param"].default == 10
 
 
-def test_optional_type_is_optional():
-    """Test that Optional[X] types are marked as not required."""
+def test_optional_type_without_default_is_still_required():
+    """Test that Optional[X] types without defaults are still required.
+
+    Optional[X] only affects the type (allows None), not whether the param
+    is required. Use a default value to make a param optional.
+    """
 
     @loopback_tool()
     async def tool_with_optional(
         ctx,
         required_param: Annotated[str, "Required"],
-        optional_param: Annotated[Optional[str], "Optional"],
+        optional_type_param: Annotated[Optional[str], "Optional type but no default"],
     ) -> str:
-        """Tool with Optional type parameter."""
+        """Tool with Optional type parameter but no default."""
         return "done"
 
     assert tool_with_optional.parameters["required_param"].required is True
-    assert tool_with_optional.parameters["optional_param"].required is False
+    # Optional[X] does NOT make param optional - only a default value does
+    assert tool_with_optional.parameters["optional_type_param"].required is True
+
+
+def test_optional_type_with_default_is_optional():
+    """Test that Optional[X] with a default is not required."""
+
+    @loopback_tool()
+    async def tool_with_optional_default(
+        ctx,
+        optional_param: Annotated[Optional[str], "Optional with default"] = None,
+    ) -> str:
+        """Tool with Optional type and default."""
+        return "done"
+
+    assert tool_with_optional_default.parameters["optional_param"].required is False
+    assert tool_with_optional_default.parameters["optional_param"].default is None
 
 
 def test_parameter_with_literal_enum():
