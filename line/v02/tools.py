@@ -13,7 +13,7 @@ __all__ = [
 ]
 
 
-@passthrough_tool()
+@passthrough_tool
 async def end_call(
     ctx: ToolEnv, message: Annotated[Optional[str], "The message to say before ending the call"] = None
 ):

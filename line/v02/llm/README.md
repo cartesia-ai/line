@@ -12,12 +12,12 @@ from line.v02.llm import (
 )
 
 # Define tools
-@loopback_tool()
+@loopback_tool
 async def get_weather(ctx, city: Annotated[str, "City name"]) -> str:
     """Get weather for a city."""
     return f"72°F in {city}"
 
-@passthrough_tool()
+@passthrough_tool
 async def end_call(ctx, message: Annotated[str, "Goodbye message"]):
     """End the call."""
     yield AgentSendText(text=message)
@@ -51,7 +51,7 @@ See [LiteLLM docs](https://docs.litellm.ai/docs/providers) for 100+ more provide
 Result is sent back to the LLM for continued generation. Use for information retrieval.
 
 ```python
-@loopback_tool()
+@loopback_tool
 async def lookup_order(ctx, order_id: Annotated[str, "Order ID"]) -> str:
     """Look up order status."""
     order = await db.get_order(order_id)
@@ -63,7 +63,7 @@ async def lookup_order(ctx, order_id: Annotated[str, "Order ID"]) -> str:
 Response bypasses the LLM and goes directly to the user. Use for deterministic actions.
 
 ```python
-@passthrough_tool()
+@passthrough_tool
 async def transfer_call(ctx, department: Annotated[str, "Department name"]):
     """Transfer to another department."""
     yield AgentSendText(text=f"Transferring to {department}...")
@@ -76,7 +76,7 @@ Transfers control to another agent. After handoff, all future input events are p
 handoff tool, which routes them to the target agent. Use for multi-agent workflows.
 
 ```python
-@handoff_tool()
+@handoff_tool
 async def transfer_to_billing(
     ctx,
     reason: Annotated[str, "Reason for transfer"],
@@ -101,7 +101,7 @@ The `event` parameter is required for handoff tools:
 Use `Annotated` with a string description to define parameters:
 
 ```python
-@loopback_tool()
+@loopback_tool
 async def search_products(
     ctx,
     query: Annotated[str, "Search query"],                                    # Required
@@ -118,7 +118,7 @@ async def search_products(
 Tools receive a `ToolEnv` object:
 
 ```python
-@loopback_tool()
+@loopback_tool
 async def my_tool(ctx: ToolEnv, ...) -> str:
     # Access turn environment (session metadata)
     print(ctx.turn_env)
