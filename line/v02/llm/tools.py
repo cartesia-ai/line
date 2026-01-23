@@ -3,18 +3,9 @@ Built-in tools for LLM agents.
 """
 
 from dataclasses import dataclass, field
-from typing import Annotated, Any, Dict, Literal, Optional, TypedDict
+from typing import Annotated, Any, Dict, Literal
 
 from line.v02.llm.agent import ToolEnv
-
-
-class UserLocation(TypedDict, total=False):
-    """User location for web search."""
-
-    city: str
-    region: str
-    country: str
-    timezone: str
 
 
 @dataclass
@@ -22,6 +13,7 @@ class WebSearchTool:
     """
     Web search tool that uses native LLM web search when available,
     or falls back to DuckDuckGo for unsupported LLMs.
+    View models supported with LiteLLM at https://docs.litellm.ai/docs/completion/web_search
 
     This class is both:
     1. A marker that LlmAgent detects to enable native web search on supported models
@@ -33,22 +25,14 @@ class WebSearchTool:
 
         # Custom settings
         LlmAgent(tools=[web_search(search_context_size="high")])
-
-        # With user location
-        LlmAgent(tools=[web_search(
-            search_context_size="medium",
-            user_location={"city": "San Francisco", "country": "US"}
-        )])
     """
 
     search_context_size: Literal["low", "medium", "high"] = "medium"
-    user_location: Optional[UserLocation] = None
     extra: Dict[str, Any] = field(default_factory=dict)
 
     def __call__(
         self,
         search_context_size: Literal["low", "medium", "high"] = "medium",
-        user_location: Optional[UserLocation] = None,
         **extra: Any,
     ) -> "WebSearchTool":
         """Create a configured WebSearchTool instance.
@@ -59,9 +43,6 @@ class WebSearchTool:
                 - "medium": Balanced (default)
                 - "high": More results, more comprehensive
 
-            user_location: Optional location hint for localized results.
-                Example: {"city": "NYC", "country": "US"}
-
             **extra: Additional provider-specific options.
 
         Returns:
@@ -69,12 +50,11 @@ class WebSearchTool:
         """
         return WebSearchTool(
             search_context_size=search_context_size,
-            user_location=user_location,
             extra=extra,
         )
 
     def get_web_search_options(self) -> Dict[str, Any]:
-        """Get the web_search_options dict for litellm.
+        """Get the web_search_options dict for LiteLLM.
 
         Returns a dict suitable for passing as `web_search_options` to litellm's
         completion/chat methods for models that support native web search.
@@ -82,12 +62,6 @@ class WebSearchTool:
         options: Dict[str, Any] = {
             "search_context_size": self.search_context_size,
         }
-        if self.user_location:
-            # Transform to litellm's expected format
-            options["user_location"] = {
-                "type": "approximate",
-                "approximate": self.user_location,
-            }
         options.update(self.extra)
         return options
 
@@ -111,7 +85,7 @@ class WebSearchTool:
             Formatted search results as a string, or an error message.
         """
         try:
-            from duckduckgo_search import DDGS
+            from ddgs import DDGS
         except ImportError:
             return (
                 "Error: duckduckgo-search package not installed. Install with: pip install duckduckgo-search"

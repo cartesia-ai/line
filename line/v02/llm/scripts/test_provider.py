@@ -193,23 +193,26 @@ async def test_introduction(model: str):
     print("✓ Introduction test passed")
 
 
-async def test_web_search(model: str):
+async def test_web_search(model: str, search_context_size: str = "medium"):
     """Test web search tool integration."""
     print(f"\n{'=' * 60}")
-    print(f"Testing web search with {model}")
+    if search_context_size != "medium":
+        print(f"Testing web search with {model} (context_size={search_context_size}")
+    else:
+        print(f"Testing web search with {model}")
     print("=" * 60)
 
     agent = LlmAgent(
         model=model,
-        tools=[web_search],
+        tools=[web_search(search_context_size=search_context_size)],
         config=LlmConfig(
             system_prompt="You are a helpful assistant with web search capabilities."
-            +" Use web search to find current information.",
+            + " Use web search to find current information.",
         ),
     )
 
     env = TurnEnv()
-    user_message = "What is the current weather in San Francisco? Search the web for this information."
+    user_message = "What is the current weather in New York City? Search the web for this information."
     event = UserTextSent(
         content=user_message,
         history=[SpecificUserTextSent(content=user_message)],
@@ -295,6 +298,7 @@ async def main():
             await test_introduction(model)
             await test_tool_calling(model)
             await test_web_search(model)
+            await test_web_search(model, search_context_size="high")
         except Exception as e:
             print(f"\n✗ Error testing {model}: {e}")
             import traceback
