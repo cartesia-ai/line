@@ -60,9 +60,6 @@ from line.v02.llm.agent import (
 # Configuration
 from line.v02.llm.config import LlmConfig
 
-# Function tool definitions
-from line.v02.llm.function_tool import FunctionTool, ToolType, construct_function_tool
-
 # LLM Agent
 from line.v02.llm.llm_agent import LlmAgent
 
@@ -83,6 +80,12 @@ from line.v02.llm.schema_converter import (
 # Tool type decorators
 from line.v02.llm.tool_types import handoff_tool, loopback_tool, passthrough_tool
 
+# Function tool definitions
+from line.v02.llm.tool_utils import FunctionTool, ToolType, construct_function_tool
+
+# Built-in tools
+from line.v02.llm.tools import web_search
+
 __all__ = [
     # LLM Agent
     "LlmAgent",
@@ -96,6 +99,8 @@ __all__ = [
     "loopback_tool",
     "passthrough_tool",
     "handoff_tool",
+    # Built-in tools
+    "web_search",
     # Schema converters
     "function_tool_to_openai",
     "function_tool_to_anthropic",
