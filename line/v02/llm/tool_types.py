@@ -25,7 +25,7 @@ def loopback_tool(func: Callable) -> FunctionTool:
     return construct_function_tool(
         func,
         name=func.__name__,
-        description=func.__doc__ or "",
+        description=(func.__doc__ or "").strip(),
         tool_type=ToolType.LOOPBACK,
     )
 
@@ -42,7 +42,7 @@ def passthrough_tool(func: Callable) -> FunctionTool:
     return construct_function_tool(
         func,
         name=func.__name__,
-        description=func.__doc__ or "",
+        description=(func.__doc__ or "").strip(),
         tool_type=ToolType.PASSTHROUGH,
     )
 
@@ -59,6 +59,6 @@ def handoff_tool(func: Callable) -> FunctionTool:
     return construct_function_tool(
         func,
         name=func.__name__,
-        description=func.__doc__ or "",
+        description=(func.__doc__ or "").strip(),
         tool_type=ToolType.HANDOFF,
     )
