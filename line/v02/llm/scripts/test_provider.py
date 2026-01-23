@@ -42,6 +42,7 @@ from line.v02.llm import (
     UserTextSent,
     loopback_tool,
 )
+from line.v02.llm.tools import web_search
 
 # =============================================================================
 # Test Tools
@@ -192,6 +193,56 @@ async def test_introduction(model: str):
     print("✓ Introduction test passed")
 
 
+async def test_web_search(model: str, search_context_size: str = "medium"):
+    """Test web search tool integration."""
+    print(f"\n{'=' * 60}")
+    if search_context_size != "medium":
+        print(f"Testing web search with {model} (context_size={search_context_size}")
+    else:
+        print(f"Testing web search with {model}")
+    print("=" * 60)
+
+    agent = LlmAgent(
+        model=model,
+        tools=[web_search(search_context_size=search_context_size)],
+        config=LlmConfig(
+            system_prompt="You are a helpful assistant with web search capabilities."
+            + " Use web search to find current information.",
+        ),
+    )
+
+    env = TurnEnv()
+    user_message = "What is the current weather in New York City? Search the web for this information."
+    event = UserTextSent(
+        content=user_message,
+        history=[SpecificUserTextSent(content=user_message)],
+    )
+
+    print(f"User: {user_message}")
+    print("\nAgent response:")
+
+    web_search_used = False
+    async for output in agent.process(env, event):
+        if isinstance(output, AgentSendText):
+            print(output.text, end="", flush=True)
+        elif isinstance(output, AgentToolCalled):
+            if output.tool_name == "web_search":
+                web_search_used = True
+            print(f"\n  [Tool call]: {output.tool_name}({output.tool_args})")
+        elif isinstance(output, AgentToolReturned):
+            # Truncate long results for display
+            result_preview = output.result[:200] + "..." if len(output.result) > 200 else output.result
+            print(f"  [Tool result]: {result_preview}")
+
+    print()
+
+    if web_search_used:
+        print("✓ Web search test passed (web_search tool was called)")
+    else:
+        print("⚠ Web search tool was not explicitly called (model may use native web search)")
+    print("✓ Web search test completed")
+
+
 # =============================================================================
 # Main
 # =============================================================================
@@ -246,6 +297,8 @@ async def main():
             await test_streaming_text(model)
             await test_introduction(model)
             await test_tool_calling(model)
+            await test_web_search(model)
+            await test_web_search(model, search_context_size="high")
         except Exception as e:
             print(f"\n✗ Error testing {model}: {e}")
             import traceback
