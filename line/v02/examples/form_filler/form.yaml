@@ -1,0 +1,68 @@
+questionnaire:
+  id: "contact_form"
+  text: "Contact Information Form"
+  questions:
+    - id: "name"
+      text: "What is your full name?"
+      type: "string"
+      required: true
+
+    - id: "email"
+      text: "What is your email address?"
+      type: "string"
+      required: true
+
+    - id: "phone"
+      text: "What is your phone number?"
+      type: "string"
+      required: false
+
+    - id: "contact_reason"
+      text: "What is the reason for contacting us?"
+      type: "select"
+      required: true
+      options:
+        - value: "sales"
+          text: "Sales inquiry"
+        - value: "support"
+          text: "Technical support"
+        - value: "partnership"
+          text: "Partnership opportunity"
+        - value: "other"
+          text: "Other"
+
+    - id: "urgency"
+      text: "How urgent is your request?"
+      type: "select"
+      required: true
+      options:
+        - value: "low"
+          text: "Low - just exploring"
+        - value: "medium"
+          text: "Medium - need help soon"
+        - value: "high"
+          text: "High - need help today"
+
+    - id: "budget"
+      text: "What is your approximate budget?"
+      type: "number"
+      required: false
+      min: 0
+      dependsOn:
+        questionId: "contact_reason"
+        value: "sales"
+        operator: "equals"
+
+    - id: "issue_description"
+      text: "Please describe the issue you're experiencing."
+      type: "string"
+      required: true
+      dependsOn:
+        questionId: "contact_reason"
+        value: "support"
+        operator: "equals"
+
+    - id: "additional_notes"
+      text: "Any additional information you'd like to share?"
+      type: "string"
+      required: false
