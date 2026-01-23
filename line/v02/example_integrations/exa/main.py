@@ -48,12 +48,10 @@ async def web_search(
     ctx: ToolEnv,
     query: Annotated[
         str,
-        "Search the web for current information. \
-        Use when you need up-to-date facts or news. \
-            The search query. Be specific and include key terms.",
+        "The search query. Be specific and include key terms.",
     ],
 ) -> str:
-    """Search the web using Exa API."""
+    """Search the web for current information. Use when you need up-to-date facts or news."""
     logger.info(f"Performing Exa web search: '{query}'")
 
     api_key = os.environ.get("EXA_API_KEY")
