@@ -41,7 +41,7 @@ async def get_agent(env: AgentEnv, call_request: CallRequest):
     return LlmAgent(
         model="gemini/gemini-2.0-flash",
         api_key=os.getenv("GEMINI_API_KEY"),
-        tools=[form.tool, end_call],
+        tools=[form.record_answer_tool, end_call],
         config=LlmConfig(
             system_prompt=form.get_system_prompt(),
             introduction=f"Hi! I'm here to collect some information from you. {first_question}",
@@ -52,5 +52,4 @@ async def get_agent(env: AgentEnv, call_request: CallRequest):
 app = VoiceAgentApp(get_agent=get_agent)
 
 if __name__ == "__main__":
-    print("Starting Form Filler app...")
     app.run()

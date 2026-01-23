@@ -13,23 +13,7 @@ from line.v02.llm.agent import ToolEnv
 
 
 class FormFiller:
-    """
-    Form filler that loads questions from YAML and provides a loopback tool
-    for recording answers and determining the next question.
-
-    Usage:
-        form = FormFiller("form.yaml")
-        agent = LlmAgent(
-            tools=[form.tool, end_call],
-            config=LlmConfig(system_prompt="Your prompt here..."),
-        )
-
-    The record_answer tool returns:
-        - completed: dict of answered questions
-        - remaining: list of remaining question IDs
-        - next_question: the next question to ask (or None if complete)
-        - is_complete: whether the form is done
-    """
+    """Loads questions from YAML and provides a loopback tool for recording answers."""
 
     def __init__(self, form_path: str, system_prompt: str):
         self.form_path = form_path
@@ -38,7 +22,7 @@ class FormFiller:
         self._questions = self._flatten_questions(self._config["questionnaire"]["questions"])
         self._answers: dict = {}
         self._current_index: int = 0
-        self._tool = self._create_tool()
+        self._tool = None
         logger.info(f"FormFiller initialized with {len(self._questions)} questions")
 
     def _load_config(self) -> dict:
@@ -139,43 +123,29 @@ class FormFiller:
 
         return answer
 
-    def _create_tool(self):
+    @property
+    def record_answer_tool(self):
+        if self._tool is not None:
+            return self._tool
+
         form = self
 
         @loopback_tool(
             name="record_answer",
             description=(
                 "Record a VALID answer to the current form question. "
-                "Only call this when the user has clearly provided an answer \
-                    that matches the question being asked. "
-                "Do NOT call if the user said something unrelated, unclear, \
-                    or did not answer the question - instead ask for clarification."
+                "Only call this when the user has clearly provided an answer that matches the question. "
+                "Do NOT call if the user said something unrelated or unclear."
             ),
         )
         async def record_answer(
             ctx: ToolEnv,
-            answer: Annotated[
-                str,
-                """The user's actual answer extracted from their response
- - must be relevant to the current question""",
-            ],
+            answer: Annotated[str, "The user's answer extracted from their response"],
         ):
-            return form.record_answer(answer)
+            return form._record_answer(answer)
 
+        self._tool = record_answer
         return record_answer
-
-    @property
-    def tool(self):
-        """The loopback tool for recording answers."""
-        return self._tool
-
-    @property
-    def form_title(self) -> str:
-        return self._config["questionnaire"].get("text", "Form")
-
-    @property
-    def answers(self) -> dict:
-        return self._answers.copy()
 
     @property
     def is_complete(self) -> bool:
@@ -251,7 +221,7 @@ You are conducting a questionnaire to collect information from the user.
             temp_index += 1
         return remaining
 
-    def record_answer(self, answer: str) -> dict:
+    def _record_answer(self, answer: str) -> dict:
         """Record an answer and return form status."""
         q = self._get_current_question()
         if not q:
@@ -277,19 +247,9 @@ You are conducting a questionnaire to collect information from the user.
 
         self._answers[q["id"]] = processed
         self._current_index += 1
-        logger.info(f"Recorded answer for '{q['id']}': {processed}")
+        logger.info(f"Recorded '{q['id']}': {processed}")
 
         next_q = self._get_current_question()
-        logger.info(
-            "record_answer response: {\n"
-            f"  'success': True,\n"
-            f"  'completed': {self._answers.copy()},\n"
-            f"  'remaining': {self._get_remaining_questions()},\n"
-            f"  'next_question': {self._format_question(next_q) if next_q else None},\n"
-            f"  'is_complete': {next_q is None}\n"
-            "}"
-        )
-
         return {
             "success": True,
             "completed": self._answers.copy(),
