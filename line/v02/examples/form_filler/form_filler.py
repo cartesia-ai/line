@@ -130,18 +130,17 @@ class FormFiller:
 
         form = self
 
-        @loopback_tool(
-            name="record_answer",
-            description=(
-                "Record a VALID answer to the current form question. "
-                "Only call this when the user has clearly provided an answer that matches the question. "
-                "Do NOT call if the user said something unrelated or unclear."
-            ),
-        )
+        @loopback_tool()
         async def record_answer(
             ctx: ToolEnv,
             answer: Annotated[str, "The user's answer extracted from their response"],
         ):
+            """
+            Record a VALID answer to the current form question.
+            Only call this when the user has clearly provided an answer that matches the question.
+            Do NOT call if the user said something unrelated or unclear.
+            """
+
             return form._record_answer(answer)
 
         self._tool = record_answer
