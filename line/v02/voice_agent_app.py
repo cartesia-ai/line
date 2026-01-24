@@ -326,7 +326,9 @@ class ConversationRunner:
             except WebSocketDisconnect:
                 logger.info("WebSocket disconnected in loop")
                 self.shutdown_event.set()
-                end_event, self.history = self._process_specific_input_event(self.history, SpecificCallEnded())
+                end_event, self.history = self._process_specific_input_event(
+                    self.history, SpecificCallEnded()
+                )
                 await self._handle_event(TurnEnv(), end_event)
             except json.JSONDecodeError as e:
                 logger.exception(f"Failed to parse JSON message: {e}")

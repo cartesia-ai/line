@@ -419,6 +419,7 @@ class LlmAgent:
                         if not isinstance(event.result, str)
                         else event.result,
                         tool_call_id=event.tool_call_id,
+                        name=event.tool_name,
                     )
                 )
         return messages

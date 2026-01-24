@@ -26,7 +26,6 @@ from line.v02.llm.agent import (
     UserTextSent,
 )
 from line.v02.llm.config import LlmConfig
-from line.v02.llm.function_tool import FunctionTool
 from line.v02.llm.llm_agent import LlmAgent, _build_full_history
 from line.v02.llm.provider import Message, StreamChunk, ToolCall
 from line.v02.llm.tool_types import handoff_tool, loopback_tool, passthrough_tool
@@ -1019,9 +1018,11 @@ async def test_mixed_decorated_and_plain_functions(turn_env):
     assert agent.tools[0].name == "decorated_tool"
     assert agent.tools[1].name == "plain_tool"
 
+
 # =============================================================================
 # Tests: _build_full_history
 # =============================================================================
+
 
 class TestBuildFullHistory:
     """Tests for the _build_full_history function.
@@ -1152,11 +1153,11 @@ class TestBuildFullHistory:
         # Expected: UserText, ToolCalled, ToolReturned, AgentTextSent (canonical)
         assert len(result) == 4
         assert isinstance(result[0], SpecificUserTextSent)
-        assert result[0].content, "What's the weather?"
+        assert result[0].content == "What's the weather?"
         assert isinstance(result[1], AgentToolCalled)
         assert isinstance(result[2], AgentToolReturned)
         assert isinstance(result[3], SpecificAgentTextSent)
-        assert result[3].content, "The weather is sunny."
+        assert result[3].content == "The weather is sunny."
 
     async def test_multiple_tool_calls_interleaved(self):
         """Test multiple tool calls with responses interleaved."""
