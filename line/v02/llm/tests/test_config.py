@@ -7,7 +7,7 @@ uv run pytest line/v02/llm/tests/test_config.py -v
 from typing import Optional
 
 from line.call_request import AgentConfig, CallRequest
-from line.v02.llm.config import DEFAULT_INTRODUCTION, DEFAULT_SYSTEM_PROMPT, LlmConfig
+from line.v02.llm.config import FALLBACK_INTRODUCTION, FALLBACK_SYSTEM_PROMPT, LlmConfig
 
 
 def make_call_request(
@@ -33,8 +33,8 @@ def test_from_call_request_uses_defaults_when_none():
 
     config = LlmConfig.from_call_request(call_request)
 
-    assert config.system_prompt == DEFAULT_SYSTEM_PROMPT
-    assert config.introduction == DEFAULT_INTRODUCTION
+    assert config.system_prompt == FALLBACK_SYSTEM_PROMPT
+    assert config.introduction == FALLBACK_INTRODUCTION
 
 
 def test_from_call_request_uses_provided_values():
@@ -72,7 +72,7 @@ def test_from_call_request_empty_system_prompt_uses_default():
 
     config = LlmConfig.from_call_request(call_request)
 
-    assert config.system_prompt == DEFAULT_SYSTEM_PROMPT  # Falls back to SDK default
+    assert config.system_prompt == FALLBACK_SYSTEM_PROMPT  # Falls back to SDK default
     assert config.introduction == "Custom intro"
 
 
@@ -89,8 +89,8 @@ def test_from_call_request_with_extra_kwargs():
     assert config.temperature == 0.7
     assert config.max_tokens == 300
     # Defaults still applied
-    assert config.system_prompt == DEFAULT_SYSTEM_PROMPT
-    assert config.introduction == DEFAULT_INTRODUCTION
+    assert config.system_prompt == FALLBACK_SYSTEM_PROMPT
+    assert config.introduction == FALLBACK_INTRODUCTION
 
 
 def test_from_call_request_mixed_none_and_provided():
@@ -103,7 +103,7 @@ def test_from_call_request_mixed_none_and_provided():
     config = LlmConfig.from_call_request(call_request)
 
     assert config.system_prompt == "Custom prompt"
-    assert config.introduction == DEFAULT_INTRODUCTION
+    assert config.introduction == FALLBACK_INTRODUCTION
 
 
 # =============================================================================
@@ -117,8 +117,8 @@ def test_user_default_used_when_call_request_is_none():
 
     config = LlmConfig.from_call_request(
         call_request,
-        default_system_prompt="My app's default prompt",
-        default_introduction="My app's default intro",
+        fallback_system_prompt="My app's default prompt",
+        fallback_introduction="My app's default intro",
     )
 
     assert config.system_prompt == "My app's default prompt"
@@ -134,8 +134,8 @@ def test_call_request_overrides_user_default():
 
     config = LlmConfig.from_call_request(
         call_request,
-        default_system_prompt="My app's default prompt",
-        default_introduction="My app's default intro",
+        fallback_system_prompt="My app's default prompt",
+        fallback_introduction="My app's default intro",
     )
 
     # CallRequest values should win
@@ -152,8 +152,8 @@ def test_empty_string_from_call_request_overrides_user_default():
 
     config = LlmConfig.from_call_request(
         call_request,
-        default_system_prompt="My default prompt",
-        default_introduction="My default intro",
+        fallback_system_prompt="My default prompt",
+        fallback_introduction="My default intro",
     )
 
     assert config.system_prompt == "My default prompt"  # Uses user default
@@ -169,7 +169,7 @@ def test_empty_system_prompt_from_call_request_uses_user_default():
 
     config = LlmConfig.from_call_request(
         call_request,
-        default_system_prompt="My default prompt",
+        fallback_system_prompt="My default prompt",
     )
 
     assert config.system_prompt == "My default prompt"  # Falls back to user default
@@ -185,10 +185,10 @@ def test_empty_system_prompt_everywhere_uses_sdk_default():
 
     config = LlmConfig.from_call_request(
         call_request,
-        default_system_prompt="",  # Empty string default
+        fallback_system_prompt="",  # Empty string default
     )
 
-    assert config.system_prompt == DEFAULT_SYSTEM_PROMPT  # Falls back to SDK default
+    assert config.system_prompt == FALLBACK_SYSTEM_PROMPT  # Falls back to SDK default
     assert config.introduction == "Custom intro"
 
 
@@ -196,15 +196,15 @@ def test_partial_user_defaults():
     """Test providing only some user defaults."""
     call_request = make_call_request(system_prompt=None, introduction=None)
 
-    # Only provide default_system_prompt
+    # Only provide fallback_system_prompt
     config = LlmConfig.from_call_request(
         call_request,
-        default_system_prompt="My custom prompt",
-        # No default_introduction provided
+        fallback_system_prompt="My custom prompt",
+        # No fallback_introduction provided
     )
 
     assert config.system_prompt == "My custom prompt"
-    assert config.introduction == DEFAULT_INTRODUCTION  # Falls back to SDK default
+    assert config.introduction == FALLBACK_INTRODUCTION  # Falls back to SDK default
 
 
 def test_priority_call_request_then_user_then_sdk():
@@ -213,7 +213,7 @@ def test_priority_call_request_then_user_then_sdk():
     call_request = make_call_request(system_prompt="From CallRequest", introduction=None)
     config = LlmConfig.from_call_request(
         call_request,
-        default_system_prompt="User default",
+        fallback_system_prompt="User default",
     )
     assert config.system_prompt == "From CallRequest"
 
@@ -221,14 +221,14 @@ def test_priority_call_request_then_user_then_sdk():
     call_request = make_call_request(system_prompt=None, introduction=None)
     config = LlmConfig.from_call_request(
         call_request,
-        default_system_prompt="User default",
+        fallback_system_prompt="User default",
     )
     assert config.system_prompt == "User default"
 
     # Case 3: CallRequest None, user default None -> use SDK default
     call_request = make_call_request(system_prompt=None, introduction=None)
     config = LlmConfig.from_call_request(call_request)
-    assert config.system_prompt == DEFAULT_SYSTEM_PROMPT
+    assert config.system_prompt == FALLBACK_SYSTEM_PROMPT
 
 
 def test_user_defaults_with_extra_kwargs():
@@ -237,8 +237,8 @@ def test_user_defaults_with_extra_kwargs():
 
     config = LlmConfig.from_call_request(
         call_request,
-        default_system_prompt="Sales assistant prompt",
-        default_introduction="Welcome to our store!",
+        fallback_system_prompt="Sales assistant prompt",
+        fallback_introduction="Welcome to our store!",
         temperature=0.8,
         max_tokens=500,
     )

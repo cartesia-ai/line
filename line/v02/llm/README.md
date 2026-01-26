@@ -170,15 +170,15 @@ async def get_agent(env, call_request):
 
 **Priority chain** (highest to lowest):
 1. **CallRequest value** - If the API provides `system_prompt` or `introduction`
-2. **User default** - Your app's custom defaults via `default_system_prompt` / `default_introduction`
-3. **SDK default** - Built-in defaults (`DEFAULT_SYSTEM_PROMPT`, `DEFAULT_INTRODUCTION`)
+2. **User fallback** - Your app's custom fallbacks via `fallback_system_prompt` / `fallback_introduction`
+3. **SDK default** - Built-in defaults (`FALLBACK_SYSTEM_PROMPT`, `FALLBACK_INTRODUCTION`)
 
 ```python
-# Provide custom defaults for your app (used when CallRequest doesn't specify)
+# Provide custom fallbacks for your app (used when CallRequest doesn't specify)
 config = LlmConfig.from_call_request(
     call_request,
-    default_system_prompt="You are a sales assistant for Acme Corp.",
-    default_introduction="Hi! How can I help with your purchase today?",
+    fallback_system_prompt="You are a sales assistant for Acme Corp.",
+    fallback_introduction="Hi! How can I help with your purchase today?",
     temperature=0.7,  # Additional LlmConfig options
 )
 ```

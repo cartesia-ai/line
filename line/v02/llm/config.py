@@ -5,11 +5,11 @@ from typing import Any, Dict, List, Optional
 
 from line.call_request import CallRequest
 
-# Default values used when CallRequest doesn't specify them
-DEFAULT_SYSTEM_PROMPT = (
+# Fallback values used when CallRequest doesn't specify them
+FALLBACK_SYSTEM_PROMPT = (
     "You are a friendly and helpful assistant powered by Cartesia. Have a natural conversation with the user."
 )
-DEFAULT_INTRODUCTION = "Hello! I'm your Cartesia assistant. How can I help you today?"
+FALLBACK_INTRODUCTION = "Hello! I'm your Cartesia assistant. How can I help you today?"
 
 
 @dataclass
@@ -47,8 +47,8 @@ class LlmConfig:
     def from_call_request(
         cls,
         call_request: CallRequest,
-        default_system_prompt: Optional[str] = None,
-        default_introduction: Optional[str] = None,
+        fallback_system_prompt: Optional[str] = None,
+        fallback_introduction: Optional[str] = None,
         **kwargs: Any,
     ) -> "LlmConfig":
         """
@@ -56,17 +56,17 @@ class LlmConfig:
 
         Priority (highest to lowest):
         1. CallRequest value (if not None)
-        2. User-provided default (default_system_prompt / default_introduction)
-        3. SDK default (DEFAULT_SYSTEM_PROMPT / DEFAULT_INTRODUCTION)
+        2. User-provided fallback (fallback_system_prompt / fallback_introduction)
+        3. SDK default (FALLBACK_SYSTEM_PROMPT / FALLBACK_INTRODUCTION)
 
         Args:
             call_request: The CallRequest containing agent configuration
-            default_system_prompt: Custom default if CallRequest doesn't specify one
-            default_introduction: Custom default if CallRequest doesn't specify one
+            fallback_system_prompt: Custom fallback if CallRequest doesn't specify one
+            fallback_introduction: Custom fallback if CallRequest doesn't specify one
             **kwargs: Additional LlmConfig options (temperature, max_tokens, etc.)
 
         Note:
-            - system_prompt: Empty strings are treated as None (will use defaults).
+            - system_prompt: Empty strings are treated as None (will use fallbacks).
               A valid system prompt is always required for proper agent behavior.
             - introduction: Empty strings ARE preserved (agent waits for user to speak first).
 
@@ -74,29 +74,29 @@ class LlmConfig:
             # Use SDK defaults
             config = LlmConfig.from_call_request(call_request)
 
-            # Use custom defaults (overridden by CallRequest if set)
+            # Use custom fallbacks (overridden by CallRequest if set)
             config = LlmConfig.from_call_request(
                 call_request,
-                default_system_prompt="You are a sales assistant.",
-                default_introduction="Hi! How can I help with your purchase?",
+                fallback_system_prompt="You are a sales assistant.",
+                fallback_introduction="Hi! How can I help with your purchase?",
                 temperature=0.7,
             )
         """
-        # Priority: call_request > user default > SDK default
-        # Note: Empty strings for system_prompt are treated as None (fall back to defaults)
+        # Priority: call_request > user fallback > SDK default
+        # Note: Empty strings for system_prompt are treated as None (fall back to fallbacks)
         if call_request.agent.system_prompt:  # Truthiness check treats "" as None
             system_prompt = call_request.agent.system_prompt
-        elif default_system_prompt:  # Also use truthiness for consistency
-            system_prompt = default_system_prompt
+        elif fallback_system_prompt:  # Also use truthiness for consistency
+            system_prompt = fallback_system_prompt
         else:
-            system_prompt = DEFAULT_SYSTEM_PROMPT
+            system_prompt = FALLBACK_SYSTEM_PROMPT
 
         if call_request.agent.introduction is not None:
             introduction = call_request.agent.introduction
-        elif default_introduction is not None:
-            introduction = default_introduction
+        elif fallback_introduction is not None:
+            introduction = fallback_introduction
         else:
-            introduction = DEFAULT_INTRODUCTION
+            introduction = FALLBACK_INTRODUCTION
 
         return cls(
             system_prompt=system_prompt,
