@@ -95,6 +95,46 @@ async def test_transfer_call_international_number(mock_ctx, anyio_backend):
     assert events[0].target_phone_number == "+442071234567"
 
 
+async def test_transfer_call_normalizes_spaces(mock_ctx, anyio_backend):
+    """Test that phone numbers with spaces are normalized to E.164 format."""
+    events = await collect_events(transfer_call.func(mock_ctx, "+1 415 555 1234"))
+
+    assert len(events) == 1
+    assert isinstance(events[0], AgentTransferCall)
+    # Should be normalized to E.164 without spaces
+    assert events[0].target_phone_number == "+14155551234"
+
+
+async def test_transfer_call_normalizes_dashes(mock_ctx, anyio_backend):
+    """Test that phone numbers with dashes are normalized to E.164 format."""
+    events = await collect_events(transfer_call.func(mock_ctx, "+1-415-555-1234"))
+
+    assert len(events) == 1
+    assert isinstance(events[0], AgentTransferCall)
+    # Should be normalized to E.164 without dashes
+    assert events[0].target_phone_number == "+14155551234"
+
+
+async def test_transfer_call_normalizes_mixed_formatting(mock_ctx, anyio_backend):
+    """Test that phone numbers with mixed formatting are normalized to E.164."""
+    events = await collect_events(transfer_call.func(mock_ctx, "+1 (415) 555-1234"))
+
+    assert len(events) == 1
+    assert isinstance(events[0], AgentTransferCall)
+    # Should be normalized to E.164 without any formatting
+    assert events[0].target_phone_number == "+14155551234"
+
+
+async def test_transfer_call_normalizes_international_with_spaces(mock_ctx, anyio_backend):
+    """Test that international numbers with spaces are normalized."""
+    # UK number with spaces
+    events = await collect_events(transfer_call.func(mock_ctx, "+44 20 7123 4567"))
+
+    assert len(events) == 1
+    assert isinstance(events[0], AgentTransferCall)
+    assert events[0].target_phone_number == "+442071234567"
+
+
 # =============================================================================
 # Tests: send_dtmf
 # =============================================================================

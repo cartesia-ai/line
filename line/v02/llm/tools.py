@@ -163,6 +163,9 @@ async def transfer_call(
         yield AgentSendText(text="I'm sorry, I couldn't understand that phone number format.")
         return
 
+    # Normalize to E.164 format
+    normalized_number = phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.E164)
+
     if message is not None:
         yield AgentSendText(text=message)
-    yield AgentTransferCall(target_phone_number=target_phone_number)
+    yield AgentTransferCall(target_phone_number=normalized_number)
