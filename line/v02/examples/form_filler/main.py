@@ -11,8 +11,7 @@ from form_filler import FormFiller
 from loguru import logger
 
 from line.call_request import CallRequest
-from line.v02.llm import LlmAgent, LlmConfig
-from line.v02.tools import end_call
+from line.v02.llm import LlmAgent, LlmConfig, end_call
 from line.v02.voice_agent_app import AgentEnv, VoiceAgentApp
 
 FORM_PATH = Path(__file__).parent / "schedule_form.yaml"

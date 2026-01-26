@@ -3,9 +3,12 @@ Built-in tools for LLM agents.
 """
 
 from dataclasses import dataclass, field
-from typing import Annotated, Any, Dict, Literal
+from typing import Annotated, Any, Dict, Literal, Optional
 
+from line.v02.events import AgentEndCall as AgentEndCallEvent
+from line.v02.events import AgentSendText
 from line.v02.llm.agent import ToolEnv
+from line.v02.llm.tool_types import passthrough_tool
 
 
 @dataclass
@@ -118,3 +121,13 @@ class WebSearchTool:
 # Default instance - can be used directly or called to configure
 # Usage: web_search or web_search(search_context_size="high")
 web_search = WebSearchTool()
+
+
+@passthrough_tool
+async def end_call(
+    ctx: ToolEnv, message: Annotated[Optional[str], "The message to say before ending the call"] = None
+):
+    """End the call."""
+    if message is not None:
+        yield AgentSendText(text=message)
+    yield AgentEndCallEvent()
