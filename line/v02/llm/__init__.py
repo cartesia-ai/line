@@ -58,7 +58,7 @@ from line.v02.llm.agent import (
 )
 
 # Configuration
-from line.v02.llm.config import LlmConfig
+from line.v02.llm.config import DEFAULT_INTRODUCTION, DEFAULT_SYSTEM_PROMPT, LlmConfig
 
 # LLM Agent
 from line.v02.llm.llm_agent import LlmAgent
@@ -91,6 +91,8 @@ __all__ = [
     "LlmAgent",
     # Configuration
     "LlmConfig",
+    "DEFAULT_SYSTEM_PROMPT",
+    "DEFAULT_INTRODUCTION",
     # Tool definitions
     "FunctionTool",
     "ToolType",
