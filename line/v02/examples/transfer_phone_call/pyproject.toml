@@ -1,0 +1,16 @@
+[project]
+name = "transfer-phone-call"
+version = "0.1.0"
+description = "Phone transfer example using Line SDK v02"
+requires-python = ">=3.10"
+dependencies = [
+    "cartesia-line-v02",
+    "cartesia-line",
+]
+
+[project.scripts]
+transfer-phone-call = "main:app.run"
+
+[tool.uv.sources]
+cartesia-line-v02 = { path = "../../", editable = true }
+cartesia-line={ path = "../../../../", editable = true }

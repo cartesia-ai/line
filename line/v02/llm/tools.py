@@ -6,9 +6,12 @@ from dataclasses import dataclass, field
 from typing import Annotated, Any, Dict, Literal, Optional
 
 from line.v02.events import AgentEndCall as AgentEndCallEvent
-from line.v02.events import AgentSendText
+from line.v02.events import AgentSendDtmf, AgentSendText, AgentTransferCall
 from line.v02.llm.agent import ToolEnv
 from line.v02.llm.tool_types import passthrough_tool
+
+# Valid DTMF buttons
+DtmfButton = Literal["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "*", "#"]
 
 
 @dataclass
@@ -131,3 +134,35 @@ async def end_call(
     if message is not None:
         yield AgentSendText(text=message)
     yield AgentEndCallEvent()
+
+
+@passthrough_tool
+async def send_dtmf(
+    ctx: ToolEnv,
+    button: Annotated[DtmfButton, "The DTMF button to send (0-9, *, or #)"],
+):
+    """Send a DTMF tone. Use when the voice system asks you to press a button."""
+    yield AgentSendDtmf(button=button)
+
+
+@passthrough_tool
+async def transfer_call(
+    ctx: ToolEnv,
+    target_phone_number: Annotated[str, "The destination phone number in E.164 format (e.g., +14155551234)"],
+    message: Annotated[Optional[str], "Optional message to say before transferring"] = None,
+):
+    """Transfer the call to another phone number."""
+    import phonenumbers
+
+    try:
+        parsed = phonenumbers.parse(target_phone_number)
+        if not phonenumbers.is_valid_number(parsed):
+            yield AgentSendText(text="I'm sorry, that phone number appears to be invalid.")
+            return
+    except phonenumbers.NumberParseException:
+        yield AgentSendText(text="I'm sorry, I couldn't understand that phone number format.")
+        return
+
+    if message is not None:
+        yield AgentSendText(text=message)
+    yield AgentTransferCall(target_phone_number=target_phone_number)

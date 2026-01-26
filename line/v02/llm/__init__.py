@@ -80,7 +80,7 @@ from line.v02.llm.tool_types import handoff_tool, loopback_tool, passthrough_too
 from line.v02.llm.tool_utils import FunctionTool, ToolType, construct_function_tool
 
 # Built-in tools
-from line.v02.llm.tools import end_call, web_search
+from line.v02.llm.tools import end_call, send_dtmf, transfer_call, web_search
 
 __all__ = [
     # LLM Agent
@@ -97,6 +97,8 @@ __all__ = [
     "handoff_tool",
     # Built-in tools
     "end_call",
+    "send_dtmf",
+    "transfer_call",
     "web_search",
     # Schema converters
     "function_tool_to_openai",
