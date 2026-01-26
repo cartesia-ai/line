@@ -4,15 +4,15 @@ Tests for LlmConfig.
 uv run pytest line/v02/llm/tests/test_config.py -v
 """
 
-import pytest
+from typing import Optional
 
 from line.call_request import AgentConfig, CallRequest
 from line.v02.llm.config import DEFAULT_INTRODUCTION, DEFAULT_SYSTEM_PROMPT, LlmConfig
 
 
 def make_call_request(
-    system_prompt: str | None = None,
-    introduction: str | None = None,
+    system_prompt: Optional[str] = None,
+    introduction: Optional[str] = None,
 ) -> CallRequest:
     """Helper to create a CallRequest with given agent config."""
     return CallRequest(
