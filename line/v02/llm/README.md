@@ -153,6 +153,38 @@ config = LlmConfig(
 )
 ```
 
+### Creating Config from CallRequest
+
+Use `LlmConfig.from_call_request()` to automatically extract configuration from incoming call requests with sensible defaults:
+
+```python
+from line.v02.llm import LlmAgent, LlmConfig
+
+async def get_agent(env, call_request):
+    return LlmAgent(
+        model="gemini/gemini-2.0-flash",
+        tools=[...],
+        config=LlmConfig.from_call_request(call_request),
+    )
+```
+
+**Priority chain** (highest to lowest):
+1. **CallRequest value** - If the API provides `system_prompt` or `introduction`
+2. **User default** - Your app's custom defaults via `default_system_prompt` / `default_introduction`
+3. **SDK default** - Built-in defaults (`DEFAULT_SYSTEM_PROMPT`, `DEFAULT_INTRODUCTION`)
+
+```python
+# Provide custom defaults for your app (used when CallRequest doesn't specify)
+config = LlmConfig.from_call_request(
+    call_request,
+    default_system_prompt="You are a sales assistant for Acme Corp.",
+    default_introduction="Hi! How can I help with your purchase today?",
+    temperature=0.7,  # Additional LlmConfig options
+)
+```
+
+**Empty string handling**: If CallRequest sends `introduction=""`, it is preserved (agent waits for user to speak first rather than using a default).
+
 ## Streaming
 
 Responses stream automatically. Tool calls arrive incrementally:
