@@ -12,17 +12,15 @@ from line.v02.llm.agent import (
     Agent,
     AgentCallable,
     AgentClass,
-    AgentDTMFSent,
+    AgentDtmfSent,
     AgentEndCall,
     AgentHandedOff,
-    AgentSendDTMF,
+    AgentSendDtmf,
     AgentSendText,
     AgentSpec,
     AgentTextSent,
     AgentToolCalled,
-    AgentToolCalledInput,
     AgentToolReturned,
-    AgentToolReturnedInput,
     AgentTransferCall,
     AgentTurnEnded,
     AgentTurnStarted,
@@ -36,10 +34,8 @@ from line.v02.llm.agent import (
     LoopbackToolFn,
     OutputEvent,
     PassthroughToolFn,
-    SpecificAgentDTMFSent,
+    SpecificAgentDtmfSent,
     SpecificAgentTextSent,
-    SpecificAgentToolCalled,
-    SpecificAgentToolReturned,
     SpecificAgentTurnEnded,
     SpecificAgentTurnStarted,
     SpecificCallEnded,
@@ -84,7 +80,7 @@ from line.v02.llm.tool_types import handoff_tool, loopback_tool, passthrough_too
 from line.v02.llm.tool_utils import FunctionTool, ToolType, construct_function_tool
 
 # Built-in tools
-from line.v02.llm.tools import web_search
+from line.v02.llm.tools import end_call, web_search
 
 __all__ = [
     # LLM Agent
@@ -102,6 +98,7 @@ __all__ = [
     "passthrough_tool",
     "handoff_tool",
     # Built-in tools
+    "end_call",
     "web_search",
     # Schema converters
     "function_tool_to_openai",
@@ -130,7 +127,7 @@ __all__ = [
     "HandoffToolFn",
     # Output events
     "AgentEndCall",
-    "AgentSendDTMF",
+    "AgentSendDtmf",
     "AgentSendText",
     "AgentToolCalled",
     "AgentToolReturned",
@@ -141,10 +138,8 @@ __all__ = [
     # LLM-specific events
     "AgentHandedOff",
     # Input events with history
-    "AgentDTMFSent",
+    "AgentDtmfSent",
     "AgentTextSent",
-    "AgentToolCalledInput",
-    "AgentToolReturnedInput",
     "AgentTurnEnded",
     "AgentTurnStarted",
     "CallEnded",
@@ -155,10 +150,8 @@ __all__ = [
     "UserTurnEnded",
     "UserTurnStarted",
     # Specific events
-    "SpecificAgentDTMFSent",
+    "SpecificAgentDtmfSent",
     "SpecificAgentTextSent",
-    "SpecificAgentToolCalled",
-    "SpecificAgentToolReturned",
     "SpecificAgentTurnEnded",
     "SpecificAgentTurnStarted",
     "SpecificCallEnded",

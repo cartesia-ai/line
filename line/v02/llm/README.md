@@ -214,7 +214,7 @@ async for output in agent.process(env, event):
 - `AgentSendText` - Send text to user
 - `AgentEndCall` - End the call
 - `AgentTransferCall` - Transfer call
-- `AgentSendDTMF` - Send DTMF tones
+- `AgentSendDtmf` - Send DTMF tones
 - `AgentToolCalled` - Tool was called
 - `AgentToolReturned` - Tool returned result
 
