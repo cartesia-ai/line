@@ -7,9 +7,9 @@ from line.call_request import CallRequest
 
 # Fallback values used when CallRequest doesn't specify them
 FALLBACK_SYSTEM_PROMPT = (
-    "You are a friendly and helpful assistant powered by Cartesia. Have a natural conversation with the user."
+    "You are a friendly and helpful assistant. Have a natural conversation with the user."
 )
-FALLBACK_INTRODUCTION = "Hello! I'm your Cartesia assistant. How can I help you today?"
+FALLBACK_INTRODUCTION = "Hello! I'm your AI assistant. How can I help you today?"
 
 
 @dataclass
