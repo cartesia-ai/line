@@ -66,8 +66,9 @@ class LlmConfig:
             **kwargs: Additional LlmConfig options (temperature, max_tokens, etc.)
 
         Note:
-            If CallRequest sends empty string "" for introduction, it is preserved
-            (agent waits for user to speak first).
+            - system_prompt: Empty strings are treated as None (will use defaults).
+              A valid system prompt is always required for proper agent behavior.
+            - introduction: Empty strings ARE preserved (agent waits for user to speak first).
 
         Example:
             # Use SDK defaults
@@ -82,9 +83,10 @@ class LlmConfig:
             )
         """
         # Priority: call_request > user default > SDK default
-        if call_request.agent.system_prompt is not None:
+        # Note: Empty strings for system_prompt are treated as None (fall back to defaults)
+        if call_request.agent.system_prompt:  # Truthiness check treats "" as None
             system_prompt = call_request.agent.system_prompt
-        elif default_system_prompt is not None:
+        elif default_system_prompt:  # Also use truthiness for consistency
             system_prompt = default_system_prompt
         else:
             system_prompt = DEFAULT_SYSTEM_PROMPT

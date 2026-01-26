@@ -183,7 +183,9 @@ config = LlmConfig.from_call_request(
 )
 ```
 
-**Empty string handling**: If CallRequest sends `introduction=""`, it is preserved (agent waits for user to speak first rather than using a default).
+**Empty string handling**:
+- `system_prompt=""` is treated as None and falls back to defaults (a valid system prompt is always required)
+- `introduction=""` is preserved (agent waits for user to speak first rather than using a default)
 
 ## Streaming
 

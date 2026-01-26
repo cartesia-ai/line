@@ -63,6 +63,19 @@ def test_from_call_request_empty_string_skips_intro():
     assert config.introduction == ""  # Empty string preserved
 
 
+def test_from_call_request_empty_system_prompt_uses_default():
+    """Test that empty string system_prompt falls back to SDK default."""
+    call_request = make_call_request(
+        system_prompt="",  # Empty string = fall back to default
+        introduction="Custom intro",
+    )
+
+    config = LlmConfig.from_call_request(call_request)
+
+    assert config.system_prompt == DEFAULT_SYSTEM_PROMPT  # Falls back to SDK default
+    assert config.introduction == "Custom intro"
+
+
 def test_from_call_request_with_extra_kwargs():
     """Test that extra kwargs are passed through."""
     call_request = make_call_request()
@@ -145,6 +158,38 @@ def test_empty_string_from_call_request_overrides_user_default():
 
     assert config.system_prompt == "My default prompt"  # Uses user default
     assert config.introduction == ""  # Empty string preserved (skips intro)
+
+
+def test_empty_system_prompt_from_call_request_uses_user_default():
+    """Test that empty string system_prompt from CallRequest falls back to user default."""
+    call_request = make_call_request(
+        system_prompt="",  # Empty string = fall back
+        introduction="Custom intro",
+    )
+
+    config = LlmConfig.from_call_request(
+        call_request,
+        default_system_prompt="My default prompt",
+    )
+
+    assert config.system_prompt == "My default prompt"  # Falls back to user default
+    assert config.introduction == "Custom intro"
+
+
+def test_empty_system_prompt_everywhere_uses_sdk_default():
+    """Test that empty strings everywhere for system_prompt fall back to SDK default."""
+    call_request = make_call_request(
+        system_prompt="",  # Empty string
+        introduction="Custom intro",
+    )
+
+    config = LlmConfig.from_call_request(
+        call_request,
+        default_system_prompt="",  # Empty string default
+    )
+
+    assert config.system_prompt == DEFAULT_SYSTEM_PROMPT  # Falls back to SDK default
+    assert config.introduction == "Custom intro"
 
 
 def test_partial_user_defaults():
