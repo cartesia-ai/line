@@ -8,8 +8,7 @@ from exa_py import Exa
 from loguru import logger
 
 from line.call_request import CallRequest
-from line.v02.llm import LlmAgent, LlmConfig, ToolEnv, loopback_tool
-from line.v02.tools import end_call
+from line.v02.llm import LlmAgent, LlmConfig, ToolEnv, end_call, loopback_tool
 from line.v02.voice_agent_app import AgentEnv, VoiceAgentApp
 
 SYSTEM_PROMPT = """You are an intelligent web research assistant with access to real-time \
