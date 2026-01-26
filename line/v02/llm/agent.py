@@ -20,17 +20,15 @@ from line.v02.agent import (
 # Re-export all event types from v02
 from line.v02.events import (
     # Input events with history
-    AgentDTMFSent,
+    AgentDtmfSent,
     # Output events
     AgentEndCall,
     AgentHandedOff,
-    AgentSendDTMF,
+    AgentSendDtmf,
     AgentSendText,
     AgentTextSent,
     AgentToolCalled,
-    AgentToolCalledInput,
     AgentToolReturned,
-    AgentToolReturnedInput,
     AgentTransferCall,
     AgentTurnEnded,
     AgentTurnStarted,
@@ -41,10 +39,8 @@ from line.v02.events import (
     LogMetric,
     OutputEvent,
     # Specific events
-    SpecificAgentDTMFSent,
+    SpecificAgentDtmfSent,
     SpecificAgentTextSent,
-    SpecificAgentToolCalled,
-    SpecificAgentToolReturned,
     SpecificAgentTurnEnded,
     SpecificAgentTurnStarted,
     SpecificCallEnded,
@@ -123,7 +119,7 @@ __all__ = [
     "HandoffToolFn",
     # Output events
     "AgentEndCall",
-    "AgentSendDTMF",
+    "AgentSendDtmf",
     "AgentSendText",
     "AgentToolCalled",
     "AgentToolReturned",
@@ -134,10 +130,8 @@ __all__ = [
     # LLM-specific events
     "AgentHandedOff",
     # Input events with history
-    "AgentDTMFSent",
+    "AgentDtmfSent",
     "AgentTextSent",
-    "AgentToolCalledInput",
-    "AgentToolReturnedInput",
     "AgentTurnEnded",
     "AgentTurnStarted",
     "CallEnded",
@@ -148,10 +142,8 @@ __all__ = [
     "UserTurnEnded",
     "UserTurnStarted",
     # Specific events
-    "SpecificAgentDTMFSent",
+    "SpecificAgentDtmfSent",
     "SpecificAgentTextSent",
-    "SpecificAgentToolCalled",
-    "SpecificAgentToolReturned",
     "SpecificAgentTurnEnded",
     "SpecificAgentTurnStarted",
     "SpecificCallEnded",

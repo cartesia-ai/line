@@ -36,15 +36,13 @@ from line.harness_types import (
 )
 from line.v02.agent import Agent, AgentSpec, EventFilter, TurnEnv
 from line.v02.events import (
-    AgentDTMFSent,
+    AgentDtmfSent,
     AgentEndCall,
-    AgentSendDTMF,
+    AgentSendDtmf,
     AgentSendText,
     AgentTextSent,
     AgentToolCalled,
-    AgentToolCalledInput,
     AgentToolReturned,
-    AgentToolReturnedInput,
     AgentTransferCall,
     AgentTurnEnded,
     AgentTurnStarted,
@@ -54,10 +52,8 @@ from line.v02.events import (
     LogMessage,
     LogMetric,
     OutputEvent,
-    SpecificAgentDTMFSent,
+    SpecificAgentDtmfSent,
     SpecificAgentTextSent,
-    SpecificAgentToolCalled,
-    SpecificAgentToolReturned,
     SpecificAgentTurnEnded,
     SpecificAgentTurnStarted,
     SpecificCallEnded,
@@ -313,7 +309,7 @@ class ConversationRunner:
         Processes incoming websocket messages until shutdown.
         """
         # Emit call_started to seed history/context
-        start_event, self.history = self._wrap_with_history(self.history, SpecificCallStarted())
+        start_event, self.history = self._process_specific_input_event(self.history, SpecificCallStarted())
         await self._handle_event(TurnEnv(), start_event)
 
         while not self.shutdown_event.is_set():
@@ -322,14 +318,17 @@ class ConversationRunner:
                 message = await self.websocket.receive_json()
                 input_msg = TypeAdapter(InputMessage).validate_python(message)
 
-                # Map to events
-                ev, self.history = self._map_input_event(self.history, input_msg)
+                # Convert and process the input message
+                specific_event = self._convert_input_message(input_msg)
+                ev, self.history = self._process_specific_input_event(self.history, specific_event)
                 await self._handle_event(TurnEnv(), ev)
 
             except WebSocketDisconnect:
                 logger.info("WebSocket disconnected in loop")
                 self.shutdown_event.set()
-                end_event, self.history = self._wrap_with_history(self.history, SpecificCallEnded())
+                end_event, self.history = self._process_specific_input_event(
+                    self.history, SpecificCallEnded()
+                )
                 await self._handle_event(TurnEnv(), end_event)
             except json.JSONDecodeError as e:
                 logger.exception(f"Failed to parse JSON message: {e}")
@@ -364,6 +363,7 @@ class ConversationRunner:
                         break
                     if mapped is None:
                         continue
+                    logger.info(f"Sending output message type: {type(mapped).__name__}")
                     await self.websocket.send_json(mapped.model_dump())
             except asyncio.CancelledError:
                 pass
@@ -391,52 +391,38 @@ class ConversationRunner:
             logger.warning(f"Failed to send error via WebSocket: {e}")
 
     ######### Event Parsing Methods #########
-    def _map_input_event(
-        self, history: List[SpecificInputEvent], message: InputMessage
-    ) -> tuple[InputEvent, List[SpecificInputEvent]]:
-        """Pure mapping: history + harness message -> (InputEvent | None, updated history)."""
+    def _convert_input_message(self, message: InputMessage) -> SpecificInputEvent:
+        """Convert an InputMessage to a SpecificInputEvent."""
         if isinstance(message, UserStateInput):
             if message.value == UserState.SPEAKING:
-                logger.info("🎤 User started speaking")
-                return self._wrap_with_history(history, SpecificUserTurnStarted())
-            if message.value == UserState.IDLE:
-                logger.info("🔇 User stopped speaking")
+                return SpecificUserTurnStarted()
+            elif message.value == UserState.IDLE:
                 content = self._turn_content(
-                    history,
+                    self.history,
                     SpecificUserTurnStarted,
                     (SpecificUserTextSent, SpecificUserDtmfSent),
                 )
-                return self._wrap_with_history(history, SpecificUserTurnEnded(content=content))
+                return SpecificUserTurnEnded(content=content)
 
         elif isinstance(message, TranscriptionInput):
-            logger.info(f'📝 User said: "{message.content}"')
-            return self._wrap_with_history(history, SpecificUserTextSent(content=message.content))
+            return SpecificUserTextSent(content=message.content)
 
         elif isinstance(message, AgentStateInput):
             if message.value == UserState.SPEAKING:
-                logger.info("🎤 Agent started speaking")
-                return self._wrap_with_history(history, SpecificAgentTurnStarted())
-            if message.value == UserState.IDLE:
-                logger.info("🔇 Agent stopped speaking")
+                return SpecificAgentTurnStarted()
+            elif message.value == UserState.IDLE:
                 content = self._turn_content(
-                    history,
+                    self.history,
                     SpecificAgentTurnStarted,
-                    (
-                        SpecificAgentTextSent,
-                        SpecificAgentDTMFSent,
-                        SpecificAgentToolCalled,
-                        SpecificAgentToolReturned,
-                    ),
+                    (SpecificAgentTextSent, SpecificAgentDtmfSent),
                 )
-                return self._wrap_with_history(history, SpecificAgentTurnEnded(content=content))
+                return SpecificAgentTurnEnded(content=content)
 
         elif isinstance(message, AgentSpeechInput):
-            logger.info(f'🗣️ Agent speech sent: "{message.content}"')
-            return self._wrap_with_history(history, SpecificAgentTextSent(content=message.content))
+            return SpecificAgentTextSent(content=message.content)
 
         elif isinstance(message, DTMFInput):
-            logger.info(f"🔔 DTMF received: {message.button}")
-            return self._wrap_with_history(history, SpecificUserDtmfSent(button=message.button))
+            return SpecificUserDtmfSent(button=message.button)
 
         raise ValueError(f"Unhandled input message type: {type(message).__name__}")
 
@@ -452,74 +438,86 @@ class ConversationRunner:
                 return [ev for ev in history[idx + 1 :] if isinstance(ev, content_types)]
         return []
 
-    def _wrap_with_history(
-        self, history: List[SpecificInputEvent], specific_event: SpecificInputEvent
+    def _process_specific_input_event(
+        self, history: List[SpecificInputEvent], raw_event: SpecificInputEvent
     ) -> tuple[InputEvent, List[SpecificInputEvent]]:
         """Create an InputEvent including history from a SpecificInputEvent.
 
         The raw history is updated with the new event, but the history passed to
         the InputEvent is processed to restore whitespace in SpecificAgentTextSent events.
         """
-        raw_history = history + [specific_event]
+        raw_history = history + [raw_event]
         # Process history to restore whitespace before passing to agent
-        processed_history = _get_processed_history(self.emitted_agent_text, history)
-        base_data = specific_event.model_dump()
+        processed_history = _get_processed_history(self.emitted_agent_text, raw_history)
+        processed_event = processed_history[-1]
+        base_data = processed_event.model_dump()
 
-        if isinstance(specific_event, SpecificCallStarted):
-            return CallStarted(history=processed_history, **base_data), raw_history
-        if isinstance(specific_event, SpecificCallEnded):
-            return CallEnded(history=processed_history, **base_data), raw_history
-        if isinstance(specific_event, SpecificUserTurnStarted):
-            return UserTurnStarted(history=processed_history, **base_data), raw_history
-        if isinstance(specific_event, SpecificUserDtmfSent):
-            return UserDtmfSent(history=processed_history, **base_data), raw_history
-        if isinstance(specific_event, SpecificUserTextSent):
-            return UserTextSent(history=processed_history, **base_data), raw_history
-        if isinstance(specific_event, SpecificUserTurnEnded):
-            return UserTurnEnded(history=processed_history, **base_data), raw_history
-        if isinstance(specific_event, SpecificAgentTurnStarted):
-            return AgentTurnStarted(history=processed_history, **base_data), raw_history
-        if isinstance(specific_event, SpecificAgentTextSent):
-            return AgentTextSent(history=processed_history, **base_data), raw_history
-        if isinstance(specific_event, SpecificAgentDTMFSent):
-            return AgentDTMFSent(history=processed_history, **base_data), raw_history
-        if isinstance(specific_event, SpecificAgentToolCalled):
-            return AgentToolCalledInput(history=processed_history, **base_data), raw_history
-        if isinstance(specific_event, SpecificAgentToolReturned):
-            return AgentToolReturnedInput(history=processed_history, **base_data), raw_history
-        if isinstance(specific_event, SpecificAgentTurnEnded):
-            return AgentTurnEnded(history=processed_history, **base_data), raw_history
+        event: InputEvent
+        if isinstance(processed_event, SpecificCallStarted):
+            event = CallStarted(history=processed_history, **base_data)
+            logger.info("-> 📞 Call started")
+        elif isinstance(processed_event, SpecificCallEnded):
+            event = CallEnded(history=processed_history, **base_data)
+            logger.info("-> 📞 Call ended")
+        elif isinstance(processed_event, SpecificUserTurnStarted):
+            event = UserTurnStarted(history=processed_history, **base_data)
+            logger.info("-> 🧑🔊 User started speaking")
+        elif isinstance(processed_event, SpecificUserDtmfSent):
+            event = UserDtmfSent(history=processed_history, **base_data)
+            logger.info(f"-> 🧑🔔 User DTMF received: {event.button}")
+        elif isinstance(processed_event, SpecificUserTextSent):
+            event = UserTextSent(history=processed_history, **base_data)
+            logger.info(f'-> 🧑🗣️ User said: "{event.content}"')
+        elif isinstance(processed_event, SpecificUserTurnEnded):
+            event = UserTurnEnded(history=processed_history, **base_data)
+            logger.info("-> 🧑🔇 User stopped speaking")
+        elif isinstance(processed_event, SpecificAgentTurnStarted):
+            event = AgentTurnStarted(history=processed_history, **base_data)
+            logger.info("-> 🤖🔊 Agent started speaking")
+        elif isinstance(processed_event, SpecificAgentTextSent):
+            event = AgentTextSent(history=processed_history, **base_data)
+            # special case: log the raw event content (without whitespace restoration)
+            # otherwise we re-log the same text multiple times with the new stuff
+            # concatenated
+            logger.info(f'-> 🤖🗣️ Agent said: "{raw_event.content}"')
+        elif isinstance(processed_event, SpecificAgentDtmfSent):
+            event = AgentDtmfSent(history=processed_history, **base_data)
+        elif isinstance(processed_event, SpecificAgentTurnEnded):
+            event = AgentTurnEnded(history=processed_history, **base_data)
+            logger.info("-> 🤖🔇 Agent stopped speaking")
+        else:
+            raise ValueError(f"Unknown event type: {type(processed_event).__name__}")
 
-        raise ValueError(f"Unknown event type: {type(specific_event).__name__}")
+        return event, raw_history
 
     def _map_output_event(self, event: OutputEvent) -> OutputMessage:
         """Convert OutputEvent to websocket OutputMessage."""
         if isinstance(event, AgentSendText):
-            logger.info(f'🤖 Agent said: "{event.text}"')
+            logger.info(f'<- 🤖🗣️ Agent said: "{event.text}"')
             return MessageOutput(content=event.text)
-        if isinstance(event, AgentSendDTMF):
-            logger.info(f"🔢 DTMF output: {event.button}")
+        if isinstance(event, AgentSendDtmf):
+            logger.info(f"<- 🤖🔔 Agent DTMF sent: {event.button}")
             return DTMFOutput(button=event.button)
         if isinstance(event, AgentEndCall):
-            logger.info("📞 End call")
+            logger.info("<- 📞 End call")
             return EndCallOutput()
         if isinstance(event, AgentTransferCall):
-            logger.info(f"📱 Transfer to: {event.target_phone_number}")
+            logger.info(f"<- 📱 Transfer to: {event.target_phone_number}")
             return TransferOutput(target_phone_number=event.target_phone_number)
         if isinstance(event, LogMetric):
-            logger.debug(f"📈 Log metric: {event.name}={event.value}")
+            logger.debug(f"<- 📈 Log metric: {event.name}={event.value}")
             return LogMetricOutput(name=event.name, value=event.value)
         if isinstance(event, LogMessage):
-            logger.debug(f"🪵 Log message: {event.name} [{event.level}] {event.message}")
+            logger.debug(f"<- 🪵 Log message: {event.name} [{event.level}] {event.message}")
             return LogEventOutput(
                 event=event.name,
                 metadata={"level": event.level, "message": event.message, "metadata": event.metadata},
             )
         if isinstance(event, AgentToolCalled):
-            logger.info(f"🔧 Tool called: {event.tool_name}({event.tool_args})")
+            logger.info(f"<- 🔧 Tool called: {event.tool_name}({event.tool_args})")
             return ToolCallOutput(name=event.tool_name, arguments=event.tool_args)
         if isinstance(event, AgentToolReturned):
-            logger.info(f"🔧 Tool returned: {event.tool_name}({event.tool_args}) -> {event.result}")
+            logger.info(f"<- 🔧 Tool returned: {event.tool_name}({event.tool_args}) -> {event.result}")
             result_str = str(event.result) if event.result is not None else None
             return ToolCallOutput(name=event.tool_name, arguments=event.tool_args, result=result_str)
 
