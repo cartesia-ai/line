@@ -200,7 +200,7 @@ async def test_loopback_tool_feeds_result_back_to_llm(turn_env):
     """Test that loopback tool results are fed back to the LLM."""
 
     # Define a loopback tool
-    @loopback_tool()
+    @loopback_tool
     async def get_weather(ctx, city: Annotated[str, "City name"]) -> str:
         """Get weather for a city."""
         return f"72°F in {city}"
@@ -278,7 +278,7 @@ async def test_loopback_tool_feeds_result_back_to_llm(turn_env):
 async def test_loopback_tool_multiple_iterations(turn_env):
     """Test multiple loopback tool calls in sequence."""
 
-    @loopback_tool()
+    @loopback_tool
     async def get_weather(ctx, city: Annotated[str, "City"]) -> str:
         """Get weather."""
         temps = {"NYC": "72°F", "LA": "85°F"}
@@ -344,7 +344,7 @@ async def test_loopback_tool_multiple_iterations(turn_env):
 async def test_passthrough_tool_bypasses_llm(turn_env):
     """Test that passthrough tool events go directly to output, not back to LLM."""
 
-    @passthrough_tool()
+    @passthrough_tool
     async def end_call(ctx, message: Annotated[str, "Goodbye message"]):
         """End the call."""
         yield AgentSendText(text=message)
@@ -415,7 +415,7 @@ async def test_handoff_tool_emits_handoff_event(turn_env):
 
     billing_agent = BillingAgent()
 
-    @handoff_tool()
+    @handoff_tool
     async def transfer_to_billing(ctx, reason: Annotated[str, "Reason"], event):
         """Transfer to billing department."""
 
@@ -494,7 +494,7 @@ async def test_handoff_delegates_subsequent_calls(turn_env):
 
     billing_agent = BillingAgent()
 
-    @handoff_tool()
+    @handoff_tool
     async def transfer_to_billing(ctx, event):
         """Transfer to billing."""
         async for output in billing_agent.process(ctx.turn_env, event):
@@ -550,7 +550,7 @@ async def test_handoff_delegates_subsequent_calls(turn_env):
 async def test_max_tool_iterations_prevents_infinite_loop(turn_env):
     """Test that max_tool_iterations stops runaway loops."""
 
-    @loopback_tool()
+    @loopback_tool
     async def infinite_tool(ctx) -> str:
         """Tool that always gets called again."""
         return "call me again"
@@ -629,7 +629,7 @@ async def test_introduction_only_sent_once(turn_env):
 async def test_tool_error_is_captured(turn_env):
     """Test that tool execution errors are captured in AgentToolReturned."""
 
-    @loopback_tool()
+    @loopback_tool
     async def failing_tool(ctx) -> str:
         """Tool that always fails."""
         raise ValueError("Something went wrong!")
@@ -703,7 +703,7 @@ async def test_conversation_history_passed_to_llm(turn_env):
 async def test_streaming_tool_call_accumulation(turn_env):
     """Test that tool call arguments are accumulated across chunks."""
 
-    @loopback_tool()
+    @loopback_tool
     async def greet(ctx, name: Annotated[str, "Name"]) -> str:
         """Greet someone."""
         return f"Hello, {name}!"
@@ -760,7 +760,7 @@ async def test_loopback_tool_returns_coroutine(turn_env):
         await asyncio.sleep(0)  # Simulate async operation
         return "fetched data"
 
-    @loopback_tool()
+    @loopback_tool
     async def async_fetcher(ctx) -> str:
         """Fetch data asynchronously."""
         # Return a coroutine (simulating delegating to another async function)
@@ -798,7 +798,7 @@ async def test_loopback_tool_returns_async_iterable(turn_env):
         yield "item2"
         yield "item3"
 
-    @loopback_tool()
+    @loopback_tool
     def streaming_tool(ctx):
         """Return a stream of items."""
         return stream_items()
@@ -836,7 +836,7 @@ async def test_loopback_tool_returns_single_item_async_iterable(turn_env):
     async def single_item():
         yield "only one"
 
-    @loopback_tool()
+    @loopback_tool
     def single_item_tool(ctx):
         """Return a single item stream."""
         return single_item()
@@ -869,7 +869,7 @@ async def test_loopback_tool_returns_single_item_async_iterable(turn_env):
 async def test_loopback_tool_returns_bare_value(turn_env):
     """Test that loopback tools can return a plain value."""
 
-    @loopback_tool()
+    @loopback_tool
     def sync_tool(ctx) -> str:
         """Return a plain string."""
         return "plain value"
@@ -896,3 +896,123 @@ async def test_loopback_tool_returns_bare_value(turn_env):
     tool_result = next((o for o in outputs if isinstance(o, AgentToolReturned)), None)
     assert tool_result is not None
     assert tool_result.result == "plain value"
+
+
+# =============================================================================
+# Tests: Plain Functions Auto-Wrapped as Loopback Tools
+# =============================================================================
+
+
+async def test_plain_function_wrapped_as_loopback_tool():
+    """Test that plain functions passed to LlmAgent are wrapped as loopback tools."""
+    from line.v02.llm.tool_utils import ToolType
+
+    # Plain function without any decorator
+    async def my_tool(ctx, query: Annotated[str, "Search query"]) -> str:
+        """Search for something."""
+        return f"Results for: {query}"
+
+    agent = LlmAgent(model="test-model", tools=[my_tool])
+
+    # Verify the tool was wrapped
+    assert len(agent.tools) == 1
+    tool = agent.tools[0]
+
+    # Should be a FunctionTool
+    assert isinstance(tool, FunctionTool)
+
+    # Should be loopback type
+    assert tool.tool_type == ToolType.LOOPBACK
+
+    # Name and description should come from the function
+    assert tool.name == "my_tool"
+    assert tool.description == "Search for something."
+
+    # Parameters should be extracted
+    assert "query" in tool.parameters
+    assert tool.parameters["query"].description == "Search query"
+
+
+async def test_plain_function_works_as_loopback_tool(turn_env):
+    """Test that plain functions work end-to-end as loopback tools."""
+
+    # Plain function without decorator
+    async def get_info(ctx, topic: Annotated[str, "Topic to look up"]) -> str:
+        """Look up information about a topic."""
+        return f"Info about {topic}: It's great!"
+
+    # Response 1: LLM calls the tool
+    # Response 2: LLM generates final text after seeing tool result
+    responses = [
+        [
+            StreamChunk(text="Looking that up. "),
+            StreamChunk(
+                tool_calls=[
+                    ToolCall(
+                        id="call_1",
+                        name="get_info",
+                        arguments='{"topic": "Python"}',
+                        is_complete=True,
+                    )
+                ]
+            ),
+            StreamChunk(is_final=True),
+        ],
+        [
+            StreamChunk(text="Python is great!"),
+            StreamChunk(is_final=True),
+        ],
+    ]
+
+    agent, mock_llm = create_agent_with_mock(responses, tools=[get_info])
+
+    outputs = await collect_outputs(
+        agent,
+        turn_env,
+        UserTextSent(
+            content="Tell me about Python",
+            history=[SpecificUserTextSent(content="Tell me about Python")],
+        ),
+    )
+
+    # Should work like a loopback tool
+    assert isinstance(outputs[0], AgentSendText)
+    assert outputs[0].text == "Looking that up. "
+
+    assert isinstance(outputs[1], AgentToolCalled)
+    assert outputs[1].tool_name == "get_info"
+
+    assert isinstance(outputs[2], AgentToolReturned)
+    assert outputs[2].result == "Info about Python: It's great!"
+
+    assert isinstance(outputs[3], AgentSendText)
+    assert outputs[3].text == "Python is great!"
+
+    # LLM called twice (tool result fed back)
+    assert mock_llm._call_count == 2
+
+
+async def test_mixed_decorated_and_plain_functions(turn_env):
+    """Test that decorated and plain functions can be mixed."""
+    from line.v02.llm.tool_utils import ToolType
+
+    @loopback_tool
+    async def decorated_tool(ctx) -> str:
+        """A decorated tool."""
+        return "decorated"
+
+    async def plain_tool(ctx) -> str:
+        """A plain tool."""
+        return "plain"
+
+    agent = LlmAgent(model="test-model", tools=[decorated_tool, plain_tool])
+
+    assert len(agent.tools) == 2
+
+    # Both should be loopback tools
+    assert agent.tools[0].tool_type == ToolType.LOOPBACK
+    assert agent.tools[1].tool_type == ToolType.LOOPBACK
+
+    # Names should be correct
+    assert agent.tools[0].name == "decorated_tool"
+    assert agent.tools[1].name == "plain_tool"

@@ -38,13 +38,15 @@ from line.v02.llm.agent import (
 )
 from line.v02.llm.config import LlmConfig
 from line.v02.llm.provider import LLMProvider, Message, ToolCall
+from line.v02.llm.tool_types import loopback_tool
 from line.v02.llm.tool_utils import FunctionTool, ToolType, construct_function_tool
 from line.v02.llm.tools import WebSearchTool
 
 T = TypeVar("T")
 
 # Type alias for tools that can be passed to LlmAgent
-ToolSpec = Union[FunctionTool, WebSearchTool]
+# Plain callables are automatically wrapped as loopback tools
+ToolSpec = Union[FunctionTool, WebSearchTool, Callable]
 
 
 def _check_web_search_support(model: str) -> bool:
@@ -148,8 +150,11 @@ class LlmAgent:
                     fallback_tool = _web_search_tool_to_function_tool(tool)
                     self._tools.append(fallback_tool)
                     logger.info(f"Model {model} doesn't support native web search, using fallback tool")
-            else:
+            elif isinstance(tool, FunctionTool):
                 self._tools.append(tool)
+            else:
+                # Plain callable - wrap as loopback tool
+                self._tools.append(loopback_tool(tool))
 
         self._tool_map: Dict[str, FunctionTool] = {t.name: t for t in self._tools}
         self._llm = LLMProvider(

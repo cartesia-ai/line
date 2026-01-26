@@ -20,13 +20,13 @@ GEMINI_API_KEY=your-key uv run python main.py
 
 ### The Handoff Tool
 
-The `echo` tool is decorated with `@handoff_tool()`, which means:
+The `echo` tool is decorated with `@handoff_tool`, which means:
 1. When called, it takes over processing of all future events
 2. The LLM is no longer involved after the handoff
 3. The tool receives an `event` parameter for each subsequent user input
 
 ```python
-@handoff_tool()
+@handoff_tool
 async def echo(ctx: ToolEnv, prefix: Annotated[str, "A prefix to add..."], event):
     """Echo the user's message back to them with a prefix."""
     if isinstance(event, AgentHandedOff):

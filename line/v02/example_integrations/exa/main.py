@@ -43,7 +43,7 @@ MAX_OUTPUT_TOKENS = 300
 TEMPERATURE = 0.7
 
 
-@loopback_tool()
+@loopback_tool
 async def web_search(
     ctx: ToolEnv,
     query: Annotated[

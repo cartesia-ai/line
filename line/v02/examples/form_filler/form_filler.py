@@ -126,7 +126,7 @@ class FormFiller:
     def record_answer_tool(self):
         form = self
 
-        @loopback_tool()
+        @loopback_tool
         async def record_answer(
             ctx: ToolEnv,
             answer: Annotated[str, "The user's answer extracted from their response"],
