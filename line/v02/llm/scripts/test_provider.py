@@ -49,7 +49,7 @@ from line.v02.llm.tools import web_search
 # =============================================================================
 
 
-@loopback_tool()
+@loopback_tool
 async def get_weather(ctx, city: Annotated[str, "City name"]) -> str:
     """Get the current weather for a city."""
     # Simulated weather data
@@ -63,7 +63,7 @@ async def get_weather(ctx, city: Annotated[str, "City name"]) -> str:
     return weather_data.get(city_lower, f"Weather data not available for {city}")
 
 
-@loopback_tool()
+@loopback_tool
 async def calculate(ctx, expression: Annotated[str, "Math expression to evaluate"]) -> str:
     """Evaluate a mathematical expression."""
     try:

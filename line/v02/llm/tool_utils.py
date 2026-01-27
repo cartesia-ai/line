@@ -9,12 +9,12 @@ Parameter syntax:
     def my_tool(ctx: ToolEnv, arg: Annotated[str, "this field is required"]):
         ...
 
-    # Optional parameter (using Optional type)
-    def my_tool(ctx: ToolEnv, arg: Annotated[Optional[str], "this field is optional"]):
+    # Optional parameter with default value (required is based on presence of default, not Optional type)
+    def my_tool(ctx: ToolEnv, arg: Annotated[str, "has a default"] = "default"):
         ...
 
-    # Optional parameter with default value
-    def my_tool(ctx: ToolEnv, arg: Annotated[str, "has a default"] = "default"):
+    # Optional[T] is unwrapped to T but does NOT make param optional - use a default for that
+    def my_tool(ctx: ToolEnv, arg: Annotated[Optional[str], "still required, allows None"]):
         ...
 
     # Enum constraint using Literal
@@ -94,9 +94,9 @@ def _extract_parameters(func: Callable) -> Dict[str, ParameterInfo]:
     """Extract parameter information from the function signature.
 
     Supports:
-        - Annotated[type, "description"] for required parameters
-        - Annotated[Optional[type], "description"] for optional parameters
-        - param: type = default for optional parameters with defaults
+        - Annotated[type, "description"] for parameters with descriptions
+        - param: type = default for optional parameters (required is based on default presence)
+        - Optional[type] is unwrapped to type but does NOT affect required status
         - Annotated[Literal["a", "b"], "description"] for enum constraints
     """
     params = {}
@@ -136,9 +136,9 @@ def _extract_parameters(func: Callable) -> Dict[str, ParameterInfo]:
         if is_optional_type:
             actual_type = _unwrap_optional(actual_type)
 
-        # Determine if required and get default
+        # Determine if required based solely on presence of default value
         has_default = param.default is not Parameter.empty
-        required = not has_default and not is_optional_type
+        required = not has_default
         default_value = param.default if has_default else None
 
         params[param_name] = ParameterInfo(

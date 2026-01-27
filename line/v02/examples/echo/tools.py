@@ -7,7 +7,7 @@ from line.v02.llm import handoff_tool
 from line.v02.llm.agent import ToolEnv
 
 
-@handoff_tool()
+@handoff_tool
 async def echo(ctx: ToolEnv, prefix: Annotated[str, "A prefix to add before each echoed message"], event):
     """Echo the user's message back to them with a prefix."""
     if isinstance(event, AgentHandedOff):

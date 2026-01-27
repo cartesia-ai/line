@@ -363,21 +363,21 @@ class TestConversationRunner:
 
         assert content == []
 
-    def test_wrap_with_history_updates_history(self):
-        """Verify _wrap_with_history returns updated history."""
+    def test_process_specific_input_event_updates_history(self):
+        """Verify _process_specific_input_event returns updated history."""
         ws = create_mock_websocket()
         runner = ConversationRunner(ws, noop_agent, env)
 
         initial_history: List[SpecificInputEvent] = []
         event = SpecificCallStarted()
 
-        result_event, new_history = runner._wrap_with_history(initial_history, event)
+        result_event, new_history = runner._process_specific_input_event(initial_history, event)
 
         assert len(new_history) == 1
         assert new_history[0] is event
         assert isinstance(result_event, CallStarted)
 
-    def test_wrap_with_history_preserves_existing_events(self):
+    def test_process_specific_input_event_preserves_existing_events(self):
         """Verify existing history is preserved when adding new events."""
         ws = create_mock_websocket()
         runner = ConversationRunner(ws, noop_agent, env)
@@ -385,7 +385,7 @@ class TestConversationRunner:
         existing = [SpecificCallStarted(), SpecificUserTurnStarted()]
         new_event = SpecificUserTextSent(content="test")
 
-        _, new_history = runner._wrap_with_history(existing, new_event)
+        _, new_history = runner._process_specific_input_event(existing, new_event)
 
         assert len(new_history) == 3
         assert new_history[0] is existing[0]

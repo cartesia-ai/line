@@ -12,12 +12,12 @@ from line.v02.llm import (
 )
 
 # Define tools
-@loopback_tool()
+@loopback_tool
 async def get_weather(ctx, city: Annotated[str, "City name"]) -> str:
     """Get weather for a city."""
     return f"72°F in {city}"
 
-@passthrough_tool()
+@passthrough_tool
 async def end_call(ctx, message: Annotated[str, "Goodbye message"]):
     """End the call."""
     yield AgentSendText(text=message)
@@ -51,7 +51,7 @@ See [LiteLLM docs](https://docs.litellm.ai/docs/providers) for 100+ more provide
 Result is sent back to the LLM for continued generation. Use for information retrieval.
 
 ```python
-@loopback_tool()
+@loopback_tool
 async def lookup_order(ctx, order_id: Annotated[str, "Order ID"]) -> str:
     """Look up order status."""
     order = await db.get_order(order_id)
@@ -63,7 +63,7 @@ async def lookup_order(ctx, order_id: Annotated[str, "Order ID"]) -> str:
 Response bypasses the LLM and goes directly to the user. Use for deterministic actions.
 
 ```python
-@passthrough_tool()
+@passthrough_tool
 async def transfer_call(ctx, department: Annotated[str, "Department name"]):
     """Transfer to another department."""
     yield AgentSendText(text=f"Transferring to {department}...")
@@ -76,7 +76,7 @@ Transfers control to another agent. After handoff, all future input events are p
 handoff tool, which routes them to the target agent. Use for multi-agent workflows.
 
 ```python
-@handoff_tool()
+@handoff_tool
 async def transfer_to_billing(
     ctx,
     reason: Annotated[str, "Reason for transfer"],
@@ -101,7 +101,7 @@ The `event` parameter is required for handoff tools:
 Use `Annotated` with a string description to define parameters:
 
 ```python
-@loopback_tool()
+@loopback_tool
 async def search_products(
     ctx,
     query: Annotated[str, "Search query"],                                    # Required
@@ -118,7 +118,7 @@ async def search_products(
 Tools receive a `ToolEnv` object:
 
 ```python
-@loopback_tool()
+@loopback_tool
 async def my_tool(ctx: ToolEnv, ...) -> str:
     # Access turn environment (session metadata)
     print(ctx.turn_env)
@@ -153,6 +153,40 @@ config = LlmConfig(
 )
 ```
 
+### Creating Config from CallRequest
+
+Use `LlmConfig.from_call_request()` to automatically extract configuration from incoming call requests with sensible defaults:
+
+```python
+from line.v02.llm import LlmAgent, LlmConfig
+
+async def get_agent(env, call_request):
+    return LlmAgent(
+        model="gemini/gemini-2.0-flash",
+        tools=[...],
+        config=LlmConfig.from_call_request(call_request),
+    )
+```
+
+**Priority chain** (highest to lowest):
+1. **CallRequest value** - If the API provides `system_prompt` or `introduction`
+2. **User fallback** - Your app's custom fallbacks via `fallback_system_prompt` / `fallback_introduction`
+3. **SDK default** - Built-in defaults (`FALLBACK_SYSTEM_PROMPT`, `FALLBACK_INTRODUCTION`)
+
+```python
+# Provide custom fallbacks for your app (used when CallRequest doesn't specify)
+config = LlmConfig.from_call_request(
+    call_request,
+    fallback_system_prompt="You are a sales assistant for Acme Corp.",
+    fallback_introduction="Hi! How can I help with your purchase today?",
+    temperature=0.7,  # Additional LlmConfig options
+)
+```
+
+**Empty string handling**:
+- `system_prompt=""` is treated as None and falls back to defaults (a valid system prompt is always required)
+- `introduction=""` is preserved (agent waits for user to speak first rather than using a default)
+
 ## Streaming
 
 Responses stream automatically. Tool calls arrive incrementally:
@@ -180,7 +214,7 @@ async for output in agent.process(env, event):
 - `AgentSendText` - Send text to user
 - `AgentEndCall` - End the call
 - `AgentTransferCall` - Transfer call
-- `AgentSendDTMF` - Send DTMF tones
+- `AgentSendDtmf` - Send DTMF tones
 - `AgentToolCalled` - Tool was called
 - `AgentToolReturned` - Tool returned result
 

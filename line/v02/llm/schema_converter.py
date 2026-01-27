@@ -18,7 +18,7 @@ Example:
         function_tool_to_gemini,
     )
 
-    @loopback_tool()
+    @loopback_tool
     async def my_tool(ctx, param: Annotated[str, "Parameter description"]):
         '''Tool description'''
         ...
@@ -161,7 +161,7 @@ def function_tool_to_openai(
 
     Example:
         ```python
-        @loopback_tool()
+        @loopback_tool
         async def get_weather(ctx, city: Annotated[str, "City name"]):
             '''Get the weather'''
             ...
@@ -234,7 +234,7 @@ def function_tool_to_anthropic(tool: FunctionTool) -> Dict[str, Any]:
 
     Example:
         ```python
-        @loopback_tool()
+        @loopback_tool
         async def get_weather(ctx, city: Annotated[str, "City name"]):
             '''Get the weather'''
             ...
@@ -271,7 +271,7 @@ def function_tool_to_gemini(tool: FunctionTool) -> Any:
 
     Example:
         ```python
-        @loopback_tool()
+        @loopback_tool
         async def get_weather(ctx, city: Annotated[str, "City name"]):
             '''Get the weather'''
             ...
