@@ -20,14 +20,7 @@ async def get_agent(env: AgentEnv, call_request: CallRequest):
         model="gemini/gemini-2.0-flash",
         api_key=os.getenv("GEMINI_API_KEY"),
         tools=[end_call],
-        config=LlmConfig(
-            system_prompt=call_request.agent.system_prompt
-            or "You are a friendly and helpful assistant. Have a natural conversation with the user.",
-            # Empty string = agent waits for user to speak first; non-empty = agent speaks first
-            introduction=call_request.agent.introduction
-            if call_request.agent.introduction is not None
-            else "Hello! I'm your AI assistant. How can I help you today?",
-        ),
+        config=LlmConfig.from_call_request(call_request),
     )
 
 
