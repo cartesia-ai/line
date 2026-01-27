@@ -10,6 +10,7 @@ dependencies = [
     "loguru",
     "pydantic",
     "python-dotenv",
+    "phonenumbers>=9.0.22",
 ]
 
 [build-system]
