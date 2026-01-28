@@ -126,11 +126,9 @@ class GuardrailsWrapper:
             return
 
         # For user text events, apply preprocessing
-        logger.info(f"Processing user text event: {event}")
         if isinstance(event, UserTurnEnded):
             # Extract user text from history (last user message)
             user_text = self._extract_user_text(event)
-            logger.info(f"User text: {user_text}")
 
             if user_text:
                 # LLM-based guardrail checks (batched for efficiency)
@@ -239,8 +237,19 @@ Respond with ONLY a JSON object (no markdown, no explanation):
             return GuardrailCheckResult()
 
     def _extract_user_text(self, event: UserTurnEnded) -> Optional[str]:
-        """Extract the latest user text from the event."""
-        return event.content[0].content if event.content else None
+        """Extract user text from the event, ignoring DTMF inputs."""
+        if not event.content:
+            return None
+        
+        # Collect all text content, filtering out DTMF
+        text_parts = []
+        for item in event.content:
+            # SpecificUserTextSent has 'content', SpecificUserDtmfSent has 'button'
+            if hasattr(item, 'content'):
+                text_parts.append(item.content)
+        
+        # Return concatenated text if any exists
+        return " ".join(text_parts) if text_parts else None
 
     async def cleanup(self) -> None:
         """Clean up resources."""
