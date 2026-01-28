@@ -52,12 +52,6 @@ class AgentSendDtmf(BaseModel):
     button: str
 
 
-class AgentHandedOff(BaseModel):
-    """Event emitted when control is transferred to the tool target."""
-
-    type: Literal["agent_handed_off"] = "agent_handed_off"
-
-
 class LogMetric(BaseModel):
     type: Literal["log_metric"] = "log_metric"
     name: str
@@ -98,6 +92,13 @@ class SpecificCallStarted(BaseModel):
 
 class SpecificCallEnded(BaseModel):
     type: Literal["call_ended"] = "call_ended"
+    event_id: str = Field(default_factory=_generate_event_id)
+
+
+class SpecificAgentHandedOff(BaseModel):
+    """Event emitted when control is transferred to the tool target."""
+
+    type: Literal["agent_handed_off"] = "agent_handed_off"
     event_id: str = Field(default_factory=_generate_event_id)
 
 
@@ -154,6 +155,7 @@ class SpecificAgentTurnEnded(BaseModel):
 
 SpecificInputEvent = Union[
     SpecificCallStarted,
+    SpecificAgentHandedOff,
     SpecificUserTurnStarted,
     SpecificUserDtmfSent,
     SpecificUserTextSent,
@@ -203,6 +205,10 @@ class AgentDtmfSent(SpecificAgentDtmfSent):
 
 
 class AgentTurnEnded(SpecificAgentTurnEnded):
+    history: List[SpecificInputEvent] = Field(default_factory=list)
+
+
+class AgentHandedOff(SpecificAgentHandedOff):
     history: List[SpecificInputEvent] = Field(default_factory=list)
 
 

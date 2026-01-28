@@ -1480,7 +1480,7 @@ class TestBuildFullHistory:
         user0 = SpecificUserTextSent(content="Get weather")
         input_history = [
             user0,
-            # These are contiguous so they get concatenated during preprocessing
+            # Input events are NOT concatenated; each is matched separately
             SpecificAgentTextSent(content="The weather "),
             SpecificAgentTextSent(content="is sunny today!"),
         ]
@@ -1495,13 +1495,15 @@ class TestBuildFullHistory:
 
         result = _build_full_history(input_history, local_history, current_event_id="current")
 
-        # User, ToolCalled, ToolReturned, then text (exact match after concat)
-        assert len(result) == 4
+        # User, ToolCalled, ToolReturned, then two text events (prefix match then suffix)
+        assert len(result) == 5
         assert isinstance(result[0], SpecificUserTextSent)
         assert isinstance(result[1], AgentToolCalled)
         assert isinstance(result[2], AgentToolReturned)
         assert isinstance(result[3], SpecificAgentTextSent)
-        assert result[3].content == "The weather is sunny today!"
+        assert result[3].content == "The weather "
+        assert isinstance(result[4], SpecificAgentTextSent)
+        assert result[4].content == "is sunny today!"
 
     async def test_prefix_match_single_input_split(self):
         """Single input text that is prefix of local text - suffix is dropped."""
@@ -1546,30 +1548,6 @@ class TestBuildFullHistory:
         assert isinstance(result[4], SpecificUserTextSent)
         assert result[5].content == "C"
 
-    async def test_preprocessing_concat_then_exact_match(self):
-        """Preprocessing concatenates both sides, resulting in exact match."""
-        agent0 = SpecificAgentTextSent(content="Hello")
-        input_history = [
-            # These get concatenated to "Hello world"
-            agent0,
-            SpecificAgentTextSent(content=" world"),
-        ]
-        local_history = self._annotate(
-            [
-                # These get concatenated to "Hello world"
-                AgentSendText(text="Hello"),
-                AgentSendText(text=" world"),
-            ],
-            event_id=agent0.event_id,
-        )
-
-        result = _build_full_history(input_history, local_history, current_event_id="current")
-
-        # After concatenation on both sides: exact match
-        assert len(result) == 1
-        assert isinstance(result[0], SpecificAgentTextSent)
-        assert result[0].content == "Hello world"
-
     async def test_preprocessing_local_longer_than_input(self):
         """Local text is longer than input after preprocessing - prefix match."""
         agent0 = SpecificAgentTextSent(content="Hello")  # Single event
@@ -1590,26 +1568,6 @@ class TestBuildFullHistory:
         assert len(result) == 1
         assert isinstance(result[0], SpecificAgentTextSent)
         assert result[0].content == "Hello"
-
-    async def test_preprocessing_input_concatenation(self):
-        """Input preprocessing concatenates before matching."""
-        agent0 = SpecificAgentTextSent(content="Hello")
-        input_history = [
-            # These will be concatenated to "Hello world!"
-            agent0,
-            SpecificAgentTextSent(content=" world!"),
-        ]
-        local_history = self._annotate(
-            [AgentSendText(text="Hello world!")],
-            event_id=agent0.event_id,
-        )
-
-        result = _build_full_history(input_history, local_history, current_event_id="current")
-
-        # After input concatenation, it's an exact match
-        assert len(result) == 1
-        assert isinstance(result[0], SpecificAgentTextSent)
-        assert result[0].content == "Hello world!"
 
     async def test_pre_tool_call_result_grouped_with_agent_text(self):
         """Tool call and result are grouped together in the final history."""
@@ -1710,7 +1668,7 @@ class TestBuildFullHistory:
 
         result = _build_full_history(input_history, local_history, current_event_id="current")
 
-        # After input concatenation, it's an exact match
+        # Tool call interpolated around matched text
         assert len(result) == 5
         assert isinstance(result[0], SpecificUserTextSent)
         assert isinstance(result[1], AgentToolCalled)
