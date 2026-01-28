@@ -3,7 +3,7 @@ name = "counter-agent"
 version = "0.1.0"
 description = "Voice agent that counts from 1 to a maximum value"
 dependencies = [
-    "cartesia-line==0.1.10",
+    "cartesia-line==0.1.12",
     "uvicorn[standard]",
 ]
 
