@@ -36,6 +36,7 @@ from line.harness_types import (
 )
 from line.v02.agent import Agent, AgentSpec, EventFilter, TurnEnv
 from line.v02.events import (
+    AddToHistory,
     AgentDtmfSent,
     AgentEndCall,
     AgentSendDtmf,
@@ -354,6 +355,12 @@ class ConversationRunner:
         async def runner():
             try:
                 async for output in self.agent_callable(turn_env, event):
+                    # Handle AddToHistory - add items to history without sending over websocket
+                    if isinstance(output, AddToHistory):
+                        self.history.extend(output.items)
+                        logger.debug(f"Added {len(output.items)} items to history")
+                        continue
+
                     # Buffer AgentSendText content for whitespace interpolation
                     if isinstance(output, AgentSendText):
                         self.emitted_agent_text += output.text

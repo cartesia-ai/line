@@ -11,6 +11,7 @@ from typing import Annotated, List, Optional
 
 import pytest
 
+from line.v02.events import AddToHistory
 from line.v02.llm.agent import (
     AgentEndCall,
     AgentHandedOff,
@@ -22,8 +23,11 @@ from line.v02.llm.agent import (
     SpecificAgentTextSent,
     SpecificCallEnded,
     SpecificUserTextSent,
+    SpecificUserTurnEnded,
+    SpecificUserTurnStarted,
     TurnEnv,
     UserTextSent,
+    UserTurnEnded,
 )
 from line.v02.llm.config import LlmConfig
 from line.v02.llm.llm_agent import LlmAgent, _build_full_history
@@ -1596,3 +1600,262 @@ class TestBuildFullHistory:
         assert isinstance(result[2], SpecificAgentTextSent)
         assert isinstance(result[3], AgentToolReturned)
         assert isinstance(result[4], SpecificUserTextSent)
+
+
+# =============================================================================
+# Tests: AddToHistory Event Integration
+# =============================================================================
+
+
+class TestAddToHistoryIntegration:
+    """Integration tests for AddToHistory event handling.
+
+    These tests verify that wrappers can inject synthetic events into history
+    and that subsequent events correctly include the injected history items.
+    """
+
+    async def test_wrapper_injects_history_to_inner_agent(self, anyio_backend):
+        """Test that a wrapper can inject history items that the inner agent receives."""
+        # Track what history the inner agent receives
+        received_histories = []
+
+        @loopback_tool
+        async def record_history(ctx) -> str:
+            """Tool that records the history it receives."""
+            return "recorded"
+
+        # Create a wrapper that injects synthetic history before forwarding
+        class HistoryInjectingWrapper:
+            def __init__(self, inner_agent):
+                self.inner_agent = inner_agent
+
+            async def process(self, env, event):
+                # Inject synthetic user text into history
+                synthetic_items = [
+                    SpecificUserTurnStarted(),
+                    SpecificUserTextSent(content="injected from wrapper"),
+                    SpecificUserTurnEnded(content=[SpecificUserTextSent(content="injected from wrapper")]),
+                ]
+
+                # Yield AddToHistory first
+                yield AddToHistory(items=synthetic_items)
+
+                # Create updated event with injected history for inner agent
+                updated_history = list(event.history) + synthetic_items
+                updated_event = event.model_copy(update={"history": updated_history})
+
+                # Record history received by inner agent
+                received_histories.append(updated_event.history)
+
+                # Forward to inner agent
+                async for output in self.inner_agent.process(env, updated_event):
+                    yield output
+
+        # Response: just text, no tool call
+        responses = [
+            [
+                StreamChunk(text="Got it!"),
+                StreamChunk(is_final=True),
+            ]
+        ]
+
+        inner_agent, _ = create_agent_with_mock(responses, tools=[record_history])
+        wrapper = HistoryInjectingWrapper(inner_agent)
+
+        # Process an event through the wrapper
+        event = UserTextSent(
+            content="original message",
+            history=[SpecificUserTextSent(content="original message")],
+        )
+
+        outputs = []
+        async for output in wrapper.process(TurnEnv(), event):
+            outputs.append(output)
+
+        # Verify AddToHistory was yielded
+        assert any(isinstance(o, AddToHistory) for o in outputs)
+        add_to_history = next(o for o in outputs if isinstance(o, AddToHistory))
+        assert len(add_to_history.items) == 3
+        assert add_to_history.items[1].content == "injected from wrapper"
+
+        # Verify inner agent received updated history
+        assert len(received_histories) == 1
+        inner_history = received_histories[0]
+
+        # Should have: original message + 3 injected items
+        assert len(inner_history) == 4
+        assert inner_history[0].content == "original message"
+        assert isinstance(inner_history[1], SpecificUserTurnStarted)
+        assert inner_history[2].content == "injected from wrapper"
+        assert isinstance(inner_history[3], SpecificUserTurnEnded)
+
+    async def test_dtmf_wrapper_pattern(self, anyio_backend):
+        """Test the DTMF wrapper pattern: collect input, inject history, forward to agent."""
+
+        # Simulate DTMF wrapper that converts digits to text
+        class DtmfWrapper:
+            def __init__(self, inner_agent):
+                self.inner_agent = inner_agent
+                self.digit_buffer = []
+
+            async def process(self, env, event):
+                # Simulate receiving UserTurnEnded with DTMF digits collected
+                if isinstance(event, UserTurnEnded):
+                    # Pretend we collected "4155551234" from DTMF
+                    formatted_text = "4 1 5 5 5 5 1 2 3 4"
+
+                    # Create synthetic user turn
+                    user_text = SpecificUserTextSent(content=formatted_text)
+                    synthetic_items = [
+                        SpecificUserTurnStarted(),
+                        user_text,
+                        SpecificUserTurnEnded(content=[user_text]),
+                    ]
+
+                    # Yield AddToHistory to update central history
+                    yield AddToHistory(items=synthetic_items)
+
+                    # Create new event with updated history for inner agent
+                    updated_event = UserTurnEnded(
+                        content=[user_text],
+                        history=list(event.history) + synthetic_items,
+                    )
+
+                    async for output in self.inner_agent.process(env, updated_event):
+                        yield output
+                else:
+                    async for output in self.inner_agent.process(env, event):
+                        yield output
+
+        # Inner agent responds to the phone number
+        responses = [
+            [
+                StreamChunk(text="Got your phone number: 415-555-1234"),
+                StreamChunk(is_final=True),
+            ]
+        ]
+
+        inner_agent, mock_llm = create_agent_with_mock(responses)
+        wrapper = DtmfWrapper(inner_agent)
+
+        # Process UserTurnEnded (simulating end of DTMF collection)
+        event = UserTurnEnded(content=[], history=[])
+
+        outputs = []
+        async for output in wrapper.process(TurnEnv(), event):
+            outputs.append(output)
+
+        # Should have AddToHistory + AgentSendText
+        assert len(outputs) == 2
+
+        # First output is AddToHistory
+        assert isinstance(outputs[0], AddToHistory)
+        assert len(outputs[0].items) == 3
+        assert outputs[0].items[1].content == "4 1 5 5 5 5 1 2 3 4"
+
+        # Second output is agent response
+        assert isinstance(outputs[1], AgentSendText)
+        assert "415-555-1234" in outputs[1].text
+
+        # Verify LLM received the formatted phone number in messages
+        messages = mock_llm._recorded_messages[0]
+        user_message = next((m for m in messages if m.role == "user"), None)
+        assert user_message is not None
+        assert "4 1 5 5 5 5 1 2 3 4" in user_message.content
+
+    async def test_multiple_history_injections_accumulate(self, anyio_backend):
+        """Test that multiple AddToHistory events accumulate correctly."""
+        injection_count = 0
+
+        class MultiInjectWrapper:
+            def __init__(self, inner_agent):
+                self.inner_agent = inner_agent
+
+            async def process(self, env, event):
+                nonlocal injection_count
+
+                # Inject first item
+                yield AddToHistory(items=[SpecificUserTextSent(content="first injection")])
+                injection_count += 1
+
+                # Inject second item
+                yield AddToHistory(items=[SpecificUserTextSent(content="second injection")])
+                injection_count += 1
+
+                # Forward to inner agent with both injections in history
+                updated_history = list(event.history) + [
+                    SpecificUserTextSent(content="first injection"),
+                    SpecificUserTextSent(content="second injection"),
+                ]
+                updated_event = event.model_copy(update={"history": updated_history})
+
+                async for output in self.inner_agent.process(env, updated_event):
+                    yield output
+
+        responses = [[StreamChunk(text="Response"), StreamChunk(is_final=True)]]
+
+        inner_agent, mock_llm = create_agent_with_mock(responses)
+        wrapper = MultiInjectWrapper(inner_agent)
+
+        event = UserTextSent(content="test", history=[SpecificUserTextSent(content="test")])
+
+        outputs = []
+        async for output in wrapper.process(TurnEnv(), event):
+            outputs.append(output)
+
+        # Should have 2 AddToHistory events + 1 AgentSendText
+        add_history_events = [o for o in outputs if isinstance(o, AddToHistory)]
+        assert len(add_history_events) == 2
+        assert add_history_events[0].items[0].content == "first injection"
+        assert add_history_events[1].items[0].content == "second injection"
+
+        # Verify both injections reached the LLM
+        messages = mock_llm._recorded_messages[0]
+        user_messages = [m.content for m in messages if m.role == "user"]
+        # The history should contain test + first injection + second injection
+        assert any("first injection" in content for content in user_messages)
+        assert any("second injection" in content for content in user_messages)
+
+    async def test_add_to_history_not_sent_to_websocket(self, anyio_backend):
+        """Test that ConversationRunner filters out AddToHistory and doesn't send it over websocket."""
+        from line.v02.voice_agent_app import AgentEnv, ConversationRunner
+
+        # Mock websocket that records sent messages
+        class MockWebSocket:
+            def __init__(self):
+                self.sent_messages = []
+
+            async def send_json(self, data):
+                self.sent_messages.append(data)
+
+        # Agent that yields AddToHistory followed by visible output
+        class TestAgent:
+            async def process(self, env, event):
+                # This should NOT be sent to websocket
+                yield AddToHistory(items=[SpecificUserTextSent(content="internal")])
+                # This SHOULD be sent to websocket
+                yield AgentSendText(text="visible response")
+
+        mock_ws = MockWebSocket()
+        runner = ConversationRunner(
+            websocket=mock_ws,
+            agent_spec=TestAgent(),
+            env=AgentEnv(),
+        )
+
+        # Trigger agent processing
+        event = UserTurnEnded(content=[], history=[])
+        await runner._start_agent_task(TurnEnv(), event)
+
+        # Wait for task to complete
+        if runner.agent_task:
+            await runner.agent_task
+
+        # Verify: only AgentSendText was sent to websocket, not AddToHistory
+        assert len(mock_ws.sent_messages) == 1
+        assert mock_ws.sent_messages[0]["type"] == "message"
+        assert mock_ws.sent_messages[0]["content"] == "visible response"
+
+        # Verify: AddToHistory items were added to runner's history
+        assert len(runner.history) == 1
+        assert runner.history[0].content == "internal"

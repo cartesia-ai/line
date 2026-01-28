@@ -65,6 +65,20 @@ class LogMessage(BaseModel):
     metadata: Optional[Dict[str, Any]] = None
 
 
+class AddToHistory(BaseModel):
+    """Request to add events to the conversation history.
+
+    This allows agents/wrappers to inject synthetic events into the central
+    history maintained by voice_agent_app. Useful for DTMF-to-text conversion
+    where the wrapper converts keypad input to text that should appear in history.
+
+    The items are added to history but not sent over websocket.
+    """
+
+    type: Literal["add_to_history"] = "add_to_history"
+    items: List["SpecificInputEvent"] = Field(default_factory=list)
+
+
 OutputEvent = Union[
     AgentSendText,
     AgentSendDtmf,
@@ -74,6 +88,7 @@ OutputEvent = Union[
     AgentToolReturned,
     LogMetric,
     LogMessage,
+    AddToHistory,
 ]
 
 
@@ -214,6 +229,7 @@ __all__ = [
     "AgentHandedOff",
     "LogMetric",
     "LogMessage",
+    "AddToHistory",
     "OutputEvent",
     # Input specific
     "SpecificCallStarted",

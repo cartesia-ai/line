@@ -1,21 +1,32 @@
 """
 Form Filler Example - Collects user information via YAML-defined form.
 
+This example demonstrates:
+- Loopback tools for structured data collection
+- DTMF input wrapper for phone numbers and dates
+- Users can speak answers OR enter them via phone keypad
+
 Run with: GEMINI_API_KEY=your-key uv run python main.py
 """
 
 import os
 from pathlib import Path
 
+from dtmf_input_wrapper import DtmfInputWrapper
 from form_filler import FormFiller
 from loguru import logger
 
 from line.call_request import CallRequest
+from line.v02.events import CallEnded, CallStarted, UserDtmfSent, UserTurnEnded, UserTurnStarted
 from line.v02.llm import LlmAgent, LlmConfig, end_call
 from line.v02.voice_agent_app import AgentEnv, VoiceAgentApp
 
 FORM_PATH = Path(__file__).parent / "schedule_form.yaml"
 
+# Event filters: run_filter triggers agent, cancel_filter interrupts it
+# We add UserDtmfSent to run_filter so the DTMF wrapper receives digit events
+RUN_ON = (CallStarted, UserTurnEnded, CallEnded, UserDtmfSent)
+CANCEL_ON = (UserTurnStarted,)
 
 USER_PROMPT = """### Your tone
 Be professional but conversational. Confirm answers when appropriate.
@@ -33,11 +44,9 @@ async def get_agent(env: AgentEnv, call_request: CallRequest):
     logger.info(f"Starting form filler call: {call_request.call_id}")
 
     form = FormFiller(str(FORM_PATH), system_prompt=USER_PROMPT)
-
-    # Get the first question to include in the introduction
     first_question = form.get_current_question_text()
 
-    return LlmAgent(
+    llm_agent = LlmAgent(
         model="gemini/gemini-2.0-flash",
         api_key=os.getenv("GEMINI_API_KEY"),
         tools=[form.record_answer_tool, end_call],
@@ -46,6 +55,8 @@ async def get_agent(env: AgentEnv, call_request: CallRequest):
             introduction=f"Hi! I'm here to collect some information from you. {first_question}",
         ),
     )
+
+    return (DtmfInputWrapper(llm_agent), RUN_ON, CANCEL_ON)
 
 
 app = VoiceAgentApp(get_agent=get_agent)

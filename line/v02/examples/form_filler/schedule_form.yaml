@@ -11,6 +11,10 @@ questionnaire:
       text: "And what is your date of birth?"
       type: "string"
       required: true
+      dtmf_input:
+        enabled: true
+        format: "MMDDYYYY"
+        hint: "Enter as month, day, year - for example, zero one one five one nine nine zero for January 15th, 1990"
 
     - id: "visit_type"
       text: "What type of appointment are you looking to schedule?"
@@ -118,6 +122,10 @@ questionnaire:
       text: "What's the best phone number to reach you if we need to confirm or reschedule?"
       type: "string"
       required: true
+      dtmf_input:
+        enabled: true
+        format: "phone"
+        hint: "Enter the digits of your phone number"
 
     - id: "additional_notes"
       text: "Is there anything else we should know before your appointment?"
