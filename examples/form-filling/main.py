@@ -6,7 +6,7 @@ from form_filling_node import FormFillingNode
 from google import genai
 
 from line import Bridge, CallRequest, VoiceAgentApp, VoiceAgentSystem
-from line.events import UserStartedSpeaking, UserStoppedSpeaking, UserTranscriptionReceived
+from line.events import AgentSpeechSent, UserStartedSpeaking, UserStoppedSpeaking, UserTranscriptionReceived
 
 gemini_client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
@@ -25,7 +25,7 @@ async def handle_new_call(system: VoiceAgentSystem, call_request: CallRequest):
     system.with_speaking_node(form_node, bridge=form_bridge)
 
     form_bridge.on(UserTranscriptionReceived).map(form_node.add_event)
-
+    form_bridge.on(AgentSpeechSent).map(form_node.add_event)
     (
         form_bridge.on(UserStoppedSpeaking)
         .interrupt_on(UserStartedSpeaking, handler=form_node.on_interrupt_generate)

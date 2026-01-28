@@ -6,7 +6,7 @@ import google.genai as genai
 from loguru import logger
 
 from line import Bridge, CallRequest, PreCallResult, VoiceAgentApp, VoiceAgentSystem
-from line.events import UserStartedSpeaking, UserStoppedSpeaking, UserTranscriptionReceived
+from line.events import AgentSpeechSent, UserStartedSpeaking, UserStoppedSpeaking, UserTranscriptionReceived
 
 gemini_client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
@@ -54,7 +54,7 @@ async def handle_new_call(system: VoiceAgentSystem, call_request: CallRequest):
     system.with_speaking_node(conversation_node, conversation_bridge)
 
     conversation_bridge.on(UserTranscriptionReceived).map(conversation_node.add_event)
-
+    conversation_bridge.on(AgentSpeechSent).map(conversation_node.add_event)
     (
         conversation_bridge.on(UserStoppedSpeaking)
         .interrupt_on(UserStartedSpeaking, handler=conversation_node.on_interrupt_generate)

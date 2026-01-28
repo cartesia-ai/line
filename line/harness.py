@@ -16,6 +16,7 @@ from line.events import (
     AgentSpeechSent,
     AgentStartedSpeaking,
     AgentStoppedSpeaking,
+    CustomReceived,
     DTMFInputEvent,
     UserStartedSpeaking,
     UserStoppedSpeaking,
@@ -25,6 +26,7 @@ from line.events import (
 from line.harness_types import (
     AgentSpeechInput,
     AgentStateInput,
+    CustomInput,
     DTMFInput,
     DTMFOutput,
     EndCallOutput,
@@ -78,6 +80,9 @@ class ConversationHarness:
         # State tracking
         self.is_running = False
 
+        # Lock to serialize WebSocket sends (prevents out-of-order delivery)
+        self._send_lock = asyncio.Lock()
+
     async def start(self):
         """
         Start the harness tasks for input and output processing
@@ -129,12 +134,13 @@ class ConversationHarness:
         return await self.input_queue.get()
 
     async def _send(self, output: OutputMessage):
-        try:
-            if not self.shutdown_event.is_set():
-                await self.websocket.send_json(output.model_dump())
-        except Exception as e:
-            logger.warning(f"Failed to send message via WebSocket: {e}")
-            self.shutdown_event.set()
+        async with self._send_lock:
+            try:
+                if not self.shutdown_event.is_set():
+                    await self.websocket.send_json(output.model_dump())
+            except Exception as e:
+                logger.warning(f"Failed to send message via WebSocket: {e}")
+                self.shutdown_event.set()
 
     async def end_call(self):
         """
@@ -269,6 +275,9 @@ class ConversationHarness:
         elif isinstance(message, DTMFInput):
             logger.info(f"🔔 DTMF received: {message.button}")
             return [DTMFInputEvent(button=message.button)]
+        elif isinstance(message, CustomInput):
+            logger.info(f"📦 Custom event received: {message.metadata}")
+            return [CustomReceived(metadata=message.metadata)]
         else:
             # Fallback for unknown types.
             logger.warning(f"Unknown message type: {type(message).__name__} ({message.model_dump_json()})")
