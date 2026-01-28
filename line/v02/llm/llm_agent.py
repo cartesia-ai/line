@@ -4,6 +4,7 @@ LlmAgent - An Agent implementation wrapping 100+ LLM providers via LiteLLM.
 See README.md for examples and documentation.
 """
 
+import asyncio
 import inspect
 import json
 from typing import (
@@ -44,6 +45,7 @@ from line.v02.llm.provider import LLMProvider, Message, ToolCall
 from line.v02.llm.tool_types import loopback_tool
 from line.v02.llm.tool_utils import FunctionTool, ToolType, construct_function_tool
 from line.v02.llm.tools import WebSearchTool
+from line.v02.utils import shield_awaitable
 
 T = TypeVar("T")
 
@@ -114,6 +116,16 @@ def _normalize_to_async_gen(
     return wrapper
 
 
+async def _wait_first(*awaitables: Awaitable[T]) -> T:
+    """Return the result of the first awaitable to complete.
+
+    Cancels all other awaitables once one completes.
+    """
+    tasks = [asyncio.ensure_future(a) for a in awaitables]
+    done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+    return done.pop().result()
+
+
 class LlmAgent:
     """
     Agent wrapping LLM providers via LiteLLM with tool calling support.
@@ -176,6 +188,13 @@ class LlmAgent:
         # Event ID of the current triggering input event (set on each process() call)
         self._current_event_id: str = ""
         self._handoff_target: Optional[AgentCallable] = None  # Normalized process function
+        # Background task for backgrounded tools - starts as a completed future
+        self._background_task: asyncio.Future[None] = asyncio.get_event_loop().create_future()
+        self._background_task.set_result(None)
+        # Queue for events from backgrounded tools that need to trigger loopback
+        self._background_event_queue: asyncio.Queue[tuple[AgentToolCalled, AgentToolReturned]] = (
+            asyncio.Queue()
+        )
 
         logger.info(f"LlmAgent initialized with model={self._model}, tools={[t.name for t in self._tools]}")
 
@@ -220,6 +239,7 @@ class LlmAgent:
 
         # Handle CallEnded
         if isinstance(event, CallEnded):
+            await self.cleanup()
             return
 
         async for output in self._generate_response(env, event):
@@ -228,7 +248,33 @@ class LlmAgent:
     async def _generate_response(self, env: TurnEnv, event: InputEvent) -> AsyncIterable[OutputEvent]:
         """Generate a response using the LLM."""
 
+        is_first_iteration = True
+        should_loopback = False
         for _iteration in range(self._max_tool_iterations):
+            # First, yield any pending events from backgrounded tools
+            # These events were produced since the last iteration (or from previous process() calls)
+            if is_first_iteration or should_loopback:
+                # Drain any immediately available events (non-blocking)
+                while not self._background_event_queue.empty():
+                    called_evt, returned_evt = self._background_event_queue.get_nowait()
+                    yield called_evt
+                    yield returned_evt
+            else:
+                # Wait for either: background task completes OR new event arrives
+                result = await _wait_first(
+                    self._background_event_queue.get(),
+                    self._background_task,
+                )
+                if result is None:
+                    # Background task completed with no more events - exit loop
+                    break
+                called_evt, returned_evt = result
+                yield called_evt
+                yield returned_evt
+
+            is_first_iteration = False
+            should_loopback = False
+
             messages = self._build_messages(event.history, self._local_history, self._current_event_id)
             tool_calls_dict: Dict[str, ToolCall] = {}
 
@@ -258,7 +304,6 @@ class LlmAgent:
                         for tc in chunk.tool_calls:
                             tool_calls_dict[tc.id] = tc
 
-            should_continue = False
             ctx = ToolEnv(turn_env=env)
 
             for tc in tool_calls_dict.values():
@@ -272,36 +317,51 @@ class LlmAgent:
 
                 tool_args = json.loads(tc.arguments) if tc.arguments else {}
 
-                tool_called_output = AgentToolCalled(
-                    tool_call_id=tc.id,
-                    tool_name=tc.name,
-                    tool_args=tool_args,
-                )
-                self._append_to_local_history(tool_called_output)
-                yield tool_called_output
+                normalized_func = _normalize_to_async_gen(tool.func)
+
+                # For backgrounded tools, we emit AgentToolCalled/AgentToolReturned pairs
+                # inside _execute_backgroundable_tool, not here
+                if tool.tool_type == ToolType.LOOPBACK and tool.is_background:
+                    # Backgroundable tool: run in a shielded task that survives cancellation
+                    # Each yielded value triggers a loopback with AgentToolCalled/AgentToolReturned pair
+                    self._execute_backgroundable_tool(normalized_func, ctx, tool_args, tc.id, tc.name)
+                    continue
 
                 try:
-                    normalized_func = _normalize_to_async_gen(tool.func)
-
                     if tool.tool_type == ToolType.LOOPBACK:
-                        # Collect results to send back to LLM
-                        results = []
-                        should_continue = True
+                        should_loopback = True
+                        # Regular loopback tool: collect results to send back to LLM
+                        n = 0
                         async for value in normalized_func(ctx, **tool_args):
-                            results.append(value)
+                            # Each yielded value gets a unique call ID
+                            call_id = f"{tc.id}-{n}"
+                            tool_called_output = AgentToolCalled(
+                                tool_call_id=call_id,
+                                tool_name=tc.name,
+                                tool_args=tool_args,
+                            )
+                            self._append_to_local_history(tool_called_output)
+                            yield tool_called_output
+
                             tool_returned_output = AgentToolReturned(
-                                tool_call_id=tc.id,
+                                tool_call_id=call_id,
                                 tool_name=tc.name,
                                 tool_args=tool_args,
                                 result=value,
                             )
                             self._append_to_local_history(tool_returned_output)
                             yield tool_returned_output
+                            n += 1
 
                     elif tool.tool_type == ToolType.PASSTHROUGH:
-                        async for evt in normalized_func(ctx, **tool_args):
-                            self._append_to_local_history(evt)
-                            yield evt
+                        # Emit AgentToolCalled before executing
+                        tool_called_output = AgentToolCalled(
+                            tool_call_id=tc.id,
+                            tool_name=tc.name,
+                            tool_args=tool_args,
+                        )
+                        self._append_to_local_history(tool_called_output)
+                        yield tool_called_output
                         tool_returned_output = AgentToolReturned(
                             tool_call_id=tc.id,
                             tool_name=tc.name,
@@ -311,7 +371,28 @@ class LlmAgent:
                         self._append_to_local_history(tool_returned_output)
                         yield tool_returned_output
 
+                        async for evt in normalized_func(ctx, **tool_args):
+                            self._append_to_local_history(evt)
+                            yield evt
+
                     elif tool.tool_type == ToolType.HANDOFF:
+                        # Emit AgentToolCalled before executing
+                        tool_called_output = AgentToolCalled(
+                            tool_call_id=tc.id,
+                            tool_name=tc.name,
+                            tool_args=tool_args,
+                        )
+                        self._append_to_local_history(tool_called_output)
+                        yield tool_called_output
+                        tool_returned_output = AgentToolReturned(
+                            tool_call_id=tc.id,
+                            tool_name=tc.name,
+                            tool_args=tool_args,
+                            result="success",
+                        )
+                        self._append_to_local_history(tool_returned_output)
+                        yield tool_returned_output
+
                         # AgentHandedOff input event is passed to the handoff target to execute the tool
                         specific_event = SpecificAgentHandedOff()
                         event = AgentHandedOff(
@@ -334,27 +415,12 @@ class LlmAgent:
 
                         self._handoff_target = handoff_target
 
-                        tool_returned_output = AgentToolReturned(
-                            tool_call_id=tc.id,
-                            tool_name=tc.name,
-                            tool_args=tool_args,
-                            result="success",
-                        )
-                        self._append_to_local_history(tool_returned_output)
-                        yield tool_returned_output
-
                 except Exception as e:
                     logger.error(f"Tool execution error: {e}")
-                    error_output = AgentToolReturned(
-                        tool_call_id=tc.id,
-                        tool_name=tc.name,
-                        tool_args=tool_args,
-                        result=f"error: {e}",
-                    )
-                    self._append_to_local_history(error_output)
-                    yield error_output
 
-            if not should_continue:
+            has_background_events = not self._background_event_queue.empty()
+            has_background_tasks = self._background_task.done() is False
+            if not (should_loopback or has_background_events or has_background_tasks):
                 break
 
     def _build_messages(
@@ -414,6 +480,66 @@ class LlmAgent:
                 )
         return messages
 
+    def _execute_backgroundable_tool(
+        self,
+        normalized_func: Callable[..., AsyncIterable[Any]],
+        ctx: ToolEnv,
+        tool_args: Dict[str, Any],
+        tc_id: str,
+        tc_name: str,
+    ) -> None:
+        """Execute a backgroundable tool in a shielded task, streaming events.
+
+        The task is protected from cancellation. If the calling coroutine is
+        cancelled, the task continues running and stores results to local_history.
+
+        Each value yielded by the tool produces a pair of:
+        - AgentToolCalled with tool_call_id = "{tc_id}-{n}"
+        - AgentToolReturned with the same tool_call_id
+
+        Events are added to _background_event_queue for loopback processing.
+        If the caller is cancelled, events continue to be produced and queued
+        for processing on the next process() call.
+        """
+        # Capture the event_id at the start - this is the triggering event
+        triggering_event_id = self._current_event_id
+
+        async def generate_events() -> None:
+            n = 0
+            async for value in normalized_func(ctx, **tool_args):
+                call_id = f"{tc_id}-{n}"
+
+                called = AgentToolCalled(
+                    tool_call_id=call_id,
+                    tool_name=tc_name,
+                    tool_args=tool_args,
+                )
+                returned = AgentToolReturned(
+                    tool_call_id=call_id,
+                    tool_name=tc_name,
+                    tool_args=tool_args,
+                    result=value,
+                )
+
+                # Add to local history with the triggering event_id
+                self._local_history.append((triggering_event_id, called))
+                self._local_history.append((triggering_event_id, returned))
+
+                # Add to queue for loopback processing
+                await self._background_event_queue.put((called, returned))
+                n += 1
+
+        # Chain this task after the current background task
+        # Use shield_awaitable to protect from cancellation
+        future = generate_events()
+        old_background_task = self._background_task
+
+        async def _new_background_task():
+            await old_background_task
+            await shield_awaitable(future)
+
+        self._background_task = asyncio.ensure_future(_new_background_task())
+
     def _append_to_local_history(self, event: OutputEvent) -> None:
         """Append an output event to local history, annotated with the triggering event_id."""
         self._local_history.append((self._current_event_id, event))
@@ -421,7 +547,8 @@ class LlmAgent:
     async def cleanup(self) -> None:
         """Clean up resources."""
         self._handoff_target = None
-        await self._llm.aclose()
+        # Wait for any remaining background task to complete
+        await asyncio.gather(self._llm.aclose(), self._background_task, return_exceptions=True)
 
 
 def _build_full_history(

@@ -273,7 +273,8 @@ async def test_loopback_tool_feeds_result_back_to_llm(turn_env):
     tool_result_msg = next((m for m in second_call_messages if m.role == "tool"), None)
     assert tool_result_msg is not None
     assert tool_result_msg.content == "72°F in NYC"
-    assert tool_result_msg.tool_call_id == "call_1"
+    # Tool call ID now uses -n suffix format for all loopback tool results
+    assert tool_result_msg.tool_call_id == "call_1-0"
 
 
 async def test_loopback_tool_multiple_iterations(turn_env):
@@ -465,13 +466,13 @@ async def test_handoff_tool_emits_handoff_event(turn_env):
     assert isinstance(outputs[1], AgentToolCalled)
     assert outputs[1].tool_name == "transfer_to_billing"
 
-    assert isinstance(outputs[2], AgentSendText)
-    assert outputs[2].text == "Transferring you now..."
+    assert isinstance(outputs[2], AgentToolReturned)
 
     assert isinstance(outputs[3], AgentSendText)
-    assert outputs[3].text == "Billing agent here!"
+    assert outputs[3].text == "Transferring you now..."
 
-    assert isinstance(outputs[4], AgentToolReturned)
+    assert isinstance(outputs[4], AgentSendText)
+    assert outputs[4].text == "Billing agent here!"
 
     # LLM called only once - handoff doesn't loop back
     assert mock_llm._call_count == 1
@@ -1480,7 +1481,6 @@ class TestBuildFullHistory:
         user0 = SpecificUserTextSent(content="Get weather")
         input_history = [
             user0,
-            # Input events are NOT concatenated; each is matched separately
             SpecificAgentTextSent(content="The weather "),
             SpecificAgentTextSent(content="is sunny today!"),
         ]
