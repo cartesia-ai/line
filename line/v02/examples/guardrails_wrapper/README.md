@@ -1,6 +1,6 @@
 # Guardrails Wrapper Example
 
-This example demonstrates how to create a wrapper around `LlmAgent` that preprocesses user inputs and postprocesses agent outputs. It showcases the flexibility of the Line SDK by implementing content filtering, PII protection, and conversation guardrails.
+This example demonstrates how to create a wrapper around `LlmAgent` that preprocesses user inputs. It showcases the flexibility of the Line SDK by implementing content filtering and conversation guardrails.
 
 ## Use Case
 
@@ -8,7 +8,6 @@ A Cartesia AI assistant that:
 - Answers questions about Cartesia, voice AI, and the competitive landscape
 - Uses web search for up-to-date information
 - Protects against toxic content, prompt injection, and off-topic conversations
-- Automatically redacts PII in both directions
 - Ends the call after repeated policy violations
 
 ## Architecture
@@ -22,34 +21,25 @@ User Input (speech → text)
 │  ┌─────────────────────────────┐   │
 │  │ PREPROCESS                  │   │
 │  │                             │   │
-│  │ 1. PII scan (regex)         │◄───── Fast, no LLM call
-│  │    → redact emails, phones, │   |
-│  │      SSNs, credit cards     │   |
-│  │ 2. Guardrail LLM (batched)  │◄───── Gemini Flash (fast/cheap)
-│  │    → toxicity check         │   |
-│  │    → prompt injection check │   |
-│  │    → off-topic check        │   |
-│  └─────────────────────────────┘   |
-│              ↓                     |
-│     ┌────────────────────┐         |
-│     │ Block?             │         |
-│     │ • Toxic → respond  │         |
-│     │ • Injection → warn │         |
-│     │ • Off-topic → warn │         |
-│     │ • 3 strikes → end  │         |
-│     └────────────────────┘         |
-│              ↓                     |
-│  ┌─────────────────────────────┐   |
+│  │ Guardrail LLM (batched)     │◄───── Gemini Flash (fast/cheap)
+│  │    → toxicity check         │   │
+│  │    → prompt injection check │   │
+│  │    → off-topic check        │   │
+│  └─────────────────────────────┘   │
+│              ↓                     │
+│     ┌────────────────────┐         │
+│     │ Block?             │         │
+│     │ • Toxic → respond  │         │
+│     │ • Injection → warn │         │
+│     │ • Off-topic → warn │         │
+│     │ • 3 strikes → end  │         │
+│     └────────────────────┘         │
+│              ↓                     │
+│  ┌─────────────────────────────┐   │
 │  │     Inner LlmAgent          │◄───── Anthropic Claude
-│  │     (Cartesia assistant     │   |
-│  │      with web search)       │   |
-│  └─────────────────────────────┘   |
-│              ↓                     |
-│  ┌─────────────────────────────┐   |
-│  │ POSTPROCESS                 │   |
-│  │ • PII scan → redact any     │   |
-│  │   leaked PII in responses   │   |
-│  └─────────────────────────────┘   |
+│  │     (Cartesia assistant     │   │
+│  │      with web search)       │   │
+│  └─────────────────────────────┘   │
 │                                    │
 └────────────────────────────────────┘
          ↓
@@ -60,7 +50,6 @@ User Input (speech → text)
 
 | Check | Method | Action on Violation |
 |-------|--------|---------------------|
-| **PII** | Regex (fast) | Redact and continue |
 | **Toxicity** | LLM classification | Block, send warning message |
 | **Prompt Injection** | LLM classification | Block, send warning message |
 | **Off-Topic** | LLM classification | Block, redirect to allowed topics |
@@ -120,7 +109,6 @@ GuardrailConfig(
     # Toggle individual checks
     block_toxicity=True,
     block_prompt_injection=True,
-    redact_pii=True,
     enforce_topic=True,
 
     # Escalation threshold
@@ -138,32 +126,21 @@ GuardrailConfig(
 
 ### 1. Preprocessing (Input)
 
-When a `UserTextSent` event arrives:
+When a `UserTurnEnded` event arrives:
 
-1. **PII Detection** (regex-based, fast):
-   - Scans for emails, phone numbers, SSNs, credit cards
-   - Redacts with placeholders like `[REDACTED_EMAIL]`
-   - Modifies the event before passing to inner agent
-
-2. **LLM Classification** (single batched call):
+1. **LLM Classification** (single batched call):
    - Sends user text to guardrail LLM
    - Returns JSON: `{toxic, prompt_injection, off_topic, reasoning}`
    - Uses temperature=0 for deterministic classification
 
-3. **Violation Handling**:
+2. **Violation Handling**:
    - Toxic/Injection: Block completely, return warning
    - Off-topic: Return redirect message
    - All violations increment counter toward escalation
 
-### 2. Postprocessing (Output)
+### 2. Passthrough
 
-When the inner agent yields `AgentSendText`:
-- Scan for PII patterns
-- Redact any found PII before yielding
-
-### 3. Passthrough
-
-Other events (`CallStarted`, `CallEnded`, tool events) pass through unchanged.
+Other events (`CallStarted`, `CallEnded`, tool events) pass through to the inner agent.
 
 ## Extending the Wrapper
 

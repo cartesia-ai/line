@@ -1,16 +1,14 @@
 """
-Guardrails Wrapper - Preprocessing and postprocessing for LLM agents.
+Guardrails Wrapper - Preprocessing for LLM agents.
 
 This module provides a wrapper around LlmAgent that:
-- Preprocesses user input to detect and handle violations (toxicity, prompt injection, off-topic, PII)
-- Postprocesses agent output to redact any PII leakage
+- Preprocesses user input to detect and handle violations (toxicity, prompt injection, off-topic)
 - Tracks violations and ends the call after repeated offenses
 """
 
 from dataclasses import dataclass
 import json
-import re
-from typing import AsyncIterable, List, Optional
+from typing import AsyncIterable, Optional
 
 from loguru import logger
 
@@ -23,7 +21,7 @@ from line.v02.llm import (
     LlmConfig,
     OutputEvent,
     TurnEnv,
-    UserTextSent,
+    UserTurnEnded,
 )
 from line.v02.llm.provider import LLMProvider, Message
 
@@ -46,7 +44,6 @@ class GuardrailConfig:
     # Behavior toggles
     block_toxicity: bool = True
     block_prompt_injection: bool = True
-    redact_pii: bool = True
     enforce_topic: bool = True
 
     # Escalation settings
@@ -71,36 +68,6 @@ class GuardrailConfig:
     )
 
 
-# PII patterns for regex-based detection
-PII_PATTERNS = {
-    "email": r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b",
-    "phone": r"\b(?:\+?1[-.\s]?)?\(?[0-9]{3}\)?[-.\s]?[0-9]{3}[-.\s]?[0-9]{4}\b",
-    "ssn": r"\b\d{3}[-\s]?\d{2}[-\s]?\d{4}\b",
-    "credit_card": r"\b(?:\d{4}[-\s]?){3}\d{4}\b",
-}
-
-
-def detect_pii(text: str) -> List[str]:
-    """Detect PII in text using regex patterns.
-
-    Returns a list of PII types found.
-    """
-    found = []
-    for pii_type, pattern in PII_PATTERNS.items():
-        if re.search(pattern, text, re.IGNORECASE):
-            found.append(pii_type)
-    return found
-
-
-def redact_pii(text: str) -> str:
-    """Redact PII from text by replacing with placeholders."""
-    result = text
-    for pii_type, pattern in PII_PATTERNS.items():
-        placeholder = f"[REDACTED_{pii_type.upper()}]"
-        result = re.sub(pattern, placeholder, result, flags=re.IGNORECASE)
-    return result
-
-
 @dataclass
 class GuardrailCheckResult:
     """Result of guardrail checks."""
@@ -116,13 +83,9 @@ class GuardrailsWrapper:
     Wrapper that adds guardrails to an LlmAgent.
 
     Preprocessing (on user input):
-    - PII detection and redaction (regex-based, fast)
     - Toxicity detection (LLM-based)
     - Prompt injection detection (LLM-based)
     - Off-topic detection (LLM-based)
-
-    Postprocessing (on agent output):
-    - PII redaction in AgentSendText events
 
     Escalation:
     - Tracks violations and ends call after max_violations_before_end_call
@@ -163,21 +126,14 @@ class GuardrailsWrapper:
             return
 
         # For user text events, apply preprocessing
-        if isinstance(event, UserTextSent):
+        logger.info(f"Processing user text event: {event}")
+        if isinstance(event, UserTurnEnded):
             # Extract user text from history (last user message)
             user_text = self._extract_user_text(event)
+            logger.info(f"User text: {user_text}")
 
             if user_text:
-                # Step 1: PII detection and redaction (fast, regex-based)
-                if self.config.redact_pii:
-                    pii_found = detect_pii(user_text)
-                    if pii_found:
-                        logger.info(f"PII detected and redacted: {pii_found}")
-                        user_text = redact_pii(user_text)
-                        # Update the event with redacted text
-                        event = self._update_event_text(event, user_text)
-
-                # Step 2: LLM-based guardrail checks (batched for efficiency)
+                # LLM-based guardrail checks (batched for efficiency)
                 check_result = await self._check_guardrails(user_text)
 
                 # Handle toxicity - block completely
@@ -220,15 +176,8 @@ class GuardrailsWrapper:
                     yield AgentSendText(text=self.config.off_topic_warning)
                     return
 
-        # Process through inner agent and postprocess outputs
+        # Process through inner agent
         async for output in self.inner_agent.process(env, event):
-            # Postprocess: redact PII from agent responses
-            if isinstance(output, AgentSendText) and self.config.redact_pii:
-                pii_found = detect_pii(output.text)
-                if pii_found:
-                    logger.info(f"PII in agent output redacted: {pii_found}")
-                    output = AgentSendText(text=redact_pii(output.text))
-
             yield output
 
     def _check_max_violations(self) -> bool:
@@ -289,35 +238,9 @@ Respond with ONLY a JSON object (no markdown, no explanation):
             # On failure, allow the message through (fail open)
             return GuardrailCheckResult()
 
-    def _extract_user_text(self, event: UserTextSent) -> Optional[str]:
+    def _extract_user_text(self, event: UserTurnEnded) -> Optional[str]:
         """Extract the latest user text from the event."""
-        # The UserTextSent event contains history, find the last user message
-        if event.history:
-            for item in reversed(event.history):
-                if hasattr(item, "content") and isinstance(item, type(event.history[0])):
-                    # Check if it's a user text event
-                    if item.__class__.__name__ == "SpecificUserTextSent":
-                        return item.content
-        return None
-
-    def _update_event_text(self, event: UserTextSent, new_text: str) -> UserTextSent:
-        """Create a new event with updated text in history.
-
-        Note: This creates a shallow copy with modified history.
-        """
-        from line.v02.llm import SpecificUserTextSent
-
-        if not event.history:
-            return event
-
-        # Create new history with the last user text replaced
-        new_history = list(event.history)
-        for i in range(len(new_history) - 1, -1, -1):
-            if isinstance(new_history[i], SpecificUserTextSent):
-                new_history[i] = SpecificUserTextSent(content=new_text)
-                break
-
-        return UserTextSent(history=new_history)
+        return event.content[0].content if event.content else None
 
     async def cleanup(self) -> None:
         """Clean up resources."""
