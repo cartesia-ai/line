@@ -219,10 +219,9 @@ class LlmAgent:
 
     async def _generate_response(self, env: TurnEnv, event: InputEvent) -> AsyncIterable[OutputEvent]:
         """Generate a response using the LLM."""
-        messages = self._build_messages(event.history, self._local_history)
 
         for _iteration in range(self._max_tool_iterations):
-            text_buffer = ""
+            messages = self._build_messages(event.history, self._local_history)
             tool_calls_dict: Dict[str, ToolCall] = {}
 
             # Build kwargs for LLM chat, including web_search_options if available
@@ -238,7 +237,6 @@ class LlmAgent:
             async with stream:
                 async for chunk in stream:
                     if chunk.text:
-                        text_buffer += chunk.text
                         output = AgentSendText(text=chunk.text)
                         self._append_to_local_history(output)
                         yield output
@@ -280,6 +278,7 @@ class LlmAgent:
                     if tool.tool_type == ToolType.LOOPBACK:
                         # Collect results to send back to LLM
                         results = []
+                        should_continue = True
                         async for value in normalized_func(ctx, **tool_args):
                             results.append(value)
                             tool_returned_output = AgentToolReturned(
@@ -290,26 +289,6 @@ class LlmAgent:
                             )
                             self._append_to_local_history(tool_returned_output)
                             yield tool_returned_output
-
-                        # Add to messages for next iteration
-                        result_str = str(results[0]) if len(results) == 1 else str(results)
-                        messages.append(
-                            Message(
-                                role="assistant",
-                                content=text_buffer if text_buffer else None,
-                                tool_calls=[tc],
-                            )
-                        )
-                        messages.append(
-                            Message(
-                                role="tool",
-                                content=result_str,
-                                tool_call_id=tc.id,
-                                name=tc.name,
-                            )
-                        )
-                        should_continue = True
-                        text_buffer = ""
 
                     elif tool.tool_type == ToolType.PASSTHROUGH:
                         async for evt in normalized_func(ctx, **tool_args):
@@ -400,14 +379,11 @@ class LlmAgent:
                         role="assistant",
                         content=None,
                         tool_calls=[
-                            {
-                                "id": event.tool_call_id,
-                                "type": "function",
-                                "function": {
-                                    "name": event.tool_name,
-                                    "arguments": json.dumps(event.tool_args),
-                                },
-                            }
+                            ToolCall(
+                                id=event.tool_call_id,
+                                name=event.tool_name,
+                                arguments=json.dumps(event.tool_args),
+                            )
                         ],
                     )
                 )
@@ -497,11 +473,12 @@ def _build_full_history_rec(
 
     Algorithm:
     1. Base case: if both histories are empty, return []
-    2. If head of input is non-observable: output it, recurse with rest of input
-    3. If head of local is non-observable: output it, recurse with rest of local
+    2. If head of local is non-observable: output it, recurse with rest of local
+    3. If head of input is non-observable: output it, recurse with rest of input
     4. (Now both heads are observable, or one/both missing)
-    5. If both exist and match exactly: output head_input (canonical), recurse with rest of both
-    6. If input text is a prefix of local text: output head_input, recurse with suffix prepended to local
+    5. If both exist and match exactly: drain any trailing unobservables from rest_local,
+       output them + head_input (canonical), recurse with rest of both
+    6. If input text is a prefix of local text: same as above, with suffix prepended to local
     7. If head_local exists (no match or no input): skip it, recurse with rest of local
     8. If head_input exists (no local left): output it, recurse with rest of input
     """
@@ -517,7 +494,6 @@ def _build_full_history_rec(
     # If head_input is non-observable: output it, continue with same local, rest of input
     if head_input is not None and not _is_input_observable(head_input):
         return [head_input] + _build_full_history_rec(rest_input, local_history)
-
     # If head_local is non-observable: output it, continue with rest of local, same input
     if head_local is not None and not _is_local_observable(head_local):
         return [head_local] + _build_full_history_rec(input_history, rest_local)
@@ -529,8 +505,12 @@ def _build_full_history_rec(
         match_result = _try_match_events(head_local, head_input)
         if match_result is not None:
             matched_input, suffix_event = match_result
-            new_local = ([suffix_event] if suffix_event else []) + list(rest_local)
-            return [matched_input] + _build_full_history_rec(rest_input, new_local)
+            # Drain any leading unobservable events from rest_local after outputting the match.
+            # This ensures tool results are grouped with the agent's text that preceded them
+            # in local_history, preserving the original ordering of events.
+            drained_unobservables, remaining_local = _drain_leading_unobservables(rest_local)
+            new_local = ([suffix_event] if suffix_event else []) + list(remaining_local)
+            return [matched_input] + drained_unobservables + _build_full_history_rec(rest_input, new_local)
 
     # If head_local exists but no match (or head_input missing): skip head_local
     if head_local is not None:
@@ -542,6 +522,32 @@ def _build_full_history_rec(
 
     # Both are None - should have been caught by base case
     return []
+
+
+def _drain_leading_unobservables(
+    local_history: List[OutputEvent],
+) -> tuple[List[OutputEvent], List[OutputEvent]]:
+    """Drain leading non-observable events from local_history.
+
+    Only drains AgentToolReturned events (not AgentToolCalled). This is because
+    AgentToolReturned completes a tool call that was already started (and output)
+    before the current match, so it should be grouped with the match. But
+    AgentToolCalled starts a NEW tool call that belongs to a later part of the
+    conversation and should not be drained.
+
+    Returns:
+        (drained_events, remaining_events)
+    """
+    drained: List[OutputEvent] = []
+    remaining = list(local_history)
+    while remaining:
+        head = remaining[0]
+        # Only drain AgentToolReturned - stop at anything else (including AgentToolCalled)
+        if isinstance(head, AgentToolReturned):
+            drained.append(remaining.pop(0))
+        else:
+            break
+    return drained, remaining
 
 
 # Observable OutputEvent types - these can be matched between local and input history
