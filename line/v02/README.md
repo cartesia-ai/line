@@ -50,6 +50,21 @@ Browse more templates:
 - [All Examples](https://example.com/examples)
 - [Community Templates](https://example.com/community-templates)
 
+## Example Integrations
+
+Production-ready integrations with third-party services:
+
+| Integration | Description | Services |
+|-------------|-------------|----------|
+| [Exa Web Research](./example_integrations/exa) | Voice agent with real-time web search | Exa API, OpenAI |
+| [Browserbase Form Filler](./example_integrations/browserbase) | Fill web forms via voice conversation | Browserbase, Stagehand, Gemini |
+
+These integrations demonstrate:
+- Custom loopback tools for external APIs
+- Passthrough tools for deterministic conversation flow
+- Async processing patterns for non-blocking operations
+- Agent wrapper patterns for extended functionality
+
 ## Documentation
 
 ### Core Concepts
@@ -117,15 +132,23 @@ See [Latency Optimization](https://example.com/tips/latency) for benchmarks.
 
 ## LLM Provider Support
 
-Line SDK supports 100+ LLM providers via LiteLLM:
+Line SDK supports 100+ LLM providers through [LiteLLM](https://github.com/BerriAI/litellm), providing a unified interface across all major model providers.
 
-| Provider | Model Format | Example |
-|----------|--------------|---------|
-| OpenAI | `model-name` | `gpt-4o`, `gpt-4o-mini` |
-| Anthropic | `anthropic/model` | `anthropic/claude-sonnet-4-20250514` |
-| Google | `gemini/model` | `gemini/gemini-2.0-flash` |
+### Popular Models
 
-See [Supported Models](https://example.com/docs/models) for the full list.
+| Provider | Models | Format |
+|----------|--------|--------|
+| **OpenAI** | GPT-4o, GPT-4o-mini, o1, o3-mini | `gpt-4o`, `o1` |
+| **Anthropic** | Claude Opus 4, Claude Sonnet 4 | `anthropic/claude-sonnet-4-20250514` |
+| **Google** | Gemini 2.0 Flash, Gemini Pro | `gemini/gemini-2.0-flash` |
+| **Meta** | Llama 3.1, Llama 3.2 | `together_ai/meta-llama/Llama-3.1-70B` |
+| **Mistral** | Mistral Large, Mixtral | `mistral/mistral-large-latest` |
+| **Cohere** | Command R+, Command R | `cohere/command-r-plus` |
+
+### Additional Providers
+
+AWS Bedrock, Azure OpenAI, Vertex AI, Groq, Together AI, Replicate, Hugging Face, Ollama (local), and [many more](https://docs.litellm.ai/docs/providers).
+
 
 ## Project Structure
 
@@ -139,12 +162,12 @@ line/v02/
 ├── events.py               # Event types (InputEvent, OutputEvent)
 ├── agent.py                # Base agent types
 ├── voice_agent_app.py      # VoiceAgentApp server
-└── examples/               # Example implementations
+├── examples/               # Example implementations
+└── example_integrations/   # Third-party service integrations
 ```
 
 ## Getting Help
 
-- [FAQ](https://example.com/faq)
-- [Troubleshooting](https://example.com/troubleshooting)
-- [GitHub Issues](https://example.com/issues)
-- [Discord Community](https://example.com/discord)
+- [Line Docs](https://docs.cartesia.ai/line/introduction)
+- [Support Email](mailto:support@cartesia.ai)
+- [Discord Community](https://discord.gg/GExXcjM7)
