@@ -45,6 +45,7 @@ from line.v02.llm.provider import LLMProvider, Message, ToolCall
 from line.v02.llm.tool_types import loopback_tool
 from line.v02.llm.tool_utils import FunctionTool, ToolType, construct_function_tool
 from line.v02.llm.tools import WebSearchTool
+from line.v02.utils import shield_awaitable
 
 T = TypeVar("T")
 
@@ -363,6 +364,7 @@ class LlmAgent:
                             self._append_to_local_history(tool_returned_output)
                             yield tool_called_output
                             yield tool_returned_output
+                            n += 1
 
                     elif tool.tool_type == ToolType.PASSTHROUGH:
                         # Emit AgentToolCalled before executing
