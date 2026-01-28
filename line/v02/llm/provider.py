@@ -30,7 +30,7 @@ class ToolCall:
 
 @dataclass
 class StreamChunk:
-    """A chunk from an LLM stream."""
+    """An output chunk from an LLM stream."""
 
     text: Optional[str] = None
     tool_calls: List[ToolCall] = field(default_factory=list)
@@ -39,7 +39,7 @@ class StreamChunk:
 
 @dataclass
 class Message:
-    """A message in the conversation."""
+    """A input message in the conversation."""
 
     role: str
     content: Optional[str] = None
@@ -133,6 +133,7 @@ class LLMProvider:
                 llm_msg["content"] = msg.content
 
             if msg.tool_calls:
+                # ToolCallRequest
                 llm_msg["tool_calls"] = [
                     {
                         "id": tc.id,
@@ -143,12 +144,12 @@ class LLMProvider:
                 ]
 
             if msg.role == "tool":
+                # ToolCallResponse
                 llm_msg["tool_call_id"] = msg.tool_call_id
                 if msg.name:
                     llm_msg["name"] = msg.name
 
             result.append(llm_msg)
-
         return result
 
     async def aclose(self) -> None:
