@@ -223,3 +223,136 @@ def test_tool_name_and_description_from_function():
 
     assert my_tool.name == "my_tool"
     assert my_tool.description == "This is the tool description."
+
+
+# =============================================================================
+# Tests: Method-based Tools (Descriptor Protocol)
+# =============================================================================
+
+
+def test_method_tool_binding():
+    """Test that tool decorators work on class methods via descriptor protocol."""
+
+    class MyAgent:
+        def __init__(self, prefix: str):
+            self.prefix = prefix
+
+        @loopback_tool
+        async def greet(self, ctx, name: Annotated[str, "Name to greet"]) -> str:
+            """Greet someone with a prefix."""
+            return f"{self.prefix} {name}!"
+
+    agent = MyAgent(prefix="Hello")
+
+    # Access the tool from the instance - should get a bound FunctionTool
+    bound_tool = agent.greet
+
+    # Check it's still a FunctionTool
+    assert bound_tool.name == "greet"
+    assert bound_tool.tool_type.value == "loopback"
+    assert "name" in bound_tool.parameters
+    # 'self' should NOT be in parameters
+    assert "self" not in bound_tool.parameters
+
+
+@pytest.mark.asyncio
+async def test_method_tool_execution():
+    """Test that bound method tools can be executed with self bound."""
+
+    class Counter:
+        def __init__(self):
+            self.count = 0
+
+        @loopback_tool
+        async def increment(self, ctx, amount: Annotated[int, "Amount to add"] = 1) -> int:
+            """Increment the counter."""
+            self.count += amount
+            return self.count
+
+    counter = Counter()
+    bound_tool = counter.increment
+
+    # Execute the tool - self should be automatically bound
+    result = await bound_tool.func(None, amount=5)  # ctx=None for test
+    assert result == 5
+    assert counter.count == 5
+
+    # Execute again
+    result = await bound_tool.func(None, amount=3)
+    assert result == 8
+    assert counter.count == 8
+
+
+def test_method_passthrough_tool():
+    """Test that passthrough tool decorator works on methods."""
+
+    class FormFiller:
+        def __init__(self, form_id: str):
+            self.form_id = form_id
+
+        @passthrough_tool
+        async def submit(self, ctx):
+            """Submit the form."""
+            yield AgentSendText(text=f"Submitting form {self.form_id}")
+
+    filler = FormFiller(form_id="abc123")
+    bound_tool = filler.submit
+
+    assert bound_tool.name == "submit"
+    assert bound_tool.tool_type.value == "passthrough"
+
+
+@pytest.mark.asyncio
+async def test_method_passthrough_tool_execution():
+    """Test that bound passthrough method tools yield events correctly."""
+
+    class FormFiller:
+        def __init__(self, form_id: str):
+            self.form_id = form_id
+
+        @passthrough_tool
+        async def submit(self, ctx):
+            """Submit the form."""
+            yield AgentSendText(text=f"Submitting form {self.form_id}")
+
+    filler = FormFiller(form_id="xyz789")
+    bound_tool = filler.submit
+
+    # Execute and collect events
+    events = []
+    async for event in bound_tool.func(None):  # ctx=None for test
+        events.append(event)
+
+    assert len(events) == 1
+    assert isinstance(events[0], AgentSendText)
+    assert events[0].text == "Submitting form xyz789"
+
+
+@pytest.mark.asyncio
+async def test_multiple_instances_get_separate_bound_tools():
+    """Test that different instances get separately bound tools."""
+
+    class Counter:
+        def __init__(self, start: int):
+            self.value = start
+
+        @loopback_tool
+        async def get_value(self, ctx) -> int:
+            """Get current value."""
+            return self.value
+
+    counter1 = Counter(start=10)
+    counter2 = Counter(start=20)
+
+    tool1 = counter1.get_value
+    tool2 = counter2.get_value
+
+    # Should be different bound tools with different behavior
+    assert tool1 is not tool2
+
+    # Verify they're bound to different instances by executing
+    result1 = await tool1.func(None)  # ctx=None for test
+    result2 = await tool2.func(None)
+
+    assert result1 == 10
+    assert result2 == 20
