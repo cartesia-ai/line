@@ -3,8 +3,15 @@
 from __future__ import annotations
 
 from typing import Any, Dict, List, Literal, Optional, Union
+import uuid
 
 from pydantic import BaseModel, Field
+
+
+def _generate_event_id() -> str:
+    """Generate a stable UUID for an event."""
+    return str(uuid.uuid4())
+
 
 # -------------------------
 # Output Events (agent -> harness)
@@ -81,47 +88,57 @@ OutputEvent = Union[
 # Input Events (harness -> agent)
 # -------------------------
 # Specific* events do NOT include history and are used within the history list.
+# Each event has a stable event_id (UUID) for tracking which events trigger responses.
 
 
 class SpecificCallStarted(BaseModel):
     type: Literal["call_started"] = "call_started"
+    event_id: str = Field(default_factory=_generate_event_id)
 
 
 class SpecificCallEnded(BaseModel):
     type: Literal["call_ended"] = "call_ended"
+    event_id: str = Field(default_factory=_generate_event_id)
 
 
 class SpecificUserTurnStarted(BaseModel):
     type: Literal["user_turn_started"] = "user_turn_started"
+    event_id: str = Field(default_factory=_generate_event_id)
 
 
 class SpecificUserDtmfSent(BaseModel):
     type: Literal["user_dtmf_sent"] = "user_dtmf_sent"
     button: str
+    event_id: str = Field(default_factory=_generate_event_id)
 
 
 class SpecificUserTextSent(BaseModel):
     type: Literal["user_text_sent"] = "user_text_sent"
     content: str
+    event_id: str = Field(default_factory=_generate_event_id)
 
 
 class SpecificUserTurnEnded(BaseModel):
     type: Literal["user_turn_ended"] = "user_turn_ended"
     content: List[Union[SpecificUserDtmfSent, SpecificUserTextSent]] = Field(default_factory=list)
+    event_id: str = Field(default_factory=_generate_event_id)
 
 
 class SpecificAgentTurnStarted(BaseModel):
     type: Literal["agent_turn_started"] = "agent_turn_started"
+    event_id: str = Field(default_factory=_generate_event_id)
 
 
 class SpecificAgentTextSent(BaseModel):
     type: Literal["agent_text_sent"] = "agent_text_sent"
     content: str
+    event_id: str = Field(default_factory=_generate_event_id)
 
 
 class SpecificAgentDtmfSent(BaseModel):
     type: Literal["agent_dtmf_sent"] = "agent_dtmf_sent"
     button: str
+    event_id: str = Field(default_factory=_generate_event_id)
 
 
 class SpecificAgentTurnEnded(BaseModel):
@@ -132,6 +149,7 @@ class SpecificAgentTurnEnded(BaseModel):
             SpecificAgentDtmfSent,
         ]
     ] = Field(default_factory=list)
+    event_id: str = Field(default_factory=_generate_event_id)
 
 
 SpecificInputEvent = Union[
