@@ -1504,3 +1504,95 @@ class TestBuildFullHistory:
         assert len(result) == 1
         assert isinstance(result[0], SpecificAgentTextSent)
         assert result[0].content == "Hello world!"
+
+    async def test_pre_tool_call_result_grouped_with_agent_text(self):
+        """Tool call and result are grouped together in the final history."""
+        input_history = [
+            SpecificUserTextSent(content="Question1"),
+            SpecificAgentTextSent(content="Response1"),
+            SpecificUserTextSent(content="Question2"),
+        ]
+        local_history = [
+            AgentToolCalled(tool_call_id="1", tool_name="tool1", tool_args={}),
+            AgentToolReturned(tool_call_id="1", tool_name="tool1", tool_args={}, result="r1"),
+            AgentSendText(text="Response1"),
+        ]
+
+        result = _build_full_history(input_history, local_history)
+
+        assert len(result) == 5
+        assert isinstance(result[0], SpecificUserTextSent)
+        assert isinstance(result[1], AgentToolCalled)
+        assert isinstance(result[2], AgentToolReturned)
+        assert isinstance(result[3], SpecificAgentTextSent)
+        assert isinstance(result[4], SpecificUserTextSent)
+
+    # ==== TOOL CALL ORDERING ====
+
+    async def test_circum_tool_call_result_grouped_with_agent_text(self):
+        """Tool call and result are grouped together in the final history."""
+        input_history = [
+            SpecificUserTextSent(content="Question1"),
+            SpecificAgentTextSent(content="Response1"),
+            SpecificUserTextSent(content="Question2"),
+        ]
+        local_history = [
+            AgentToolCalled(tool_call_id="1", tool_name="tool1", tool_args={}),
+            AgentSendText(text="Response1 and more"),
+            AgentToolReturned(tool_call_id="1", tool_name="tool1", tool_args={}, result="r1"),
+        ]
+
+        result = _build_full_history(input_history, local_history)
+
+        # After input concatenation, it's an exact match
+        assert len(result) == 5
+        assert isinstance(result[0], SpecificUserTextSent)
+        assert isinstance(result[1], AgentToolCalled)
+        assert isinstance(result[2], SpecificAgentTextSent)
+        assert isinstance(result[3], AgentToolReturned)
+        assert isinstance(result[4], SpecificUserTextSent)
+
+    async def test_pre_tool_call_result_grouped_with_trimmed_agent_text(self):
+        """Tool call and result are grouped together in the final history."""
+        input_history = [
+            SpecificUserTextSent(content="Question1"),
+            SpecificAgentTextSent(content="Response1"),
+            SpecificUserTextSent(content="Question2"),
+        ]
+        local_history = [
+            AgentToolCalled(tool_call_id="1", tool_name="tool1", tool_args={}),
+            AgentToolReturned(tool_call_id="1", tool_name="tool1", tool_args={}, result="r1"),
+            AgentSendText(text="Response1 and more"),
+        ]
+
+        result = _build_full_history(input_history, local_history)
+
+        assert len(result) == 5
+        assert isinstance(result[0], SpecificUserTextSent)
+        assert isinstance(result[1], AgentToolCalled)
+        assert isinstance(result[2], AgentToolReturned)
+        assert isinstance(result[3], SpecificAgentTextSent)
+        assert isinstance(result[4], SpecificUserTextSent)
+
+    async def test_circum_tool_call_result_grouped_with_trimmed_agent_text(self):
+        """Tool call and result are grouped together in the final history."""
+        input_history = [
+            SpecificUserTextSent(content="Question1"),
+            SpecificAgentTextSent(content="Response1"),
+            SpecificUserTextSent(content="Question2"),
+        ]
+        local_history = [
+            AgentToolCalled(tool_call_id="1", tool_name="tool1", tool_args={}),
+            AgentSendText(text="Response1"),
+            AgentToolReturned(tool_call_id="1", tool_name="tool1", tool_args={}, result="r1"),
+        ]
+
+        result = _build_full_history(input_history, local_history)
+
+        # After input concatenation, it's an exact match
+        assert len(result) == 5
+        assert isinstance(result[0], SpecificUserTextSent)
+        assert isinstance(result[1], AgentToolCalled)
+        assert isinstance(result[2], SpecificAgentTextSent)
+        assert isinstance(result[3], AgentToolReturned)
+        assert isinstance(result[4], SpecificUserTextSent)
