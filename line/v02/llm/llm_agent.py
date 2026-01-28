@@ -18,6 +18,7 @@ from typing import (
     Union,
 )
 
+from events import SpecificAgentHandedOff
 from loguru import logger
 
 from line.v02.events import AgentEndCall, SpecificCallEnded
@@ -313,6 +314,10 @@ class LlmAgent:
 
                     elif tool.tool_type == ToolType.HANDOFF:
                         # AgentHandedOff input event is passed to the handoff target to execute the tool
+                        specific_event = SpecificAgentHandedOff()
+                        event = AgentHandedOff(
+                            history=event.history + [specific_event], **specific_event.model_dump()
+                        )
                         async for item in normalized_func(ctx, **tool_args, event=AgentHandedOff()):
                             self._append_to_local_history(item)
                             yield item
@@ -462,13 +467,10 @@ def _build_full_history(
     # Build a set of event_ids that have responsive local events
     trigger_event_ids = set(local_by_event_id.keys())
 
-    # Preprocess input for concatenation
-    preprocessed_input = _concat_contiguous_agent_text_sent(input_history)
-
-    # Build index mapping: find which indices in preprocessed_input have triggers
+    # Build index mapping: find which indices in input_history have triggers
     # We need to track original event_ids after preprocessing
     trigger_indices: set[int] = set()
-    for i, evt in enumerate(preprocessed_input):
+    for i, evt in enumerate(input_history):
         if evt.event_id in trigger_event_ids:
             trigger_indices.add(i)
 
@@ -476,50 +478,37 @@ def _build_full_history(
     result: List[Union[SpecificInputEvent, OutputEvent]] = []
     i = 0
 
-    while i < len(preprocessed_input):
-        current_evt = preprocessed_input[i]
+    while i < len(input_history):
+        current_evt = input_history[i]
         if current_evt.event_id in trigger_event_ids:
             # Find the end of this slice (next trigger index or end of input)
-            slice_end = len(preprocessed_input)
-            for j in range(i + 1, len(preprocessed_input)):
+            slice_end = len(input_history)
+            for j in range(i + 1, len(input_history)):
                 if j in trigger_indices:
                     slice_end = j
                     break
 
             # Get the slice of input and the responsive local events
-            input_slice = preprocessed_input[i:slice_end]
+            input_slice = input_history[i:slice_end]
             local_slice = local_by_event_id[current_evt.event_id]
 
             # Preprocess local slice for concatenation
             preprocessed_local_slice = _concat_contiguous_agent_send_text(local_slice)
 
             # Apply interpolation logic to this slice
-            slice_result = _build_slice_history(input_slice, preprocessed_local_slice)
+            slice_result = _build_history_rec(input_slice, preprocessed_local_slice)
             result.extend(slice_result)
 
             i = slice_end
         else:
             # No responsive local events, output as-is
-            result.append(preprocessed_input[i])
+            result.append(input_history[i])
             i += 1
 
     # Append current local events (not yet observed, use local version)
     result.extend(current_local)
 
     return result
-
-
-def _build_slice_history(
-    input_slice: List[SpecificInputEvent],
-    local_slice: List[OutputEvent],
-) -> List[Union[SpecificInputEvent, OutputEvent]]:
-    """
-    Build history for a slice of input with its responsive local events.
-
-    Uses the existing recursive interpolation logic to match observable events
-    and interpolate unobservable events.
-    """
-    return _build_history_rec(input_slice, local_slice)
 
 
 def _concat_contiguous_agent_send_text(local_history: List[OutputEvent]) -> List[OutputEvent]:
@@ -531,19 +520,6 @@ def _concat_contiguous_agent_send_text(local_history: List[OutputEvent]) -> List
         return [a, b]
 
     return _reduce_windowed(local_history, reduce_texts)
-
-
-def _concat_contiguous_agent_text_sent(
-    input_history: List[SpecificInputEvent],
-) -> List[SpecificInputEvent]:
-    """Concatenate contiguous SpecificAgentTextSent events in input history."""
-
-    def reduce_texts(a: SpecificInputEvent, b: SpecificInputEvent) -> List[SpecificInputEvent]:
-        if isinstance(a, SpecificAgentTextSent) and isinstance(b, SpecificAgentTextSent):
-            return [SpecificAgentTextSent(content=a.content + b.content)]
-        return [a, b]
-
-    return _reduce_windowed(input_history, reduce_texts)
 
 
 def _build_history_rec(
