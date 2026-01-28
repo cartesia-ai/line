@@ -400,14 +400,12 @@ class LlmAgent:
                         role="assistant",
                         content=None,
                         tool_calls=[
-                            {
-                                "id": event.tool_call_id,
-                                "type": "function",
-                                "function": {
-                                    "name": event.tool_name,
-                                    "arguments": json.dumps(event.tool_args),
-                                },
-                            }
+                            ToolCall(
+                                id=event.tool_call_id,
+                                name=event.tool_name,
+                                arguments=json.dumps(event.tool_args),
+                                is_complete=True,
+                            )
                         ],
                     )
                 )
