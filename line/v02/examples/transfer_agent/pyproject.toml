@@ -1,7 +1,7 @@
 [project]
-name = "echo"
+name = "transfer-agent"
 version = "0.1.0"
-description = "Handoff echo example using Line SDK v02"
+description = "Basic chat example using Line SDK v02"
 requires-python = ">=3.10"
 dependencies = [
     "cartesia-line-v02",
@@ -9,8 +9,8 @@ dependencies = [
 ]
 
 [project.scripts]
-echo = "main:app.run"
+transfer-agent = "main:app.run"
 
 [tool.uv.sources]
 cartesia-line-v02 = { path = "../../", editable = true }
-cartesia-line = { path = "../../../../", editable = true }
+cartesia-line={ path = "../../../../", editable = true }
