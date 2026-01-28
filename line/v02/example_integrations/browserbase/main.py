@@ -24,10 +24,10 @@ from typing import AsyncIterable
 from loguru import logger
 from stagehand_form_filler import StagehandFormFiller
 
-from line.v02.agent import TurnEnv
-from line.v02.events import CallEnded, InputEvent, OutputEvent
-from line.v02.llm_agent import LlmAgent, LlmConfig
-from line.v02.voice_agent_app import AgentEnv, CallRequest, VoiceAgentApp
+from line.agent import TurnEnv
+from line.events import CallEnded, InputEvent, OutputEvent
+from line.llm_agent import LlmAgent, LlmConfig
+from line.voice_agent_app import AgentEnv, CallRequest, VoiceAgentApp
 
 # Model configuration
 MODEL_ID = os.getenv("MODEL_ID", "gemini/gemini-2.0-flash")

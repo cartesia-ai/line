@@ -6,8 +6,8 @@ Run with: ANTHROPIC_API_KEY=your-key uv run python main.py
 
 import os
 
-from line.v02.llm_agent import LlmAgent, LlmConfig, end_call, send_dtmf, transfer_call
-from line.v02.voice_agent_app import AgentEnv, CallRequest, VoiceAgentApp
+from line.llm_agent import LlmAgent, LlmConfig, end_call, send_dtmf, transfer_call
+from line.voice_agent_app import AgentEnv, CallRequest, VoiceAgentApp
 
 SYSTEM_PROMPT = """You are a helpful phone assistant that can navigate automated phone systems \
 and transfer calls.

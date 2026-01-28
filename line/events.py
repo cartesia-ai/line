@@ -1,252 +1,267 @@
-"""
-Typed event definitions for the agent bus system.
+"""Typed event definitions for the v0.2 audio harness."""
 
-Each event inherits from EventMeta which provides automatic node identification
-and instance tracking for distributed agent communication.
-"""
+from __future__ import annotations
 
-import json
-from typing import Any, Dict, Optional, Type, TypeVar, Union
+from typing import Any, Dict, List, Literal, Optional, Union
 import uuid
 
 from pydantic import BaseModel, Field
 
-T = TypeVar("T")
-EventInstance = T
 
-# Type[T] means EventType has to be a class (not an instance), and it allows us to refer to T in
-# order to instantiate T later.
-EventType = Type[T]
-
-EventTypeOrAlias = Union[EventType, str]
-
-__all__ = [
-    "AgentResponse",
-    "ToolResult",
-    "ToolCall",
-    "EndCall",
-    "AgentGenerationComplete",
-    "Authorize",
-    "AgentError",
-    "TransferCall",
-    "AgentHandoff",
-    "AgentStartedSpeaking",
-    "AgentStoppedSpeaking",
-    "UserStartedSpeaking",
-    "UserStoppedSpeaking",
-    "UserTranscriptionReceived",
-    "AgentSpeechSent",
-    "UserUnknownInputReceived",
-    "CustomReceived",
-    "LogMetric",
-    "DTMFInputEvent",
-    "DTMFOutputEvent",
-    "DTMFStoppedEvent",
-]
+def _generate_event_id() -> str:
+    """Generate a stable UUID for an event."""
+    return str(uuid.uuid4())
 
 
-class AgentResponse(BaseModel):
-    """Agent message to be sent to the user."""
-
-    content: str
-    chunk_type: str = "text"
+# -------------------------
+# Output Events (agent -> harness)
+# -------------------------
 
 
-class ToolResult(BaseModel):
-    """Tool execution result
-    - This will appear in the transcript in the Agent's current turn.
-
-    Attributes:
-    - tool_name: Name of the tool that was called.
-    - tool_args: Arguments that were passed to the tool.
-    - result: Result returned by the tool.
-    - result_str: String representation of the result (computed).
-    - error: Error message if the tool call failed (None if successful).
-    - metadata: Additional metadata about the tool call.
-    - tool_call_id: Reference to the ToolCall instance that triggered this result (if applicable).
-    """
-
-    tool_name: str = ""
-    tool_args: dict = Field(default_factory=dict)
-    result: Optional[object] = None
-    error: Optional[str] = None
-    metadata: Optional[Dict] = None
-    tool_call_id: Optional[str] = None
-
-    @property
-    def result_str(self) -> Optional[str]:
-        """String representation of the result, automatically computed from result."""
-        if self.result is not None:
-            try:
-                return json.dumps(self.result)
-            except Exception:
-                return str(self.result)
-        return None
-
-    @property
-    def success(self) -> bool:
-        """Returns True if there was no error, False otherwise."""
-        return self.error is None
+class AgentSendText(BaseModel):
+    type: Literal["agent_send_text"] = "agent_send_text"
+    text: str
 
 
-class ToolCall(BaseModel):
-    """Tool execution request
-    - This will appear in the transcript in the Agent's current turn.
-
-    Attributes:
-    - tool_name: Name of the tool that was called
-    - tool_args: Arguments that were passed to the tool
-    - tool_call_id: Unique identifier for the tool call
-    - raw_response: Raw response from the tool call
-    """
-
+class AgentToolCalled(BaseModel):
+    type: Literal["agent_tool_called"] = "agent_tool_called"
+    tool_call_id: str
     tool_name: str
-    tool_args: Dict = Field(default_factory=dict)
-    tool_call_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    raw_response: Dict = Field(default_factory=dict)
+    tool_args: Dict[str, Any] = Field(default_factory=dict)
 
 
-class EndCall(BaseModel):
-    """End the call."""
-
-    @property
-    def content(self) -> str:
-        """Returns string representation of the end call event."""
-        return self.__repr__()
-
-
-class AgentGenerationComplete(BaseModel):
-    """Agent generation completion event."""
+class AgentToolReturned(BaseModel):
+    type: Literal["agent_tool_returned"] = "agent_tool_returned"
+    tool_call_id: str
+    tool_name: str
+    tool_args: Dict[str, Any] = Field(default_factory=dict)
+    result: Any = None
 
 
-class Authorize(BaseModel):
-    """Change the authorized agent."""
-
-    agent: str
+class AgentEndCall(BaseModel):
+    type: Literal["end_call"] = "end_call"
 
 
-class AgentError(BaseModel):
-    """Send error message to user."""
-
-    error: str
-    code: Optional[str] = None
-
-
-class TransferCall(BaseModel):
-    """Initiate transfer call to destination. When that happens:
-    1. A transfer request will be sent
-    2. The agent will wait for a timeout period (so the second leg has the opportunity to connect)
-    3. Afterwards, the agent harness will begin shutdown
-
-    For twilio clients:
-    - If the second leg has not connected by the timeout period, #3 will terminate the call for all parties.
-    - If the second leg connects, once #3 occurs, the agent will shut down and the transferred call continues.
-    """
-
+class AgentTransferCall(BaseModel):
+    type: Literal["agent_transfer_call"] = "agent_transfer_call"
     target_phone_number: str
-    timeout_s: Optional[int] = 30
 
 
-class AgentHandoff(BaseModel):
-    """Agent handoff event for transfer_to_* patterns."""
-
-    target_agent: str
-    reason: str = ""
-
-
-class AgentStartedSpeaking(BaseModel):
-    """Agent started speaking event."""
-
-
-class AgentStoppedSpeaking(BaseModel):
-    """Agent stopped speaking event."""
-
-
-class UserStartedSpeaking(BaseModel):
-    """User started speaking event."""
-
-
-class UserStoppedSpeaking(BaseModel):
-    """User stopped speaking event."""
-
-
-class UserTranscriptionReceived(BaseModel):
-    """User transcription received event."""
-
-    content: str
-
-
-class AgentSpeechSent(BaseModel):
-    """Agent speech content sent event."""
-
-    content: str
-
-
-class UserUnknownInputReceived(BaseModel):
-    """User unknown input received event."""
-
-    input_data: str
-
-
-class CustomReceived(BaseModel):
-    """Custom event received with arbitrary metadata."""
-
-    metadata: Dict[str, Any]
+class AgentSendDtmf(BaseModel):
+    type: Literal["agent_send_dtmf"] = "agent_send_dtmf"
+    button: str
 
 
 class LogMetric(BaseModel):
-    """Log metric event for tracking usage metrics."""
-
+    type: Literal["log_metric"] = "log_metric"
     name: str
     value: Any
 
 
-class DTMFInputEvent(BaseModel):
-    """DTMF event for tracking DTMF input."""
+class LogMessage(BaseModel):
+    type: Literal["log_message"] = "log_message"
+    name: str
+    level: Literal["info", "error"]
+    message: str
+    metadata: Optional[Dict[str, Any]] = None
 
+
+OutputEvent = Union[
+    AgentSendText,
+    AgentSendDtmf,
+    AgentEndCall,
+    AgentTransferCall,
+    AgentToolCalled,
+    AgentToolReturned,
+    LogMetric,
+    LogMessage,
+]
+
+
+# -------------------------
+# Input Events (harness -> agent)
+# -------------------------
+# Specific* events do NOT include history and are used within the history list.
+# Each event has a stable event_id (UUID) for tracking which events trigger responses.
+
+
+class SpecificCallStarted(BaseModel):
+    type: Literal["call_started"] = "call_started"
+    event_id: str = Field(default_factory=_generate_event_id)
+
+
+class SpecificCallEnded(BaseModel):
+    type: Literal["call_ended"] = "call_ended"
+    event_id: str = Field(default_factory=_generate_event_id)
+
+
+class SpecificAgentHandedOff(BaseModel):
+    """Event emitted when control is transferred to the tool target."""
+
+    type: Literal["agent_handed_off"] = "agent_handed_off"
+    event_id: str = Field(default_factory=_generate_event_id)
+
+
+class SpecificUserTurnStarted(BaseModel):
+    type: Literal["user_turn_started"] = "user_turn_started"
+    event_id: str = Field(default_factory=_generate_event_id)
+
+
+class SpecificUserDtmfSent(BaseModel):
+    type: Literal["user_dtmf_sent"] = "user_dtmf_sent"
     button: str
+    event_id: str = Field(default_factory=_generate_event_id)
 
 
-class DTMFOutputEvent(BaseModel):
-    """DTMF event for tracking DTMF input."""
+class SpecificUserTextSent(BaseModel):
+    type: Literal["user_text_sent"] = "user_text_sent"
+    content: str
+    event_id: str = Field(default_factory=_generate_event_id)
 
+
+class SpecificUserTurnEnded(BaseModel):
+    type: Literal["user_turn_ended"] = "user_turn_ended"
+    content: List[Union[SpecificUserDtmfSent, SpecificUserTextSent]] = Field(default_factory=list)
+    event_id: str = Field(default_factory=_generate_event_id)
+
+
+class SpecificAgentTurnStarted(BaseModel):
+    type: Literal["agent_turn_started"] = "agent_turn_started"
+    event_id: str = Field(default_factory=_generate_event_id)
+
+
+class SpecificAgentTextSent(BaseModel):
+    type: Literal["agent_text_sent"] = "agent_text_sent"
+    content: str
+    event_id: str = Field(default_factory=_generate_event_id)
+
+
+class SpecificAgentDtmfSent(BaseModel):
+    type: Literal["agent_dtmf_sent"] = "agent_dtmf_sent"
     button: str
+    event_id: str = Field(default_factory=_generate_event_id)
 
 
-class DTMFStoppedEvent(BaseModel):
-    """DTMF stopped event for tracking DTMF input."""
+class SpecificAgentTurnEnded(BaseModel):
+    type: Literal["agent_turn_ended"] = "agent_turn_ended"
+    content: List[
+        Union[
+            SpecificAgentTextSent,
+            SpecificAgentDtmfSent,
+        ]
+    ] = Field(default_factory=list)
+    event_id: str = Field(default_factory=_generate_event_id)
 
 
-class _EventsRegistry:
-    """A singleton registry of all events.
-
-    Usage:
-        >>> registry = EventsRegistry()
-        >>> registry.register("system.eventA", SystemEventA)
-        >>> registry.register("system.eventB", SystemEventB)
-        >>> registry.get("system.eventA")
-        <class 'system.eventA'>
-        >>> registry.get("system.eventB")
-        <class 'system.eventB'>
-    """
-
-    _instance = None
-
-    def __new__(cls, *args, **kwargs):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance.events = {}  # Dict[EventType, str]
-        return cls._instance
-
-    def register(self, alias: str, event_type: EventType):
-        if event_type in self.events:
-            raise ValueError(f"Event type {event_type} already registered with alias {alias}")
-        if not isinstance(alias, str):
-            raise TypeError(f"Alias {alias} is not a string")
-        self.events[event_type] = alias
-
-    def get(self, event_type: EventType) -> Optional[str]:
-        return self.events.get(event_type, None)
+SpecificInputEvent = Union[
+    SpecificCallStarted,
+    SpecificAgentHandedOff,
+    SpecificUserTurnStarted,
+    SpecificUserDtmfSent,
+    SpecificUserTextSent,
+    SpecificUserTurnEnded,
+    SpecificAgentTurnStarted,
+    SpecificAgentTextSent,
+    SpecificAgentDtmfSent,
+    SpecificAgentTurnEnded,
+    SpecificCallEnded,
+]
 
 
-EventsRegistry = _EventsRegistry()
+class CallStarted(SpecificCallStarted):
+    history: List[SpecificInputEvent] = Field(default_factory=list)
+
+
+class CallEnded(SpecificCallEnded):
+    history: List[SpecificInputEvent] = Field(default_factory=list)
+
+
+class UserTurnStarted(SpecificUserTurnStarted):
+    history: List[SpecificInputEvent] = Field(default_factory=list)
+
+
+class UserDtmfSent(SpecificUserDtmfSent):
+    history: List[SpecificInputEvent] = Field(default_factory=list)
+
+
+class UserTextSent(SpecificUserTextSent):
+    history: List[SpecificInputEvent] = Field(default_factory=list)
+
+
+class UserTurnEnded(SpecificUserTurnEnded):
+    history: List[SpecificInputEvent] = Field(default_factory=list)
+
+
+class AgentTurnStarted(SpecificAgentTurnStarted):
+    history: List[SpecificInputEvent] = Field(default_factory=list)
+
+
+class AgentTextSent(SpecificAgentTextSent):
+    history: List[SpecificInputEvent] = Field(default_factory=list)
+
+
+class AgentDtmfSent(SpecificAgentDtmfSent):
+    history: List[SpecificInputEvent] = Field(default_factory=list)
+
+
+class AgentTurnEnded(SpecificAgentTurnEnded):
+    history: List[SpecificInputEvent] = Field(default_factory=list)
+
+
+class AgentHandedOff(SpecificAgentHandedOff):
+    history: List[SpecificInputEvent] = Field(default_factory=list)
+
+
+InputEvent = Union[
+    CallStarted,
+    UserTurnStarted,
+    UserDtmfSent,
+    UserTextSent,
+    UserTurnEnded,
+    AgentTurnStarted,
+    AgentTextSent,
+    AgentDtmfSent,
+    AgentTurnEnded,
+    AgentHandedOff,
+    CallEnded,
+]
+
+
+__all__ = [
+    # Output
+    "AgentSendText",
+    "AgentSendDtmf",
+    "AgentEndCall",
+    "AgentTransferCall",
+    "AgentToolCalled",
+    "AgentToolReturned",
+    "AgentHandedOff",
+    "LogMetric",
+    "LogMessage",
+    "OutputEvent",
+    # Input specific
+    "SpecificCallStarted",
+    "SpecificCallEnded",
+    "SpecificUserTurnStarted",
+    "SpecificUserDtmfSent",
+    "SpecificUserTextSent",
+    "SpecificUserTurnEnded",
+    "SpecificAgentTurnStarted",
+    "SpecificAgentTextSent",
+    "SpecificAgentDtmfSent",
+    "SpecificAgentTurnEnded",
+    "SpecificInputEvent",
+    # Input with history
+    "CallStarted",
+    "CallEnded",
+    "UserTurnStarted",
+    "UserDtmfSent",
+    "UserTextSent",
+    "UserTurnEnded",
+    "AgentTurnStarted",
+    "AgentTextSent",
+    "AgentDtmfSent",
+    "AgentTurnEnded",
+    "AgentHandedOff",
+    "InputEvent",
+]
