@@ -166,6 +166,16 @@ line/v02/
 └── example_integrations/   # Third-party service integrations
 ```
 
+## Acknowledgements
+
+Line SDK builds on the work of several excellent open-source projects:
+
+- **[LiteLLM](https://github.com/BerriAI/litellm)** - Unified interface for 100+ LLM providers, enabling seamless model switching and fallbacks
+- **[Pydantic](https://github.com/pydantic/pydantic)** - Data validation and settings management powering our configuration system
+
+
+We're committed to building Line SDK as an open platform that advances the voice AI ecosystem.
+
 ## Getting Help
 
 - [Line Docs](https://docs.cartesia.ai/line/introduction)
