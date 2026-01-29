@@ -1,4 +1,4 @@
-"""Shared agent typing for v0.2 voice agents."""
+"""Core types for Agents"""
 
 from __future__ import annotations
 

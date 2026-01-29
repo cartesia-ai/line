@@ -1,5 +1,13 @@
 """
-VoiceAgentApp - Simplified voice agent application that handles websocket communication directly.
+VoiceAgentApp - Simple harness that manages:
+    1) HTTP endpoints to create chat sessions
+    2) Websocket connections for each chat session
+
+ConversationRunner - Manages the websocket loop for a single conversation,
+    1) converting incoming websocket messages to InputEvents
+    2) applying run/cancel filters
+    2) calling agent#process as an async iterable
+    3) serializing yield OutputEvents back to websocket
 """
 
 import asyncio

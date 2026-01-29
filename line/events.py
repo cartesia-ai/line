@@ -1,4 +1,4 @@
-"""Typed event definitions for the v0.2 audio harness."""
+"""Typed event definitions"""
 
 from __future__ import annotations
 

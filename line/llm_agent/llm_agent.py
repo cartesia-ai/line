@@ -363,7 +363,6 @@ class LlmAgent:
                             self._append_to_local_history(tool_returned_output)
                             yield tool_called_output
                             yield tool_returned_output
-                            n += 1
 
                     elif tool.tool_type == ToolType.PASSTHROUGH:
                         # Emit AgentToolCalled before executing
