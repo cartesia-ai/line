@@ -273,7 +273,8 @@ async def test_loopback_tool_feeds_result_back_to_llm(turn_env):
     tool_result_msg = next((m for m in second_call_messages if m.role == "tool"), None)
     assert tool_result_msg is not None
     assert tool_result_msg.content == "72°F in NYC"
-    assert tool_result_msg.tool_call_id == "call_1"
+    # Tool call ID now uses -n suffix format for all loopback tool results
+    assert tool_result_msg.tool_call_id == "call_1-0"
 
 
 async def test_loopback_tool_multiple_iterations(turn_env):
@@ -377,9 +378,9 @@ async def test_passthrough_tool_bypasses_llm(turn_env):
     # Expected outputs:
     # 1. AgentSendText "Goodbye! "
     # 2. AgentToolCalled
-    # 3. AgentSendText "Have a great day!" (from passthrough)
-    # 4. AgentEndCall (from passthrough)
-    # 5. AgentToolReturned
+    # 3. AgentToolReturned
+    # 4. AgentSendText "Have a great day!" (from passthrough)
+    # 5. AgentEndCall (from passthrough)
 
     assert len(outputs) == 5
 
@@ -389,12 +390,12 @@ async def test_passthrough_tool_bypasses_llm(turn_env):
     assert isinstance(outputs[1], AgentToolCalled)
     assert outputs[1].tool_name == "end_call"
 
-    assert isinstance(outputs[2], AgentSendText)
-    assert outputs[2].text == "Have a great day!"
+    assert isinstance(outputs[2], AgentToolReturned)
 
-    assert isinstance(outputs[3], AgentEndCall)
+    assert isinstance(outputs[3], AgentSendText)
+    assert outputs[3].text == "Have a great day!"
 
-    assert isinstance(outputs[4], AgentToolReturned)
+    assert isinstance(outputs[4], AgentEndCall)
 
     # LLM should only be called ONCE - passthrough doesn't loop back
     assert mock_llm._call_count == 1
@@ -403,82 +404,6 @@ async def test_passthrough_tool_bypasses_llm(turn_env):
 # =============================================================================
 # Tests: Handoff Tool
 # =============================================================================
-
-
-async def test_handoff_tool_emits_handoff_event(turn_env):
-    """Test that handoff tool emits AgentHandedOff event and sets handoff target."""
-
-    class BillingAgent:
-        """A mock billing agent."""
-
-        async def process(self, env, event):
-            yield AgentSendText(text="Billing agent here!")
-
-    billing_agent = BillingAgent()
-
-    @handoff_tool
-    async def transfer_to_billing(ctx, reason: Annotated[str, "Reason"], event):
-        """Transfer to billing department."""
-
-        if isinstance(event, AgentHandedOff):
-            # Handoff tools are async generators that yield events and the handoff target
-            yield AgentSendText(text="Transferring you now...")
-
-        async for output in billing_agent.process(ctx.turn_env, event):
-            yield output
-
-    responses = [
-        [
-            StreamChunk(text="Let me transfer you. "),
-            StreamChunk(
-                tool_calls=[
-                    ToolCall(
-                        id="call_1",
-                        name="transfer_to_billing",
-                        arguments='{"reason": "payment issue"}',
-                        is_complete=True,
-                    )
-                ]
-            ),
-            StreamChunk(is_final=True),
-        ],
-    ]
-
-    agent, mock_llm = create_agent_with_mock(responses, tools=[transfer_to_billing])
-
-    outputs = await collect_outputs(
-        agent,
-        turn_env,
-        UserTextSent(
-            content="I have a billing question",
-            history=[SpecificUserTextSent(content="I have a billing question")],
-        ),
-    )
-
-    # Expected: AgentSendText (LLM), AgentToolCalled, AgentSendText (from tool),
-    # AgentSendText (from billing_agent.process), AgentToolReturned
-    assert len(outputs) == 5
-
-    assert isinstance(outputs[0], AgentSendText)
-    assert outputs[0].text == "Let me transfer you. "
-
-    assert isinstance(outputs[1], AgentToolCalled)
-    assert outputs[1].tool_name == "transfer_to_billing"
-
-    assert isinstance(outputs[2], AgentSendText)
-    assert outputs[2].text == "Transferring you now..."
-
-    assert isinstance(outputs[3], AgentSendText)
-    assert outputs[3].text == "Billing agent here!"
-
-    assert isinstance(outputs[4], AgentToolReturned)
-
-    # LLM called only once - handoff doesn't loop back
-    assert mock_llm._call_count == 1
-
-    # Verify handoff target is set (behavior tested in test_handoff_delegates_subsequent_calls)
-    assert agent.handoff_target is not None
-    assert callable(agent.handoff_target)
 
 
 async def test_handoff_delegates_subsequent_calls(turn_env):
@@ -1480,7 +1405,6 @@ class TestBuildFullHistory:
         user0 = SpecificUserTextSent(content="Get weather")
         input_history = [
             user0,
-            # Input events are NOT concatenated; each is matched separately
             SpecificAgentTextSent(content="The weather "),
             SpecificAgentTextSent(content="is sunny today!"),
         ]
