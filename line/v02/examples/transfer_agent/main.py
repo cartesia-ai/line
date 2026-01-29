@@ -11,11 +11,7 @@ from line.v02.voice_agent_app import AgentEnv, VoiceAgentApp
 
 
 async def get_agent(env: AgentEnv, call_request: CallRequest):
-    logger.info(
-        f"Starting new call for {call_request.call_id}. "
-        f"Agent system prompt: {call_request.agent.system_prompt}"
-        f"Agent introduction: {call_request.agent.introduction}"
-    )
+    logger.info(f"Starting new call for {call_request.call_id}")
 
     # Create the Spanish-speaking agent
     spanish_agent = LlmAgent(
