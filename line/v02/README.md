@@ -1,27 +1,80 @@
-# Line SDK v0.2
+# Line SDK
 
 Build production-ready voice AI agents with real-time speech capabilities.
 
-Line SDK provides a unified interface for creating conversational voice agents powered by LLMs, with support for 100+ model providers via LiteLLM, tool calling, multi-agent handoffs, and streaming responses.
+Line SDK provides a unified interface for creating conversational voice agents powered by LLMs, with support for 100+ model providers via [LiteLLM](https://github.com/BerriAI/litellm), tool calling, multi-agent handoffs, and streaming responses.
 
-## Quick Start
+## Get Started
 
-Get up and running in minutes:
+**Quick start:** Clone the repo and run an example directly:
 
-- [5-Minute Quick Start](https://example.com/quick-start) - Build your first voice agent
-- [Installation Guide](https://example.com/installation) - Setup and dependencies
-- [API Keys & Configuration](https://example.com/configuration) - Configure LLM providers
+```bash
+git clone https://github.com/cartesia-ai/line.git
+cd line/line/v02/examples/basic_chat
+ANTHROPIC_API_KEY=your-api-key uv run python main.py
+```
 
-### Minimal Example
+**Or follow the steps below to start from scratch:**
+
+### 1. Install uv (recommended)
+
+[uv](https://docs.astral.sh/uv/) is a fast Python package manager that handles dependencies automatically.
+
+```bash
+pip install uv
+```
+
+### 2. Create a new project
+
+```bash
+mkdir my-voice-agent && cd my-voice-agent
+```
+
+Create a `pyproject.toml`:
+
+```toml
+[project]
+name = "my-voice-agent"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = [
+    "cartesia-line-v02",
+    "cartesia-line",
+]
+```
+
+### 3. Install dependencies
+
+```bash
+uv sync
+```
+
+### 4. Install the CLI (for testing)
+
+```bash
+curl -fsSL https://cartesia.sh | sh
+```
+
+### 5. Set your API key
+
+```bash
+export ANTHROPIC_API_KEY=your-api-key
+# Or use OPENAI_API_KEY, GEMINI_API_KEY, etc.
+```
+
+## Hello World
+
+Create a `main.py` file:
 
 ```python
 import os
+from line.call_request import CallRequest
 from line.v02.llm import LlmAgent, LlmConfig, end_call
-from line.v02.voice_agent_app import VoiceAgentApp
+from line.v02.voice_agent_app import AgentEnv, VoiceAgentApp
 
-async def get_agent(env, call_request):
+async def get_agent(env: AgentEnv, call_request: CallRequest):
     return LlmAgent(
-        model="anthropic/claude-sonnet-4-20250514",
+        model="claude-sonnet-4-20250514",
         api_key=os.getenv("ANTHROPIC_API_KEY"),
         tools=[end_call],
         config=LlmConfig(
@@ -31,153 +84,269 @@ async def get_agent(env, call_request):
     )
 
 app = VoiceAgentApp(get_agent=get_agent)
-app.run()
+
+if __name__ == "__main__":
+    app.run()
 ```
 
-## Templates & Examples
+Run it:
 
-Ready-to-use examples to jumpstart your project:
+```bash
+uv run python main.py
+```
 
-| Template | Description |
-|----------|-------------|
-| [Basic Chat](./examples/basic_chat) | Simple conversational agent |
-| [Form Filler](./examples/form_filler) | Collect structured information |
-| [Transfer Agent](./examples/transfer_agent) | Multi-agent handoffs |
-| [Phone Transfer](./examples/transfer_phone_call) | IVR navigation & call transfers |
-| [Guardrails Wrapper](./examples/guardrails_wrapper) | Content filtering & safety |
+## Adding Tools
 
-Browse more templates:
-- [All Examples](https://example.com/examples)
-- [Community Templates](https://example.com/community-templates)
-
-## Example Integrations
-
-Production-ready integrations with third-party services:
-
-| Integration | Description | Services |
-|-------------|-------------|----------|
-| [Exa Web Research](./example_integrations/exa) | Voice agent with real-time web search | Exa API, OpenAI |
-| [Browserbase Form Filler](./example_integrations/browserbase) | Fill web forms via voice conversation | Browserbase, Stagehand, Gemini |
-
-These integrations demonstrate:
-- Custom loopback tools for external APIs
-- Passthrough tools for deterministic conversation flow
-- Async processing patterns for non-blocking operations
-- Agent wrapper patterns for extended functionality
-
-## Documentation
-
-### Core Concepts
-
-| Topic | Description |
-|-------|-------------|
-| [Agents](https://example.com/docs/agents) | LlmAgent, custom agents, agent lifecycle |
-| [Tools](https://example.com/docs/tools) | Loopback, passthrough, and handoff tools |
-| [Events](https://example.com/docs/events) | Input/output events, history management |
-| [Configuration](https://example.com/docs/configuration) | LlmConfig, system prompts, sampling |
-
-### Guides
-
-- [Tool Calling Deep Dive](https://example.com/guides/tool-calling) - Build custom tools
-- [Multi-Agent Systems](https://example.com/guides/multi-agent) - Handoffs and orchestration
-- [Streaming & Real-Time](https://example.com/guides/streaming) - Low-latency responses
-- [Error Handling](https://example.com/guides/error-handling) - Resilience patterns
-- [Testing Voice Agents](https://example.com/guides/testing) - Test strategies
-
-### API Reference
-
-- [LlmAgent](https://example.com/api/llm-agent)
-- [LlmConfig](https://example.com/api/llm-config)
-- [Tool Decorators](https://example.com/api/tool-decorators)
-- [Events Reference](https://example.com/api/events)
-- [VoiceAgentApp](https://example.com/api/voice-agent-app)
-
-## Tips & Best Practices
-
-### Voice-Optimized Prompts
-
-Voice agents need different prompting than chat agents:
+Tools let your agent perform actions and retrieve information. Use `@loopback_tool` when the result should go back to the LLM for processing:
 
 ```python
-LlmConfig(
-    system_prompt="""You are a voice assistant. Keep responses brief (1-2 sentences).
-    Speak naturally - no bullet points, URLs, or formatted text.
-    Say goodbye before calling end_call.""",
-)
+import os
+from typing import Annotated
+from line.call_request import CallRequest
+from line.v02.llm import LlmAgent, LlmConfig, end_call, loopback_tool
+from line.v02.voice_agent_app import AgentEnv, VoiceAgentApp
+
+@loopback_tool
+async def get_weather(
+    ctx,
+    city: Annotated[str, "The city to check weather for"]
+):
+    """Get the current weather for a city."""
+    # In production, call a real weather API
+    return f"72°F and sunny in {city}"
+
+async def get_agent(env: AgentEnv, call_request: CallRequest):
+    return LlmAgent(
+        model="claude-sonnet-4-20250514",
+        api_key=os.getenv("ANTHROPIC_API_KEY"),
+        tools=[end_call, get_weather],
+        config=LlmConfig(
+            system_prompt="You are a helpful voice assistant that can check the weather.",
+            introduction="Hello! I can help you check the weather. What city are you interested in?",
+        ),
+    )
+
+app = VoiceAgentApp(get_agent=get_agent)
 ```
 
-See [Prompting for Voice](https://example.com/tips/voice-prompts) for more.
+The SDK supports three tool types:
 
-### Tool Design
+| Type | Decorator | Use Case |
+|------|-----------|----------|
+| **Loopback** | `@loopback_tool` | Information retrieval, API calls—results go back to the LLM |
+| **Passthrough** | `@passthrough_tool` | Deterministic actions like `end_call`—results go directly to user |
+| **Handoff** | `@handoff_tool` | Transfer control to another agent or handler |
 
-- **Loopback tools** - For information retrieval (results go back to LLM)
-- **Passthrough tools** - For deterministic actions (end_call, transfer)
-- **Handoff tools** - For multi-agent workflows
+## Passthrough Tools
 
-See [Choosing Tool Types](https://example.com/tips/tool-types) for guidance.
+Use `@passthrough_tool` when you want deterministic actions that bypass the LLM. The output goes directly to the user:
 
-### Performance
+```python
+import os
+from typing import Annotated
+from line.call_request import CallRequest
+from line.v02.llm import LlmAgent, LlmConfig, end_call, passthrough_tool
+from line.v02.events import AgentSendText, AgentTransferCall
+from line.v02.voice_agent_app import AgentEnv, VoiceAgentApp
 
-- Use fast models (e.g., `gemini/gemini-2.0-flash`) for low latency
-- Keep system prompts concise
-- Minimize tool call chains
+@passthrough_tool
+async def transfer_to_support(
+    ctx,
+    reason: Annotated[str, "Why the customer needs support"]
+):
+    """Transfer the customer to the support line."""
+    yield AgentSendText(text="Let me transfer you to our support team right away.")
+    yield AgentTransferCall(phone_number="+18000000000")
 
-See [Latency Optimization](https://example.com/tips/latency) for benchmarks.
+async def get_agent(env: AgentEnv, call_request: CallRequest):
+    return LlmAgent(
+        model="claude-sonnet-4-20250514",
+        api_key=os.getenv("ANTHROPIC_API_KEY"),
+        tools=[end_call, transfer_to_support],
+        config=LlmConfig(
+            system_prompt="You are a helpful assistant. Transfer to support if the user has technical issues.",
+            introduction="Hello! How can I help you today?",
+        ),
+    )
 
-### Common Patterns
+app = VoiceAgentApp(get_agent=get_agent)
+```
 
-- [Wrapper Pattern](https://example.com/tips/wrapper-pattern) - Pre/post processing
-- [Graceful Degradation](https://example.com/tips/fallbacks) - Fallback models
-- [Session State](https://example.com/tips/session-state) - Managing context
+When the LLM calls `transfer_to_support`, the message and transfer happen immediately without additional LLM processing.
+
+## Agent Handoffs
+
+Transfer control between specialized agents using `agent_as_handoff`:
+
+```python
+import os
+from line.call_request import CallRequest
+from line.v02.llm import LlmAgent, LlmConfig, agent_as_handoff, end_call
+from line.v02.voice_agent_app import AgentEnv, VoiceAgentApp
+
+async def get_agent(env: AgentEnv, call_request: CallRequest):
+    # Create a Spanish-speaking agent
+    spanish_agent = LlmAgent(
+        model="gpt-4o",
+        api_key=os.getenv("OPENAI_API_KEY"),
+        tools=[end_call],
+        config=LlmConfig(
+            system_prompt="You are a helpful assistant. You speak only in Spanish.",
+            introduction="¡Hola! ¿Cómo puedo ayudarte hoy?",
+        ),
+    )
+
+    # Main agent with handoff capability
+    return LlmAgent(
+        model="claude-sonnet-4-20250514",
+        api_key=os.getenv("ANTHROPIC_API_KEY"),
+        tools=[
+            end_call,
+            agent_as_handoff(
+                spanish_agent,
+                handoff_message="Transferring you to our Spanish-speaking agent...",
+                name="transfer_to_spanish",
+                description="Transfer to a Spanish-speaking agent when the user wants to speak in Spanish.",
+            ),
+        ],
+        config=LlmConfig(
+            system_prompt="You are a helpful assistant. If the user wants to speak in Spanish, use the transfer_to_spanish tool.",
+            introduction="Hello! How can I help you today?",
+        ),
+    )
+
+app = VoiceAgentApp(get_agent=get_agent)
+```
+
+## Putting It All Together
+
+Here's a complete customer service agent with multiple tool types:
+
+```python
+import os
+from typing import Annotated
+from line.call_request import CallRequest
+from line.v02.llm import (
+    LlmAgent,
+    LlmConfig,
+    agent_as_handoff,
+    end_call,
+    loopback_tool,
+    passthrough_tool,
+)
+from line.v02.events import AgentSendText, AgentTransferCall
+from line.v02.voice_agent_app import AgentEnv, VoiceAgentApp
+
+
+@loopback_tool
+async def get_order_status(ctx, order_id: Annotated[str, "The order ID to look up"]):
+    """Look up the current status of a customer's order."""
+    # In production, fetch from your database
+    return f"Order {order_id} was delivered on January 5th"
+
+
+@passthrough_tool
+async def transfer_to_billing(ctx, reason: Annotated[str, "Why the customer needs billing support"]):
+    """Transfer the customer to the billing department."""
+    yield AgentSendText(text="Let me transfer you to our billing department.")
+    yield AgentTransferCall(phone_number="+18005551234")
+
+
+async def get_agent(env: AgentEnv, call_request: CallRequest):
+    spanish_agent = LlmAgent(
+        model="gpt-4o",
+        api_key=os.getenv("OPENAI_API_KEY"),
+        tools=[end_call],
+        config=LlmConfig(
+            system_prompt="You are a helpful customer service agent. You speak only in Spanish.",
+            introduction="¡Hola! ¿Cómo puedo ayudarte hoy?",
+        ),
+    )
+
+    return LlmAgent(
+        model="claude-sonnet-4-20250514",
+        api_key=os.getenv("ANTHROPIC_API_KEY"),
+        tools=[
+            end_call,
+            get_order_status,
+            transfer_to_billing,
+            agent_as_handoff(
+                spanish_agent,
+                handoff_message="Un momento por favor...",
+                name="transfer_to_spanish",
+                description="Transfer to a Spanish-speaking agent when requested.",
+            ),
+        ],
+        config=LlmConfig(
+            system_prompt=(
+                "You are a helpful customer service agent. "
+                "You can look up order statuses, transfer to billing, "
+                "and transfer to a Spanish-speaking agent if requested."
+            ),
+            introduction="Hello! How can I help you today?",
+        ),
+    )
+
+
+app = VoiceAgentApp(get_agent=get_agent)
+
+if __name__ == "__main__":
+    app.run()
+```
+
+**How it works:**
+
+- **User:** "What's the status of order 12345?" → Calls `get_order_status`, LLM responds naturally
+- **User:** "I need help with my bill" → Calls `transfer_to_billing`, immediately transfers
+- **User:** "Can I speak in Spanish?" → Hands off to `spanish_agent`
 
 ## LLM Provider Support
 
-Line SDK supports 100+ LLM providers through [LiteLLM](https://github.com/BerriAI/litellm), providing a unified interface across all major model providers.
+Line SDK supports 100+ LLM providers through [LiteLLM](https://github.com/BerriAI/litellm):
 
-### Popular Models
+| Provider | Model Examples |
+|----------|----------------|
+| **Anthropic** | `claude-sonnet-4-20250514`, `claude-opus-4-20250514` |
+| **OpenAI** | `gpt-4o`, `gpt-4o-mini`, `o1` |
+| **Google** | `gemini/gemini-2.0-flash`, `gemini/gemini-1.5-pro` |
+| **Meta** | `together_ai/meta-llama/Llama-3.1-70B` |
+| **Mistral** | `mistral/mistral-large-latest` |
 
-| Provider | Models | Format |
-|----------|--------|--------|
-| **OpenAI** | GPT-4o, GPT-4o-mini, o1, o3-mini | `gpt-4o`, `o1` |
-| **Anthropic** | Claude Opus 4, Claude Sonnet 4 | `anthropic/claude-sonnet-4-20250514` |
-| **Google** | Gemini 2.0 Flash, Gemini Pro | `gemini/gemini-2.0-flash` |
-| **Meta** | Llama 3.1, Llama 3.2 | `together_ai/meta-llama/Llama-3.1-70B` |
-| **Mistral** | Mistral Large, Mixtral | `mistral/mistral-large-latest` |
-| **Cohere** | Command R+, Command R | `cohere/command-r-plus` |
+Plus AWS Bedrock, Azure OpenAI, Vertex AI, Groq, Together AI, Replicate, Ollama (local), and [many more](https://docs.litellm.ai/docs/providers).
 
-### Additional Providers
+## Examples
 
-AWS Bedrock, Azure OpenAI, Vertex AI, Groq, Together AI, Replicate, Hugging Face, Ollama (local), and [many more](https://docs.litellm.ai/docs/providers).
+| Example | Description |
+|---------|-------------|
+| [Basic Chat](./examples/basic_chat) | Simple conversational agent |
+| [Form Filler](./examples/form_filler) | Collect structured information |
+| [Phone Transfer](./examples/transfer_phone_call) | IVR navigation & call transfers |
+| [Guardrails Wrapper](./examples/guardrails_wrapper) | Content filtering & safety |
 
+### Example Integrations
 
-## Project Structure
+| Integration | Description |
+|-------------|-------------|
+| [Exa Web Research](./example_integrations/exa) | Voice agent with real-time web search |
+| [Browserbase](./example_integrations/browserbase) | Fill web forms via voice conversation |
 
-```
-line/v02/
-├── llm/                    # LLM integration layer
-│   ├── llm_agent.py        # Main LlmAgent class
-│   ├── tools.py            # Built-in tools (end_call, web_search, etc.)
-│   ├── tool_types.py       # @loopback_tool, @passthrough_tool, @handoff_tool
-│   └── config.py           # LlmConfig
-├── events.py               # Event types (InputEvent, OutputEvent)
-├── agent.py                # Base agent types
-├── voice_agent_app.py      # VoiceAgentApp server
-├── examples/               # Example implementations
-└── example_integrations/   # Third-party service integrations
-```
+## Documentation
+
+- **[SDK Overview](https://docs.cartesia.ai/line/sdk/overview)** — Installation and quick start
+- **[Build Your Voice Agent](https://docs.cartesia.ai/line/sdk/build-your-voice-agent)** — Prompting, tools, and handoffs
+- **[Agents](https://docs.cartesia.ai/line/sdk/agents)** — LlmAgent, custom agents, CallRequest
+- **[Tools](https://docs.cartesia.ai/line/sdk/tools)** — Loopback, passthrough, and handoff tools
+- **[Events](https://docs.cartesia.ai/line/sdk/events)** — Input/output events and history
 
 ## Acknowledgements
 
-Line SDK builds on the work of several excellent open-source projects:
+Line SDK builds on these open-source projects:
 
-- **[LiteLLM](https://github.com/BerriAI/litellm)** - Unified interface for 100+ LLM providers, enabling seamless model switching and fallbacks
-- **[Pydantic](https://github.com/pydantic/pydantic)** - Data validation and settings management powering our configuration system
-
-
-We're committed to building Line SDK as an open platform that advances the voice AI ecosystem.
+- **[LiteLLM](https://github.com/BerriAI/litellm)** — Unified interface for 100+ LLM providers
+- **[Pydantic](https://github.com/pydantic/pydantic)** — Data validation powering our configuration system
 
 ## Getting Help
 
-- [Line Docs](https://docs.cartesia.ai/line/introduction)
-- [Support Email](mailto:support@cartesia.ai)
+- [Documentation](https://docs.cartesia.ai/line/introduction)
 - [Discord Community](https://discord.gg/GExXcjM7)
+- [Email Support](mailto:support@cartesia.ai)
