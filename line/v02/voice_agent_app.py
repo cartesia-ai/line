@@ -7,16 +7,15 @@ from datetime import datetime, timezone
 import json
 import os
 import re
-from typing import AsyncIterable, Awaitable, Callable, List, Optional
+from typing import Any, AsyncIterable, Awaitable, Callable, Dict, List, Optional
 from urllib.parse import urlencode
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from loguru import logger
-from pydantic import TypeAdapter
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 import uvicorn
 
-from line.call_request import AgentConfig, CallRequest, PreCallResult
 from line.harness_types import (
     AgentSpeechInput,
     AgentStateInput,
@@ -68,6 +67,37 @@ from line.v02.events import (
     UserTurnEnded,
     UserTurnStarted,
 )
+
+
+# Call request types (copied from line.call_request for v02 self-containment)
+class PreCallResult(BaseModel):
+    """Result from pre_call_handler containing metadata and config."""
+
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Metadata to include with the call")
+    config: Dict[str, Any] = Field(default_factory=dict, description="Configuration for the call")
+
+
+class AgentConfig(BaseModel):
+    """Agent information for the call."""
+
+    system_prompt: Optional[str] = None  # System prompt to define the agent's role and behavior
+    introduction: Optional[str] = None  # Introduction message for the agent to start the call with
+
+
+class CallRequest(BaseModel):
+    """Request body for the /chats endpoint."""
+
+    call_id: str
+    from_: str = Field(alias="from")  # Using from_ to avoid Python keyword conflict
+    to: str
+    agent_call_id: str  # Agent call ID for logging and correlation
+    agent: AgentConfig
+    metadata: Optional[Dict[str, Any]] = None
+
+    model_config = ConfigDict(
+        # Allow both field name (from_) and alias (from) for input
+        populate_by_name=True
+    )
 
 
 class UserState:

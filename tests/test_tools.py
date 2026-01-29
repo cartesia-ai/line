@@ -10,7 +10,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from line.v02.events import AgentSendDtmf, AgentSendText, AgentTransferCall
-from line.v02.llm.tools import send_dtmf, transfer_call
+from line.v02.llm_agent.tools.system import send_dtmf, transfer_call
 
 # Use anyio for async test support with asyncio backend only
 pytestmark = [pytest.mark.anyio, pytest.mark.parametrize("anyio_backend", ["asyncio"])]

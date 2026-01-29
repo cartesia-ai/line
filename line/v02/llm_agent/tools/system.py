@@ -1,15 +1,23 @@
 """
-Built-in tools for LLM agents.
+Built-in system tools for LLM agents.
+
+Provides end_call, send_dtmf, transfer_call, and web_search tools.
 """
 
 from dataclasses import dataclass, field
 from typing import Annotated, Any, Dict, Literal, Optional
 
-from line.v02.events import AgentEndCall as AgentEndCallEvent
-from line.v02.events import AgentHandedOff, AgentSendDtmf, AgentSendText, AgentTransferCall, CallStarted
-from line.v02.llm.agent import Agent, ToolEnv
-from line.v02.llm.tool_types import passthrough_tool
-from line.v02.llm.tool_utils import FunctionTool, ToolType, construct_function_tool
+from line.v02.agent import Agent
+from line.v02.events import (
+    AgentEndCall,
+    AgentHandedOff,
+    AgentSendDtmf,
+    AgentSendText,
+    AgentTransferCall,
+    CallStarted,
+)
+from line.v02.llm_agent.tools.decorators import passthrough_tool
+from line.v02.llm_agent.tools.utils import FunctionTool, ToolEnv, ToolType, construct_function_tool
 
 # Valid DTMF buttons
 DtmfButton = Literal["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "*", "#"]
@@ -130,7 +138,7 @@ web_search = WebSearchTool()
 @passthrough_tool
 async def end_call(ctx: ToolEnv):
     """End the call. Say goodbye in your response before calling this."""
-    yield AgentEndCallEvent()
+    yield AgentEndCall()
 
 
 @passthrough_tool
@@ -252,3 +260,14 @@ def _call_agent(agent: Agent, turn_env, event):
     else:
         # AgentCallable
         return agent(turn_env, event)
+
+
+__all__ = [
+    "DtmfButton",
+    "WebSearchTool",
+    "web_search",
+    "end_call",
+    "send_dtmf",
+    "transfer_call",
+    "agent_as_handoff",
+]

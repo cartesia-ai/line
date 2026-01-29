@@ -137,11 +137,28 @@ class RouteBuilder:
     def __init__(self, bridge: "Bridge"):
         self.bridge = weakref.proxy(bridge)
         self.route_config = RouteConfig()
-        self.route_handler: "RouteHandler" = None
+        self._route_handler_ref: "weakref.ref[RouteHandler]" = None
 
     def _set_route_handler(self, route_handler: "RouteHandler") -> None:
         """Creates a weak reference to the route_handler."""
-        self.route_handler = weakref.proxy(route_handler)
+        self._route_handler_ref = weakref.ref(route_handler)
+
+    def _get_route_handler(self) -> "RouteHandler":
+        """Get the route handler, raising an error if it has been garbage collected."""
+        if self._route_handler_ref is None:
+            raise RuntimeError("RouteHandler has not been set on this RouteBuilder")
+        route_handler = self._route_handler_ref()
+        if route_handler is None:
+            raise ReferenceError(
+                "RouteHandler has been garbage collected. "
+                "Ensure the RouteHandler is kept alive (e.g., by storing it in bridge.routes)."
+            )
+        return route_handler
+
+    @property
+    def route_handler(self) -> "RouteHandler":
+        """Get the route handler (property for backward compatibility)."""
+        return self._get_route_handler()
 
     def _has_control_operation(self) -> bool:
         """Check if the route has a control operation."""
@@ -247,17 +264,21 @@ class RouteBuilder:
         handlers[event_type] = handler
 
         # Add implicit handler to the bridge to handle the suspend.
+        # We need to capture the route_handler in a local variable to avoid issues with
+        # the weak reference being garbage collected before the lambda is invoked.
+        # The lambda captures `route_handler` directly, which is a strong reference.
+        route_handler = self._get_route_handler()
         if method_name == "suspend":
             self.bridge.on(event_type)._add_control_operation(
-                lambda message: self.route_handler._suspend(message, handler)
+                lambda message, rh=route_handler: rh._suspend(message, handler)
             )
         elif method_name == "resume":
             self.bridge.on(event_type)._add_control_operation(
-                lambda message: self.route_handler._resume(message, handler)
+                lambda message, rh=route_handler: rh._resume(message, handler)
             )
         elif method_name == "interrupt":
             self.bridge.on(event_type, filter_fn=filter_fn)._add_control_operation(
-                lambda message: self.route_handler._interrupt(message, handler)
+                lambda message, rh=route_handler: rh._interrupt(message, handler)
             )
         return self
 
