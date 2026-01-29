@@ -57,6 +57,7 @@ class FunctionTool:
     func: Callable
     parameters: Dict[str, "ParameterInfo"]
     tool_type: ToolType = ToolType.LOOPBACK
+    is_background: bool = False
 
 
 @dataclass
@@ -182,7 +183,7 @@ def _validate_tool_signature(func: Callable, tool_type: ToolType) -> None:
             )
 
 
-def construct_function_tool(func, name, description, tool_type):
+def construct_function_tool(func, name, description, tool_type, is_background=False):
     _validate_tool_signature(func, tool_type)
     parameters = _extract_parameters(func)
     return FunctionTool(
@@ -191,4 +192,5 @@ def construct_function_tool(func, name, description, tool_type):
         func=func,
         parameters=parameters,
         tool_type=tool_type,
+        is_background=is_background,
     )
