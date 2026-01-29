@@ -8,9 +8,9 @@ from typing import Annotated, Literal, Optional
 
 import pytest
 
-from line.v02.llm.agent import AgentSendText
-from line.v02.llm.schema_converter import function_tool_to_openai
-from line.v02.llm.tool_types import handoff_tool, loopback_tool, passthrough_tool
+from line.v02.events import AgentSendText
+from line.v02.llm_agent.schema_converter import function_tool_to_openai
+from line.v02.llm_agent.tools.decorators import handoff_tool, loopback_tool, passthrough_tool
 
 # =============================================================================
 # Tests: Tool Signature Validation

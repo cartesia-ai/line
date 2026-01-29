@@ -2,9 +2,8 @@ import os
 
 from tools import echo
 
-from line.call_request import CallRequest
-from line.v02.llm import LlmAgent, LlmConfig, end_call
-from line.v02.voice_agent_app import AgentEnv, VoiceAgentApp
+from line.v02.llm_agent import LlmAgent, LlmConfig, end_call
+from line.v02.voice_agent_app import AgentEnv, CallRequest, VoiceAgentApp
 
 #  GEMINI_API_KEY=your-key uv python main.py
 

@@ -6,8 +6,8 @@ uv run pytest line/v02/llm/tests/test_config.py -v
 
 from typing import Optional
 
-from line.call_request import AgentConfig, CallRequest
-from line.v02.llm.config import FALLBACK_INTRODUCTION, FALLBACK_SYSTEM_PROMPT, LlmConfig
+from line.v02.llm_agent.config import FALLBACK_INTRODUCTION, FALLBACK_SYSTEM_PROMPT, LlmConfig
+from line.v02.voice_agent_app import AgentConfig, CallRequest
 
 
 def make_call_request(

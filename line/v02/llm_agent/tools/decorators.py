@@ -13,7 +13,7 @@ Works on both standalone functions and class methods.
 from functools import partial
 from typing import Any, Callable, Union
 
-from line.v02.llm.tool_utils import FunctionTool, ToolType, construct_function_tool
+from line.v02.llm_agent.tools.utils import FunctionTool, ToolType, construct_function_tool
 
 
 class _ToolDescriptor(FunctionTool):
@@ -136,3 +136,10 @@ def handoff_tool(func: Callable) -> FunctionTool:
     Tool yields OutputEvent objects and optionally yields the handoff target (AgentCallable).
     """
     return _construct_tool_descriptor(func, ToolType.HANDOFF)
+
+
+__all__ = [
+    "loopback_tool",
+    "passthrough_tool",
+    "handoff_tool",
+]

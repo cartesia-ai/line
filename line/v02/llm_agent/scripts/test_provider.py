@@ -29,20 +29,22 @@ sys.path.insert(
 )
 
 from line.v02.agent import TurnEnv
-from line.v02.llm import (
+from line.v02.events import (
     AgentSendText,
     AgentToolCalled,
     AgentToolReturned,
     CallStarted,
+    SpecificUserTextSent,
+    UserTextSent,
+)
+from line.v02.llm_agent import (
     LlmAgent,
     LlmConfig,
     LLMProvider,
     Message,
-    SpecificUserTextSent,
-    UserTextSent,
     loopback_tool,
+    web_search,
 )
-from line.v02.llm.tools import web_search
 
 # =============================================================================
 # Test Tools
