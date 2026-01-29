@@ -20,7 +20,7 @@ from typing import (
 
 from loguru import logger
 
-from line.v02.events import AgentEndCall, SpecificCallEnded
+from line.v02.events import AgentEndCall, SpecificAgentHandedOff, SpecificCallEnded
 from line.v02.llm.agent import (
     AgentCallable,
     AgentHandedOff,
@@ -170,7 +170,11 @@ class LlmAgent:
         )
 
         self._introduction_sent = False
-        self._local_history: List[OutputEvent] = []
+        # Local history annotated with (triggering_event_id, event)
+        # The event_id is the stable UUID of the triggering input event
+        self._local_history: List[tuple[str, OutputEvent]] = []
+        # Event ID of the current triggering input event (set on each process() call)
+        self._current_event_id: str = ""
         self._handoff_target: Optional[AgentCallable] = None  # Normalized process function
 
         logger.info(f"LlmAgent initialized with model={self._model}, tools={[t.name for t in self._tools]}")
@@ -194,6 +198,10 @@ class LlmAgent:
 
     async def process(self, env: TurnEnv, event: InputEvent) -> AsyncIterable[OutputEvent]:
         """Process an input event and yield output events."""
+        # Track the event_id of the triggering input event
+        # The triggering event is the last element in event.history
+        self._current_event_id = event.history[-1].event_id if event.history else ""
+
         # If handoff is active, call the handed-off process function
         if self._handoff_target is not None:
             async for output in self._handoff_target(env, event):
@@ -221,7 +229,7 @@ class LlmAgent:
         """Generate a response using the LLM."""
 
         for _iteration in range(self._max_tool_iterations):
-            messages = self._build_messages(event.history, self._local_history)
+            messages = self._build_messages(event.history, self._local_history, self._current_event_id)
             tool_calls_dict: Dict[str, ToolCall] = {}
 
             # Build kwargs for LLM chat, including web_search_options if available
@@ -305,7 +313,11 @@ class LlmAgent:
 
                     elif tool.tool_type == ToolType.HANDOFF:
                         # AgentHandedOff input event is passed to the handoff target to execute the tool
-                        async for item in normalized_func(ctx, **tool_args, event=AgentHandedOff()):
+                        specific_event = SpecificAgentHandedOff()
+                        event = AgentHandedOff(
+                            history=event.history + [specific_event], **specific_event.model_dump()
+                        )
+                        async for item in normalized_func(ctx, **tool_args, event=event):
                             self._append_to_local_history(item)
                             yield item
 
@@ -346,22 +358,24 @@ class LlmAgent:
                 break
 
     def _build_messages(
-        self, input_history: List[SpecificInputEvent], local_history: List[OutputEvent]
+        self,
+        input_history: List[SpecificInputEvent],
+        local_history: List[tuple[str, OutputEvent]],
+        current_event_id: str,
     ) -> List[Message]:
         """Build LLM messages from conversation history.
 
         Merges input_history (canonical) with local_history using the following rules:
-        1. Observable events can be matched between local and input history
-        2. Unobservable events are interpolated based on their relative position
-           to observable events
-        3. Unobserved observable events are excluded from the merged history
-           (because the audio harness is the source of truth for them)
+        1. Input history is the source of truth for all events
+        2. Local history events are interpolated based on which input event triggered them
+        3. Observable events are matched between local and input history
+        4. Unobservable events (tool calls) are interpolated relative to observables
 
         The full_history contains:
-        - SpecificInputEvent for events from input_history (including matched observables)
-        - OutputEvent for unobservable events from local_history
+        - SpecificInputEvent for events from input_history
+        - OutputEvent for unobservable/current events from local_history
         """
-        full_history = _build_full_history(input_history, local_history)
+        full_history = _build_full_history(input_history, local_history, current_event_id)
 
         messages = []
         for event in full_history:
@@ -401,8 +415,8 @@ class LlmAgent:
         return messages
 
     def _append_to_local_history(self, event: OutputEvent) -> None:
-        """Append an output event to local history."""
-        self._local_history.append(event)
+        """Append an output event to local history, annotated with the triggering event_id."""
+        self._local_history.append((self._current_event_id, event))
 
     async def cleanup(self) -> None:
         """Clean up resources."""
@@ -412,32 +426,81 @@ class LlmAgent:
 
 def _build_full_history(
     input_history: List[SpecificInputEvent],
-    local_history: List[OutputEvent],
+    local_history: List[tuple[str, OutputEvent]],
+    current_event_id: str,
 ) -> List[Union[SpecificInputEvent, OutputEvent]]:
     """
     Build full history by merging input_history (canonical) with local_history.
 
-    Preprocessing:
-    - Concatenates contiguous AgentSendText events in local_history
-    - Concatenates contiguous SpecificAgentTextSent events in input_history
+    Args:
+        input_history: Canonical history from the external harness (source of truth)
+        local_history: Local events annotated with (triggering_event_id, event)
+        current_event_id: Event ID of the current input event being processed
+
+    Algorithm:
+    1. Split local history into prior (already observed) and current (not yet observed)
+    2. Build a map from event_id to list of responsive local events
+    3. Iterate over input events:
+       - If the event has responsive local events, process a "slice" of input
+         from this event to the next triggering event using interpolation logic
+       - If no responsive local events, output the event as-is
+    4. Append current local events at the end
 
     Rules:
-    1 ) An event is considered "observable" if the external harness tracks it and
-        returns it to us in input_history: AgentSendDtmf, AgentSendText, AgentEndCall
-         - These can be matched between local and input history
-    2. Other events are unobservable (e.g., AgentToolReturned)
-    3. Match observable local events to input_history events ("observed")
-    4. Input history is canonical; interpolate unobservable events based on
-       their relative position to observable events
-    5. Unobserved observable events are excluded from full history
-    6. For text events, if input is a prefix of local, match and carry forward
-       the unmatched suffix
+    - Input history is the source of truth for all observable events
+    - Observable events: AgentSendText, AgentSendDtmf, AgentEndCall (and their input counterparts)
+    - Unobservable events (tool calls) are interpolated relative to observables
+    - Prefix matching: if input text is prefix of local text, match and carry forward suffix
     """
-    # Preprocess: concatenate contiguous text events
-    preprocessed_local = _concat_contiguous_agent_send_text(local_history)
-    preprocessed_input = _concat_contiguous_agent_text_sent(input_history)
+    from collections import defaultdict
 
-    return _build_full_history_rec(preprocessed_input, preprocessed_local)
+    # Split local history into prior and current based on event_id
+    prior_local = [(eid, e) for eid, e in local_history if eid != current_event_id]
+    current_local = [e for eid, e in local_history if eid == current_event_id]
+
+    # Build map from event_id to list of responsive local events
+    local_by_event_id: dict[str, List[OutputEvent]] = defaultdict(list)
+    for eid, event in prior_local:
+        local_by_event_id[eid].append(event)
+
+    # Build a set of event_ids that have responsive local events
+    trigger_event_ids = set(local_by_event_id.keys())
+
+    # Process input in slices
+    result: List[Union[SpecificInputEvent, OutputEvent]] = []
+    i = 0
+
+    while i < len(input_history):
+        current_evt = input_history[i]
+        if current_evt.event_id in trigger_event_ids:
+            # Find the end of this slice (next trigger index or end of input)
+            slice_end = len(input_history)
+            for j in range(i + 1, len(input_history)):
+                if input_history[j].event_id in trigger_event_ids:
+                    slice_end = j
+                    break
+
+            # Get the slice of input and the responsive local events
+            input_slice = input_history[i:slice_end]
+            local_slice = local_by_event_id[current_evt.event_id]
+
+            # Preprocess local slice for concatenation
+            preprocessed_local_slice = _concat_contiguous_agent_send_text(local_slice)
+
+            # Apply interpolation logic to this slice
+            slice_result = _build_history_rec(input_slice, preprocessed_local_slice)
+            result.extend(slice_result)
+
+            i = slice_end
+        else:
+            # No responsive local events, output as-is
+            result.append(input_history[i])
+            i += 1
+
+    # Append current local events (not yet observed, use local version)
+    result.extend(current_local)
+
+    return result
 
 
 def _concat_contiguous_agent_send_text(local_history: List[OutputEvent]) -> List[OutputEvent]:
@@ -451,20 +514,7 @@ def _concat_contiguous_agent_send_text(local_history: List[OutputEvent]) -> List
     return _reduce_windowed(local_history, reduce_texts)
 
 
-def _concat_contiguous_agent_text_sent(
-    input_history: List[SpecificInputEvent],
-) -> List[SpecificInputEvent]:
-    """Concatenate contiguous SpecificAgentTextSent events in input history."""
-
-    def reduce_texts(a: SpecificInputEvent, b: SpecificInputEvent) -> List[SpecificInputEvent]:
-        if isinstance(a, SpecificAgentTextSent) and isinstance(b, SpecificAgentTextSent):
-            return [SpecificAgentTextSent(content=a.content + b.content)]
-        return [a, b]
-
-    return _reduce_windowed(input_history, reduce_texts)
-
-
-def _build_full_history_rec(
+def _build_history_rec(
     input_history: List[SpecificInputEvent],
     local_history: List[OutputEvent],
 ) -> List[Union[SpecificInputEvent, OutputEvent]]:
@@ -493,10 +543,10 @@ def _build_full_history_rec(
 
     # If head_input is non-observable: output it, continue with same local, rest of input
     if head_input is not None and not _is_input_observable(head_input):
-        return [head_input] + _build_full_history_rec(rest_input, local_history)
+        return [head_input] + _build_history_rec(rest_input, local_history)
     # If head_local is non-observable: output it, continue with rest of local, same input
     if head_local is not None and not _is_local_observable(head_local):
-        return [head_local] + _build_full_history_rec(input_history, rest_local)
+        return [head_local] + _build_history_rec(input_history, rest_local)
 
     # Now both heads are observable (or one/both missing)
 
@@ -510,15 +560,15 @@ def _build_full_history_rec(
             # in local_history, preserving the original ordering of events.
             drained_unobservables, remaining_local = _drain_leading_unobservables(rest_local)
             new_local = ([suffix_event] if suffix_event else []) + list(remaining_local)
-            return [matched_input] + drained_unobservables + _build_full_history_rec(rest_input, new_local)
+            return [matched_input] + drained_unobservables + _build_history_rec(rest_input, new_local)
 
     # If head_local exists but no match (or head_input missing): skip head_local
     if head_local is not None:
-        return _build_full_history_rec(input_history, rest_local)
+        return _build_history_rec(input_history, rest_local)
 
     # If head_input exists but no head_local left: output head_input (canonical)
     if head_input is not None:
-        return [head_input] + _build_full_history_rec(rest_input, local_history)
+        return [head_input] + _build_history_rec(rest_input, local_history)
 
     # Both are None - should have been caught by base case
     return []
