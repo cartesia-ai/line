@@ -128,12 +128,8 @@ web_search = WebSearchTool()
 
 
 @passthrough_tool
-async def end_call(
-    ctx: ToolEnv, message: Annotated[Optional[str], "The message to say before ending the call"] = None
-):
-    """End the call."""
-    if message is not None:
-        yield AgentSendText(text=message)
+async def end_call(ctx: ToolEnv):
+    """End the call. Say goodbye in your response before calling this."""
     yield AgentEndCallEvent()
 
 

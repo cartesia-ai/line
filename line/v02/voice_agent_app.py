@@ -363,7 +363,6 @@ class ConversationRunner:
                         break
                     if mapped is None:
                         continue
-                    logger.info(f"Sending output message type: {type(mapped).__name__}")
                     await self.websocket.send_json(mapped.model_dump())
             except asyncio.CancelledError:
                 pass
