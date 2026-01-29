@@ -240,14 +240,14 @@ Respond with ONLY a JSON object (no markdown, no explanation):
         """Extract user text from the event, ignoring DTMF inputs."""
         if not event.content:
             return None
-        
+
         # Collect all text content, filtering out DTMF
         text_parts = []
         for item in event.content:
             # SpecificUserTextSent has 'content', SpecificUserDtmfSent has 'button'
-            if hasattr(item, 'content'):
+            if hasattr(item, "content"):
                 text_parts.append(item.content)
-        
+
         # Return concatenated text if any exists
         return " ".join(text_parts) if text_parts else None
 
