@@ -15,6 +15,7 @@ from loguru import logger
 from line.v02.llm import (
     AgentEndCall,
     AgentSendText,
+    CallEnded,
     CallStarted,
     InputEvent,
     LlmAgent,
@@ -115,14 +116,18 @@ class GuardrailsWrapper:
 
     async def process(self, env: TurnEnv, event: InputEvent) -> AsyncIterable[OutputEvent]:
         """Process an input event with guardrails applied."""
-        # If call was ended due to violations, don't process further
-        if self._call_ended:
-            return
-
         # Pass through non-user-text events directly
         if isinstance(event, CallStarted):
             async for output in self.inner_agent.process(env, event):
                 yield output
+            return
+
+        # If call was ended due to violations, only allow CallEnded through
+        # (needed for inner agent cleanup of background tasks)
+        if self._call_ended:
+            if isinstance(event, CallEnded):
+                async for output in self.inner_agent.process(env, event):
+                    yield output
             return
 
         # For user text events, apply preprocessing
