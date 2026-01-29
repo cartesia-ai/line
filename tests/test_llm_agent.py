@@ -11,7 +11,8 @@ from typing import Annotated, List, Optional
 
 import pytest
 
-from line.v02.llm.agent import (
+from line.v02.agent import TurnEnv
+from line.v02.events import (
     AgentEndCall,
     AgentHandedOff,
     AgentSendText,
@@ -22,14 +23,13 @@ from line.v02.llm.agent import (
     SpecificAgentTextSent,
     SpecificCallEnded,
     SpecificUserTextSent,
-    TurnEnv,
     UserTextSent,
 )
-from line.v02.llm.config import LlmConfig
-from line.v02.llm.llm_agent import LlmAgent, _build_full_history
-from line.v02.llm.provider import Message, StreamChunk, ToolCall
-from line.v02.llm.tool_types import handoff_tool, loopback_tool, passthrough_tool
-from line.v02.llm.tool_utils import FunctionTool
+from line.v02.llm_agent.config import LlmConfig
+from line.v02.llm_agent.llm_agent import LlmAgent, _build_full_history
+from line.v02.llm_agent.provider import Message, StreamChunk, ToolCall
+from line.v02.llm_agent.tools.decorators import handoff_tool, loopback_tool, passthrough_tool
+from line.v02.llm_agent.tools.utils import FunctionTool
 
 # Use anyio for async test support with asyncio backend only (trio not installed)
 pytestmark = [pytest.mark.anyio, pytest.mark.parametrize("anyio_backend", ["asyncio"])]
@@ -831,7 +831,7 @@ async def test_loopback_tool_returns_bare_value(turn_env):
 
 async def test_plain_function_wrapped_as_loopback_tool():
     """Test that plain functions passed to LlmAgent are wrapped as loopback tools."""
-    from line.v02.llm.tool_utils import ToolType
+    from line.v02.llm_agent.tools.utils import ToolType
 
     # Plain function without any decorator
     async def my_tool(ctx, query: Annotated[str, "Search query"]) -> str:
@@ -920,7 +920,7 @@ async def test_plain_function_works_as_loopback_tool(turn_env):
 
 async def test_mixed_decorated_and_plain_functions(turn_env):
     """Test that decorated and plain functions can be mixed."""
-    from line.v02.llm.tool_utils import ToolType
+    from line.v02.llm_agent.tools.utils import ToolType
 
     @loopback_tool
     async def decorated_tool(ctx) -> str:

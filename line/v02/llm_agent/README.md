@@ -1,12 +1,15 @@
-# LLM Module for Line SDK
+# LLM Agent Module for Line SDK
 
 A unified interface for building LLM-powered voice agents with 100+ provider support via LiteLLM.
 
 ## Quick Start
 
 ```python
-from typing import Annotated
-from line.v02.llm import LlmAgent, LlmConfig, loopback_tool, end_call
+from typing import Annotated, Literal, Optional
+from line.v02.events import AgentSendText, AgentEndCall, AgentHandedOff
+from line.v02.llm_agent import (
+    LlmAgent, LlmConfig, loopback_tool, passthrough_tool, handoff_tool,
+)
 
 # Define a custom tool
 @loopback_tool
@@ -149,7 +152,7 @@ config = LlmConfig(
 Use `LlmConfig.from_call_request()` to automatically extract configuration from incoming call requests with sensible defaults:
 
 ```python
-from line.v02.llm import LlmAgent, LlmConfig
+from line.v02.llm_agent import LlmAgent, LlmConfig
 
 async def get_agent(env, call_request):
     return LlmAgent(
@@ -239,5 +242,5 @@ export ANTHROPIC_API_KEY=your-key
 export GEMINI_API_KEY=your-key
 
 # Run tests (will test whichever providers have keys set)
-uv run python line/v02/llm/scripts/test_provider.py
+uv run python line/v02/llm_agent/scripts/test_provider.py
 ```

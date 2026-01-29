@@ -8,8 +8,7 @@ from typing import Annotated, Any, Optional
 from loguru import logger
 import yaml
 
-from line.v02.llm import loopback_tool
-from line.v02.llm.agent import ToolEnv
+from line.v02.llm_agent import ToolEnv, loopback_tool
 
 
 class FormFiller:

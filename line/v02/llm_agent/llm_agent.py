@@ -21,9 +21,9 @@ from typing import (
 
 from loguru import logger
 
-from line.v02.events import AgentEndCall, SpecificAgentHandedOff, SpecificCallEnded
-from line.v02.llm.agent import (
-    AgentCallable,
+from line.v02.agent import AgentCallable, TurnEnv
+from line.v02.events import (
+    AgentEndCall,
     AgentHandedOff,
     AgentSendDtmf,
     AgentSendText,
@@ -34,17 +34,17 @@ from line.v02.llm.agent import (
     InputEvent,
     OutputEvent,
     SpecificAgentDtmfSent,
+    SpecificAgentHandedOff,
     SpecificAgentTextSent,
+    SpecificCallEnded,
     SpecificInputEvent,
     SpecificUserTextSent,
-    ToolEnv,
-    TurnEnv,
 )
-from line.v02.llm.config import LlmConfig
-from line.v02.llm.provider import LLMProvider, Message, ToolCall
-from line.v02.llm.tool_types import loopback_tool
-from line.v02.llm.tool_utils import FunctionTool, ToolType, construct_function_tool
-from line.v02.llm.tools import WebSearchTool
+from line.v02.llm_agent.config import LlmConfig
+from line.v02.llm_agent.provider import LLMProvider, Message, ToolCall
+from line.v02.llm_agent.tools.decorators import loopback_tool
+from line.v02.llm_agent.tools.system import WebSearchTool
+from line.v02.llm_agent.tools.utils import FunctionTool, ToolEnv, ToolType, construct_function_tool
 
 T = TypeVar("T")
 

@@ -3,7 +3,7 @@
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-from line.call_request import CallRequest
+from line.v02.voice_agent_app import CallRequest
 
 # Fallback values used when CallRequest doesn't specify them
 FALLBACK_SYSTEM_PROMPT = (

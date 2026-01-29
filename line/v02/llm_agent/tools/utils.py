@@ -1,8 +1,11 @@
 """
-Function tool definitions for LLM agents.
+Tool utilities for LLM agents.
 
-Provides FunctionTool class for defining tools with simple Annotated syntax.
-See README.md for examples.
+This module consolidates:
+- FunctionTool class and ParameterInfo for defining tools with Annotated syntax
+- ToolType enum for tool execution paradigms
+- ToolEnv context class passed to tool functions
+- Protocol classes for tool function signatures
 
 Parameter syntax:
     # Required parameter with description
@@ -28,16 +31,26 @@ from inspect import Parameter, signature
 from typing import (
     Annotated,
     Any,
+    AsyncIterable,
+    Awaitable,
     Callable,
     Dict,
     List,
     Optional,
+    Protocol,
     Type,
     Union,
     get_args,
     get_origin,
     get_type_hints,
 )
+
+from line.v02.agent import TurnEnv
+from line.v02.events import InputEvent, OutputEvent
+
+# -------------------------
+# Tool Type Enum
+# -------------------------
 
 
 class ToolType(Enum):
@@ -46,6 +59,64 @@ class ToolType(Enum):
     LOOPBACK = "loopback"
     PASSTHROUGH = "passthrough"
     HANDOFF = "handoff"
+
+
+# -------------------------
+# Tool Context
+# -------------------------
+
+
+@dataclass
+class ToolEnv:
+    """Context passed to tool functions."""
+
+    turn_env: TurnEnv
+
+
+# -------------------------
+# Tool Function Protocols
+# -------------------------
+
+
+class LoopbackToolFn(Protocol):
+    """Loopback tool: result is sent back to the LLM for continued generation.
+
+    Signature: (ctx: ToolEnv, **kwargs) -> AsyncIterable[Any] | Awaitable[Any] | Any
+    """
+
+    def __call__(self, ctx: ToolEnv, /, **kwargs: Any) -> Union[AsyncIterable[Any], Awaitable[Any], Any]: ...
+
+
+class PassthroughToolFn(Protocol):
+    """Passthrough tool: response bypasses the LLM and goes directly to the user.
+
+    Signature: (ctx: ToolEnv, **kwargs) ->
+        AsyncIterable[OutputEvent] | Awaitable[OutputEvent] | OutputEvent
+    """
+
+    def __call__(
+        self, ctx: ToolEnv, /, **kwargs: Any
+    ) -> Union[AsyncIterable[OutputEvent], Awaitable[OutputEvent], OutputEvent]: ...
+
+
+class HandoffToolFn(Protocol):
+    """Handoff tool: transfers control to another agent.
+
+    Signature: (ctx: ToolEnv, event: InputEvent, **kwargs) ->
+        AsyncIterable[OutputEvent] | Awaitable[OutputEvent] | OutputEvent
+
+    The event parameter receives AgentHandedOff on initial handoff,
+    then subsequent InputEvents for continued processing.
+    """
+
+    def __call__(
+        self, ctx: ToolEnv, /, event: InputEvent, **kwargs: Any
+    ) -> Union[AsyncIterable[OutputEvent], Awaitable[OutputEvent], OutputEvent]: ...
+
+
+# -------------------------
+# Function Tool Definitions
+# -------------------------
 
 
 @dataclass
@@ -70,6 +141,11 @@ class ParameterInfo:
     required: bool = True
     default: Any = None
     enum: Optional[List[Any]] = None
+
+
+# -------------------------
+# Parameter Extraction Helpers
+# -------------------------
 
 
 def _is_optional_type(type_hint: Type) -> bool:
@@ -184,6 +260,7 @@ def _validate_tool_signature(func: Callable, tool_type: ToolType) -> None:
 
 
 def construct_function_tool(func, name, description, tool_type, is_background=False):
+    """Construct a FunctionTool from a function."""
     _validate_tool_signature(func, tool_type)
     parameters = _extract_parameters(func)
     return FunctionTool(
@@ -194,3 +271,18 @@ def construct_function_tool(func, name, description, tool_type, is_background=Fa
         tool_type=tool_type,
         is_background=is_background,
     )
+
+
+__all__ = [
+    # Tool context
+    "ToolEnv",
+    # Tool function protocols
+    "ToolType",
+    "LoopbackToolFn",
+    "PassthroughToolFn",
+    "HandoffToolFn",
+    "FunctionTool",
+    "ParameterInfo",
+    # constructor
+    "construct_function_tool",
+]

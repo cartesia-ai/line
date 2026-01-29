@@ -11,8 +11,8 @@ calling formats expected by different LLM providers:
 Example:
     ```python
     from typing import Annotated
-    from line.v02.llm import loopback_tool
-    from line.v02.llm.schema_converter import (
+    from line.v02.llm_agent import loopback_tool
+    from line.v02.llm_agent.schema_converter import (
         function_tool_to_openai,
         function_tool_to_anthropic,
         function_tool_to_gemini,
@@ -32,7 +32,7 @@ Example:
 from enum import Enum
 from typing import Any, Dict, List, Literal, Type, Union, get_args, get_origin
 
-from line.v02.llm.tool_utils import FunctionTool, ParameterInfo
+from line.v02.llm_agent.tools.utils import FunctionTool, ParameterInfo
 
 
 def python_type_to_json_schema(type_annotation: Type) -> Dict[str, Any]:

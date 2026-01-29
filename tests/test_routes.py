@@ -254,7 +254,8 @@ def test_add_on_event_handler(method_name: str, handler: Optional[Callable]):
 @pytest.mark.parametrize("method_name", CONTROL_METHOD_TYPES)
 def test_add_on_event_handler_double_register_event(method_name: str):
     """Test that you cannot double register an on_event handler for the same control type."""
-    builder = get_route_data().builder
+    # We need to keep the handler alive to avoid garbage collection of the weakly-referenced RouteHandler.
+    _, bridge, builder, handler = get_route_data().as_tuple()
 
     fn = getattr(builder, f"{method_name}_on")
 
@@ -266,7 +267,9 @@ def test_add_on_event_handler_double_register_event(method_name: str):
 @pytest.mark.parametrize("method_name", CONTROL_METHOD_TYPES)
 @pytest.mark.parametrize("add_handler", [True, False])
 def test_control_operation_add_handler(method_name: str, add_handler: bool):
-    builder = get_route_data().builder
+    # We need to keep the route_handler alive to avoid garbage collection of the
+    # weakly-referenced RouteHandler.
+    _, bridge, builder, route_handler = get_route_data().as_tuple()
 
     def handler():
         return None

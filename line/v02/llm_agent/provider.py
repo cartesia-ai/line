@@ -13,9 +13,9 @@ Model naming:
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Dict, List, Optional
 
-from line.v02.llm.config import LlmConfig
-from line.v02.llm.schema_converter import function_tools_to_openai
-from line.v02.llm.tool_utils import FunctionTool
+from line.v02.llm_agent.config import LlmConfig
+from line.v02.llm_agent.schema_converter import function_tools_to_openai
+from line.v02.llm_agent.tools.utils import FunctionTool
 
 
 @dataclass
