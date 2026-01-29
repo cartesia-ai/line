@@ -1,10 +1,28 @@
 # Line SDK
 
-Build production-ready voice AI agents with real-time speech capabilities.
+Build production-ready, low-latency voice AI agents with real-time speech capabilities and background reasoning.
+
+**With Line you can,**
+- **Create** your first voice agent from scratch, **deploy**, and **talk to it in under 5 minutes**.
+- **Turn any existing chatbot** or text agent you've already built into a low-latency voice agent.
+- **Spin up common use cases** for support or scheduling from **ready-made templates**.
+- **Deploy production-ready systems** with auto-scaling, telephony integration, metrics, and call analytics.
+
+**Why Line?**
+
+- 🔗 **Event-driven design** to easily define multi-agent architectures with powerful background reasoning.
+- ⚡ **State-of-the-art voice models** using Sonic TTS and Ink STT deliver the lowest latency voice experience.
+- 📋 **Pre-built templates** for common use cases like customer support, sales agents, form filling, and more.
+- 🔌 **Easy integrations** with tools, MCPs, and other frameworks out of the box.
+- 🤝 **Support for handoffs** between agents and humans.
+- 🧠 **Reasoning agnostic** works with any LLM, text agent, or chatbot code.
+- 🚀 **Instant deployment** so you can build, deploy, and start talking in minutes with no infrastructure setup.
 
 Line SDK provides a unified interface for creating conversational voice agents powered by LLMs, with support for 100+ model providers via [LiteLLM](https://github.com/BerriAI/litellm), tool calling, multi-agent handoffs, and streaming responses.
 
 ## Get Started
+
+The Line SDK is designed to be used with Cartesia's voice agent platform [Line](https://cartesia.ai/agents). To get started, create a [Cartesia account](https://play.cartesia.ai) to use our TTS/STT in the voice agent. For more, see the [documentation](https://docs.cartesia.ai/line/introduction) for more on building with the SDK.
 
 **Quick start:** Clone the repo and run an example directly:
 
