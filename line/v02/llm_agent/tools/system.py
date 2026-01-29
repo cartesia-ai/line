@@ -7,9 +7,10 @@ Provides end_call, send_dtmf, transfer_call, and web_search tools.
 from dataclasses import dataclass, field
 from typing import Annotated, Any, Dict, Literal, Optional
 
-from line.v02.events import AgentHandedOff, AgentSendDtmf, AgentSendText, AgentTransferCall, CallStarted, AgentEndCal
+from line.v02.agent import Agent
+from line.v02.events import AgentEndCall, AgentHandedOff, AgentSendDtmf, AgentSendText, AgentTransferCall, CallStarted
 from line.v02.llm_agent.tools.decorators import passthrough_tool
-from line.v02.llm_agent.tools.utils import ToolEnv, construct_function_tool
+from line.v02.llm_agent.tools.utils import ToolEnv, ToolType, construct_function_tool, FunctionTool
 
 # Valid DTMF buttons
 DtmfButton = Literal["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "*", "#"]
@@ -252,11 +253,14 @@ def _call_agent(agent: Agent, turn_env, event):
     else:
         # AgentCallable
         return agent(turn_env, event)
+
+
 __all__ = [
     "DtmfButton",
+    "WebSearchTool",
     "web_search",
     "end_call",
     "send_dtmf",
-    "agent_as_handoff",
     "transfer_call",
+    "agent_as_handoff",
 ]

@@ -45,7 +45,6 @@ from line.v02.llm_agent.provider import LLMProvider, Message, ToolCall
 from line.v02.llm_agent.tools.decorators import loopback_tool
 from line.v02.llm_agent.tools.system import WebSearchTool
 from line.v02.llm_agent.tools.utils import FunctionTool, ToolEnv, ToolType, construct_function_tool
-from line.v02.utils import shield_awaitable
 
 T = TypeVar("T")
 

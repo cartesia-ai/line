@@ -28,7 +28,6 @@ from line.v02.llm_agent.tools.utils import (
     LoopbackToolFn,
     ParameterInfo,
     PassthroughToolFn,
-    ToolDefinition,
     ToolEnv,
     ToolType,
     construct_function_tool,
@@ -55,5 +54,4 @@ __all__ = [
     "FunctionTool",
     "ParameterInfo",
     "construct_function_tool",
-    "ToolDefinition",
 ]

@@ -23,13 +23,12 @@ from line.v02.llm_agent.tools.utils import (
     LoopbackToolFn,
     ParameterInfo,
     PassthroughToolFn,
-    ToolDefinition,
     ToolEnv,
     ToolType,
 )
 
 # Built-in tools
-from line.v02.llm_agent.tools.system import end_call, send_dtmf, transfer_call, web_search
+from line.v02.llm_agent.tools.system import end_call, send_dtmf, transfer_call, web_search, agent_as_handoff
 
 __all__ = [
     # LLM Agent
@@ -47,6 +46,7 @@ __all__ = [
     "send_dtmf",
     "transfer_call",
     "web_search",
+    "agent_as_handoff",
     # Tool types
     "ToolEnv",
     "LoopbackToolFn",
@@ -56,5 +56,4 @@ __all__ = [
     "FunctionTool",
     "ParameterInfo",
     "ToolType",
-    "ToolDefinition",
 ]
