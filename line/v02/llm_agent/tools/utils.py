@@ -48,7 +48,6 @@ from typing import (
 from line.v02.agent import TurnEnv
 from line.v02.events import InputEvent, OutputEvent
 
-
 # -------------------------
 # Tool Type Enum
 # -------------------------

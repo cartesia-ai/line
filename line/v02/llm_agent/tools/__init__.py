@@ -15,6 +15,7 @@ from line.v02.llm_agent.tools.decorators import (
 from line.v02.llm_agent.tools.system import (
     DtmfButton,
     WebSearchTool,
+    agent_as_handoff,
     end_call,
     send_dtmf,
     transfer_call,
@@ -45,6 +46,7 @@ __all__ = [
     "end_call",
     "send_dtmf",
     "transfer_call",
+    "agent_as_handoff",
     # Utility types
     "ToolType",
     "ToolEnv",
