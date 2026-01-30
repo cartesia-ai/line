@@ -4,11 +4,8 @@ version = "0.1.0"
 description = "Basic chat example using Line SDK v02"
 requires-python = ">=3.10"
 dependencies = [
-    "cartesia-line",
+    "cartesia-line==0.2.0.dev0",
 ]
 
 [project.scripts]
 basic-chat = "main:app.run"
-
-[tool.uv.sources]
-cartesia-line = { path = "../../../../", editable = true }
