@@ -5,6 +5,7 @@ description = "Basic chat example using Line SDK v02"
 requires-python = ">=3.10"
 dependencies = [
     "cartesia-line",
+    "websockets>=16.0",
 ]
 
 [project.scripts]
