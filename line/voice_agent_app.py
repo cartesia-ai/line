@@ -154,7 +154,6 @@ class VoiceAgentApp:
     async def create_chat_session(self, request: Request) -> dict:
         """Create a new chat session and return the websocket URL."""
         body = await request.json()
-        logger.info(f"Received chat session request: {body}")
 
         call_request = CallRequest(
             call_id=body.get("call_id", "unknown"),
