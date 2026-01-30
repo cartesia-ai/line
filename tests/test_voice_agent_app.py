@@ -18,16 +18,13 @@ import pytest
 from line.agent import TurnEnv
 from line.events import (
     AgentSendText,
+    AgentTextSent,
+    CallEnded,
     CallStarted,
     InputEvent,
     OutputEvent,
-    SpecificAgentTextSent,
-    SpecificCallEnded,
-    SpecificCallStarted,
-    SpecificInputEvent,
-    SpecificUserTextSent,
-    SpecificUserTurnEnded,
-    SpecificUserTurnStarted,
+    UserTextSent,
+    UserTurnEnded,
     UserTurnStarted,
 )
 from line.voice_agent_app import (
@@ -73,8 +70,8 @@ class TestConversationRunner:
 
         # History should have CallStarted and CallEnded
         assert len(runner.history) == 2
-        assert isinstance(runner.history[0], SpecificCallStarted)
-        assert isinstance(runner.history[1], SpecificCallEnded)
+        assert isinstance(runner.history[0], CallStarted)
+        assert isinstance(runner.history[1], CallEnded)
 
     @pytest.mark.asyncio
     async def test_disconnect_sets_shutdown_event(self):
@@ -315,12 +312,12 @@ class TestConversationRunner:
 
         # Should have: CallStarted, UserTurnStarted, UserTextSent, UserTurnEnded, CallEnded
         assert len(runner.history) == 5
-        assert isinstance(runner.history[0], SpecificCallStarted)
-        assert isinstance(runner.history[1], SpecificUserTurnStarted)
-        assert isinstance(runner.history[2], SpecificUserTextSent)
+        assert isinstance(runner.history[0], CallStarted)
+        assert isinstance(runner.history[1], UserTurnStarted)
+        assert isinstance(runner.history[2], UserTextSent)
         assert runner.history[2].content == "hello"
-        assert isinstance(runner.history[3], SpecificUserTurnEnded)
-        assert isinstance(runner.history[4], SpecificCallEnded)
+        assert isinstance(runner.history[3], UserTurnEnded)
+        assert isinstance(runner.history[4], CallEnded)
 
     def test_turn_content_collects_events_since_turn_started(self):
         """Verify _turn_content collects the right events."""
@@ -329,16 +326,16 @@ class TestConversationRunner:
 
         # Pass history as argument to the pure function
         history = [
-            SpecificCallStarted(),
-            SpecificUserTurnStarted(),
-            SpecificUserTextSent(content="first"),
-            SpecificUserTextSent(content="second"),
+            CallStarted(),
+            UserTurnStarted(),
+            UserTextSent(content="first"),
+            UserTextSent(content="second"),
         ]
 
         content = runner._turn_content(
             history,
-            SpecificUserTurnStarted,
-            (SpecificUserTextSent,),
+            UserTurnStarted,
+            (UserTextSent,),
         )
 
         assert len(content) == 2
@@ -351,41 +348,41 @@ class TestConversationRunner:
         runner = ConversationRunner(ws, noop_agent, env)
 
         history = [
-            SpecificCallStarted(),
-            SpecificUserTextSent(content="orphan"),
+            CallStarted(),
+            UserTextSent(content="orphan"),
         ]
 
         content = runner._turn_content(
             history,
-            SpecificUserTurnStarted,
-            (SpecificUserTextSent,),
+            UserTurnStarted,
+            (UserTextSent,),
         )
 
         assert content == []
 
-    def test_process_specific_input_event_updates_history(self):
-        """Verify _process_specific_input_event returns updated history."""
+    def test_process_input_event_updates_history(self):
+        """Verify _process_input_event returns updated history."""
         ws = create_mock_websocket()
         runner = ConversationRunner(ws, noop_agent, env)
 
-        initial_history: List[SpecificInputEvent] = []
-        event = SpecificCallStarted()
+        initial_history: List[InputEvent] = []
+        event = CallStarted()
 
-        result_event, new_history = runner._process_specific_input_event(initial_history, event)
+        result_event, new_history = runner._process_input_event(initial_history, event)
 
         assert len(new_history) == 1
         assert new_history[0] is event
         assert isinstance(result_event, CallStarted)
 
-    def test_process_specific_input_event_preserves_existing_events(self):
+    def test_process_input_event_preserves_existing_events(self):
         """Verify existing history is preserved when adding new events."""
         ws = create_mock_websocket()
         runner = ConversationRunner(ws, noop_agent, env)
 
-        existing = [SpecificCallStarted(), SpecificUserTurnStarted()]
-        new_event = SpecificUserTextSent(content="test")
+        existing = [CallStarted(), UserTurnStarted()]
+        new_event = UserTextSent(content="test")
 
-        _, new_history = runner._process_specific_input_event(existing, new_event)
+        _, new_history = runner._process_input_event(existing, new_event)
 
         assert len(new_history) == 3
         assert new_history[0] is existing[0]
@@ -406,45 +403,45 @@ class TestGetProcessedHistory:
         assert result == []
 
     def test_no_agent_text_events(self):
-        history = [SpecificCallStarted(), SpecificUserTextSent(content="x")]
+        history = [CallStarted(), UserTextSent(content="x")]
         result = _get_processed_history("", history)
         assert result == history
 
     def test_restores_whitespace(self):
-        result = _get_processed_history("a b", [SpecificAgentTextSent(content="ab")])
+        result = _get_processed_history("a b", [AgentTextSent(content="ab")])
         assert len(result) == 1
         assert result[0].content == "a b"
 
     def test_partial_commit(self):
-        result = _get_processed_history("a b c", [SpecificAgentTextSent(content="ab")])
+        result = _get_processed_history("a b c", [AgentTextSent(content="ab")])
         assert len(result) == 1
         assert result[0].content == "a b"
 
     def test_multiple_agent_text_events(self):
         history = [
-            SpecificAgentTextSent(content="ab"),
-            SpecificAgentTextSent(content="cd"),
+            AgentTextSent(content="ab"),
+            AgentTextSent(content="cd"),
         ]
         result = _get_processed_history("a b c d", history)
         assert len(result) == 1
         assert result[0].content == "a b c d"
 
     def test_no_spaces_passthrough(self):
-        result = _get_processed_history("ab", [SpecificAgentTextSent(content="ab")])
+        result = _get_processed_history("ab", [AgentTextSent(content="ab")])
         assert len(result) == 1
         assert result[0].content == "ab"
 
     def test_mixed_events_preserved(self):
         history = [
-            SpecificCallStarted(),
-            SpecificAgentTextSent(content="ab"),
-            SpecificUserTurnStarted(),
+            CallStarted(),
+            AgentTextSent(content="ab"),
+            UserTurnStarted(),
         ]
         result = _get_processed_history("a b", history)
         assert len(result) == 3
-        assert isinstance(result[0], SpecificCallStarted)
+        assert isinstance(result[0], CallStarted)
         assert result[1].content == "a b"
-        assert isinstance(result[2], SpecificUserTurnStarted)
+        assert isinstance(result[2], UserTurnStarted)
 
 
 # ============================================================

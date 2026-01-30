@@ -16,13 +16,12 @@ from line.events import (
     AgentEndCall,
     AgentHandedOff,
     AgentSendText,
+    AgentTextSent,
     AgentToolCalled,
     AgentToolReturned,
+    CallEnded,
     CallStarted,
     OutputEvent,
-    SpecificAgentTextSent,
-    SpecificCallEnded,
-    SpecificUserTextSent,
     UserTextSent,
 )
 from line.llm_agent.config import LlmConfig
@@ -175,7 +174,7 @@ async def test_simple_text_response(turn_env):
     agent, mock_llm = create_agent_with_mock(responses)
 
     outputs = await collect_outputs(
-        agent, turn_env, UserTextSent(content="Hi", history=[SpecificUserTextSent(content="Hi")])
+        agent, turn_env, UserTextSent(content="Hi", history=[UserTextSent(content="Hi")])
     )
 
     # Should have two AgentSendText events
@@ -236,7 +235,7 @@ async def test_loopback_tool_feeds_result_back_to_llm(turn_env):
         turn_env,
         UserTextSent(
             content="What's the weather in NYC?",
-            history=[SpecificUserTextSent(content="What's the weather in NYC?")],
+            history=[UserTextSent(content="What's the weather in NYC?")],
         ),
     )
 
@@ -318,7 +317,7 @@ async def test_loopback_tool_multiple_iterations(turn_env):
         agent,
         turn_env,
         UserTextSent(
-            content="Weather in NYC and LA?", history=[SpecificUserTextSent(content="Weather in NYC and LA?")]
+            content="Weather in NYC and LA?", history=[UserTextSent(content="Weather in NYC and LA?")]
         ),
     )
 
@@ -372,7 +371,7 @@ async def test_passthrough_tool_bypasses_llm(turn_env):
     agent, mock_llm = create_agent_with_mock(responses, tools=[end_call])
 
     outputs = await collect_outputs(
-        agent, turn_env, UserTextSent(content="Bye", history=[SpecificUserTextSent(content="Bye")])
+        agent, turn_env, UserTextSent(content="Bye", history=[UserTextSent(content="Bye")])
     )
 
     # Expected outputs:
@@ -443,16 +442,14 @@ async def test_handoff_delegates_subsequent_calls(turn_env):
     await collect_outputs(
         agent,
         turn_env,
-        UserTextSent(content="Transfer me", history=[SpecificUserTextSent(content="Transfer me")]),
+        UserTextSent(content="Transfer me", history=[UserTextSent(content="Transfer me")]),
     )
 
     # Second call should go to billing agent, not the LLM
     outputs2 = await collect_outputs(
         agent,
         turn_env,
-        UserTextSent(
-            content="Follow up question", history=[SpecificUserTextSent(content="Follow up question")]
-        ),
+        UserTextSent(content="Follow up question", history=[UserTextSent(content="Follow up question")]),
     )
 
     assert len(outputs2) == 1
@@ -499,7 +496,7 @@ async def test_max_tool_iterations_prevents_infinite_loop(turn_env):
     agent, mock_llm = create_agent_with_mock(responses, tools=[infinite_tool], max_tool_iterations=3)
 
     outputs = await collect_outputs(
-        agent, turn_env, UserTextSent(content="Start", history=[SpecificUserTextSent(content="Start")])
+        agent, turn_env, UserTextSent(content="Start", history=[UserTextSent(content="Start")])
     )
 
     # Should have stopped after 3 iterations
@@ -578,7 +575,7 @@ async def test_tool_error_is_captured(turn_env):
     outputs = await collect_outputs(
         agent,
         turn_env,
-        UserTextSent(content="Do something", history=[SpecificUserTextSent(content="Do something")]),
+        UserTextSent(content="Do something", history=[UserTextSent(content="Do something")]),
     )
 
     # Find the AgentToolReturned
@@ -597,9 +594,9 @@ async def test_conversation_history_passed_to_llm(turn_env):
     """Test that conversation history is included in messages to LLM."""
     # Pre-populate history on the event (including current user message)
     history = [
-        SpecificUserTextSent(content="Hi"),
-        SpecificAgentTextSent(content="Hello!"),
-        SpecificUserTextSent(content="How are you?"),
+        UserTextSent(content="Hi"),
+        AgentTextSent(content="Hello!"),
+        UserTextSent(content="How are you?"),
     ]
 
     responses = [[StreamChunk(text="I'm doing well!"), StreamChunk(is_final=True)]]
@@ -659,7 +656,7 @@ async def test_streaming_tool_call_accumulation(turn_env):
     outputs = await collect_outputs(
         agent,
         turn_env,
-        UserTextSent(content="Greet Alice", history=[SpecificUserTextSent(content="Greet Alice")]),
+        UserTextSent(content="Greet Alice", history=[UserTextSent(content="Greet Alice")]),
     )
 
     # Tool should have been called with complete arguments
@@ -708,7 +705,7 @@ async def test_loopback_tool_returns_coroutine(turn_env):
     agent, mock_llm = create_agent_with_mock(responses, tools=[async_fetcher])
 
     outputs = await collect_outputs(
-        agent, turn_env, UserTextSent(content="Fetch", history=[SpecificUserTextSent(content="Fetch")])
+        agent, turn_env, UserTextSent(content="Fetch", history=[UserTextSent(content="Fetch")])
     )
 
     tool_result = next((o for o in outputs if isinstance(o, AgentToolReturned)), None)
@@ -745,7 +742,7 @@ async def test_loopback_tool_returns_async_iterable(turn_env):
     agent, mock_llm = create_agent_with_mock(responses, tools=[streaming_tool])
 
     outputs = await collect_outputs(
-        agent, turn_env, UserTextSent(content="Stream", history=[SpecificUserTextSent(content="Stream")])
+        agent, turn_env, UserTextSent(content="Stream", history=[UserTextSent(content="Stream")])
     )
 
     # New behavior: yields AgentToolReturned for each item in the stream
@@ -783,7 +780,7 @@ async def test_loopback_tool_returns_single_item_async_iterable(turn_env):
     agent, mock_llm = create_agent_with_mock(responses, tools=[single_item_tool])
 
     outputs = await collect_outputs(
-        agent, turn_env, UserTextSent(content="Get", history=[SpecificUserTextSent(content="Get")])
+        agent, turn_env, UserTextSent(content="Get", history=[UserTextSent(content="Get")])
     )
 
     tool_result = next((o for o in outputs if isinstance(o, AgentToolReturned)), None)
@@ -816,7 +813,7 @@ async def test_loopback_tool_returns_bare_value(turn_env):
     agent, mock_llm = create_agent_with_mock(responses, tools=[sync_tool])
 
     outputs = await collect_outputs(
-        agent, turn_env, UserTextSent(content="Do", history=[SpecificUserTextSent(content="Do")])
+        agent, turn_env, UserTextSent(content="Do", history=[UserTextSent(content="Do")])
     )
 
     tool_result = next((o for o in outputs if isinstance(o, AgentToolReturned)), None)
@@ -897,7 +894,7 @@ async def test_plain_function_works_as_loopback_tool(turn_env):
         turn_env,
         UserTextSent(
             content="Tell me about Python",
-            history=[SpecificUserTextSent(content="Tell me about Python")],
+            history=[UserTextSent(content="Tell me about Python")],
         ),
     )
 
@@ -960,7 +957,7 @@ class TestBuildFullHistory:
     5. Current local events (not yet observed) are appended at the end
 
     Observable output events: AgentSendText, AgentSendDtmf, AgentEndCall
-    Observable input events: SpecificAgentTextSent, SpecificAgentDtmfSent, SpecificCallEnded
+    Observable input events: AgentTextSent, AgentDtmfSent, CallEnded
 
     local_history format: List[tuple[str, OutputEvent]] where str is the triggering event_id
     """
@@ -977,21 +974,21 @@ class TestBuildFullHistory:
 
     async def test_only_input_history_with_user_message(self):
         """When only input_history exists with non-observable event, include it."""
-        input_history = [SpecificUserTextSent(content="Hello")]
+        input_history = [UserTextSent(content="Hello")]
         result = _build_full_history(input_history, [], current_event_id="current")
 
         assert len(result) == 1
-        assert isinstance(result[0], SpecificUserTextSent)
+        assert isinstance(result[0], UserTextSent)
         assert result[0].content == "Hello"
 
     async def test_only_input_history_with_observable_event(self):
         """When only input_history exists with observable event, include it (pass through)."""
-        input_history = [SpecificAgentTextSent(content="Hi there")]
+        input_history = [AgentTextSent(content="Hi there")]
         result = _build_full_history(input_history, [], current_event_id="current")
 
         # Observable input with no responsive local passes through
         assert len(result) == 1
-        assert isinstance(result[0], SpecificAgentTextSent)
+        assert isinstance(result[0], AgentTextSent)
         assert result[0].content == "Hi there"
 
     async def test_only_local_history_with_unobservable_event_current(self):
@@ -1022,7 +1019,7 @@ class TestBuildFullHistory:
     async def test_matching_observable_events_uses_input_canonical(self):
         """When observable events match, use the input_history version (canonical)."""
         # Create input event and use its event_id for local
-        input_evt = SpecificAgentTextSent(content="Hello world")
+        input_evt = AgentTextSent(content="Hello world")
         input_history = [input_evt]
         local_history = self._annotate(
             [AgentSendText(text="Hello world")],
@@ -1032,17 +1029,17 @@ class TestBuildFullHistory:
         result = _build_full_history(input_history, local_history, current_event_id="current")
 
         assert len(result) == 1
-        # Should be the input_history version (SpecificAgentTextSent), not local (AgentSendText)
-        assert isinstance(result[0], SpecificAgentTextSent)
+        # Should be the input_history version (AgentTextSent), not local (AgentSendText)
+        assert isinstance(result[0], AgentTextSent)
         assert result[0].content == "Hello world"
 
     async def test_unobservable_local_event_interpolated_before_observable(self):
         """Unobservable local events appear before their following observable event."""
         # Input: [User0, Agent1] - User0 triggers local events
-        user0 = SpecificUserTextSent(content="Question")
+        user0 = UserTextSent(content="Question")
         input_history = [
             user0,
-            SpecificAgentTextSent(content="Response"),
+            AgentTextSent(content="Response"),
         ]
         local_history = self._annotate(
             [
@@ -1059,17 +1056,17 @@ class TestBuildFullHistory:
 
         # Expected order: User, ToolCalled, ToolReturned, AgentTextSent
         assert len(result) == 4
-        assert isinstance(result[0], SpecificUserTextSent)
+        assert isinstance(result[0], UserTextSent)
         assert isinstance(result[1], AgentToolCalled)
         assert isinstance(result[2], AgentToolReturned)
-        assert isinstance(result[3], SpecificAgentTextSent)
+        assert isinstance(result[3], AgentTextSent)
 
     async def test_non_observable_input_event_included(self):
-        """Non-observable input events (like SpecificUserTextSent) are always included."""
-        user0 = SpecificUserTextSent(content="User question")
+        """Non-observable input events (like UserTextSent) are always included."""
+        user0 = UserTextSent(content="User question")
         input_history = [
             user0,
-            SpecificAgentTextSent(content="Agent answer"),
+            AgentTextSent(content="Agent answer"),
         ]
         local_history = self._annotate(
             [AgentSendText(text="Agent answer")],
@@ -1079,14 +1076,14 @@ class TestBuildFullHistory:
         result = _build_full_history(input_history, local_history, current_event_id="current")
 
         assert len(result) == 2
-        assert isinstance(result[0], SpecificUserTextSent)
+        assert isinstance(result[0], UserTextSent)
         assert result[0].content == "User question"
-        assert isinstance(result[1], SpecificAgentTextSent)
+        assert isinstance(result[1], AgentTextSent)
         assert result[1].content == "Agent answer"
 
     async def test_unmatched_observable_local_event_excluded(self):
         """Observable local events without matching input events are excluded."""
-        user0 = SpecificUserTextSent(content="Question")
+        user0 = UserTextSent(content="Question")
         input_history = [user0]
         local_history = self._annotate(
             [
@@ -1100,14 +1097,14 @@ class TestBuildFullHistory:
 
         # Only the user message should be included
         assert len(result) == 1
-        assert isinstance(result[0], SpecificUserTextSent)
+        assert isinstance(result[0], UserTextSent)
 
     async def test_complex_conversation_with_tools(self):
         """Test a realistic conversation with user messages, tool calls, and agent responses."""
-        user0 = SpecificUserTextSent(content="What's the weather?")
+        user0 = UserTextSent(content="What's the weather?")
         input_history = [
             user0,
-            SpecificAgentTextSent(content="The weather is sunny."),
+            AgentTextSent(content="The weather is sunny."),
         ]
         local_history = self._annotate(
             [
@@ -1122,19 +1119,19 @@ class TestBuildFullHistory:
 
         # Expected: UserText, ToolCalled, ToolReturned, AgentTextSent (canonical)
         assert len(result) == 4
-        assert isinstance(result[0], SpecificUserTextSent)
+        assert isinstance(result[0], UserTextSent)
         assert result[0].content == "What's the weather?"
         assert isinstance(result[1], AgentToolCalled)
         assert isinstance(result[2], AgentToolReturned)
-        assert isinstance(result[3], SpecificAgentTextSent)
+        assert isinstance(result[3], AgentTextSent)
         assert result[3].content == "The weather is sunny."
 
     async def test_multiple_tool_calls_interleaved(self):
         """Test multiple tool calls with responses interleaved."""
-        user0 = SpecificUserTextSent(content="Get weather and time")
+        user0 = UserTextSent(content="Get weather and time")
         input_history = [
             user0,
-            SpecificAgentTextSent(content="Weather is sunny, time is 3pm."),
+            AgentTextSent(content="Weather is sunny, time is 3pm."),
         ]
         local_history = self._annotate(
             [
@@ -1151,24 +1148,24 @@ class TestBuildFullHistory:
 
         # All unobservable events interpolated, then the matching observable
         assert len(result) == 6
-        assert isinstance(result[0], SpecificUserTextSent)
+        assert isinstance(result[0], UserTextSent)
         assert isinstance(result[1], AgentToolCalled)
         assert result[1].tool_name == "get_weather"
         assert isinstance(result[2], AgentToolReturned)
         assert isinstance(result[3], AgentToolCalled)
         assert result[3].tool_name == "get_time"
         assert isinstance(result[4], AgentToolReturned)
-        assert isinstance(result[5], SpecificAgentTextSent)
+        assert isinstance(result[5], AgentTextSent)
 
     async def test_multiple_matching_observable_events(self):
         """Test conversation with multiple turns, each with matching observables."""
-        user0 = SpecificUserTextSent(content="Hi")
-        user2 = SpecificUserTextSent(content="How are you?")
+        user0 = UserTextSent(content="Hi")
+        user2 = UserTextSent(content="How are you?")
         input_history = [
             user0,
-            SpecificAgentTextSent(content="Hello!"),
+            AgentTextSent(content="Hello!"),
             user2,
-            SpecificAgentTextSent(content="I'm good!"),
+            AgentTextSent(content="I'm good!"),
         ]
         # First turn (user0) triggers Hello, second turn (user2) triggers I'm good
         local_history = self._annotate(
@@ -1182,24 +1179,24 @@ class TestBuildFullHistory:
         result = _build_full_history(input_history, local_history, current_event_id="current")
 
         assert len(result) == 4
-        assert isinstance(result[0], SpecificUserTextSent)
+        assert isinstance(result[0], UserTextSent)
         assert result[0].content == "Hi"
-        assert isinstance(result[1], SpecificAgentTextSent)
+        assert isinstance(result[1], AgentTextSent)
         assert result[1].content == "Hello!"
-        assert isinstance(result[2], SpecificUserTextSent)
+        assert isinstance(result[2], UserTextSent)
         assert result[2].content == "How are you?"
-        assert isinstance(result[3], SpecificAgentTextSent)
+        assert isinstance(result[3], AgentTextSent)
         assert result[3].content == "I'm good!"
 
     async def test_unobservable_events_between_observables(self):
         """Test unobservable events appear in correct position between observables."""
-        user0 = SpecificUserTextSent(content="Start")
-        user2 = SpecificUserTextSent(content="User interjects")
+        user0 = UserTextSent(content="Start")
+        user2 = UserTextSent(content="User interjects")
         input_history = [
             user0,
-            SpecificAgentTextSent(content="First"),
+            AgentTextSent(content="First"),
             user2,
-            SpecificAgentTextSent(content="Second"),
+            AgentTextSent(content="Second"),
         ]
         # user0 triggers First + tools, user2 triggers Second
         local_history = self._annotate(
@@ -1218,13 +1215,13 @@ class TestBuildFullHistory:
 
         # User0, First, tools (drained after First), User2, Second
         assert len(result) == 6
-        assert isinstance(result[0], SpecificUserTextSent)
-        assert isinstance(result[1], SpecificAgentTextSent)
+        assert isinstance(result[0], UserTextSent)
+        assert isinstance(result[1], AgentTextSent)
         assert result[1].content == "First"
         assert isinstance(result[2], AgentToolCalled)
         assert isinstance(result[3], AgentToolReturned)
-        assert isinstance(result[4], SpecificUserTextSent)
-        assert isinstance(result[5], SpecificAgentTextSent)
+        assert isinstance(result[4], UserTextSent)
+        assert isinstance(result[5], AgentTextSent)
         assert result[5].content == "Second"
 
     async def test_input_observable_without_local_match_passes_through(self):
@@ -1234,8 +1231,8 @@ class TestBuildFullHistory:
         that the current agent instance didn't generate.
         """
         input_history = [
-            SpecificAgentTextSent(content="Previous agent said this"),
-            SpecificUserTextSent(content="User reply"),
+            AgentTextSent(content="Previous agent said this"),
+            UserTextSent(content="User reply"),
         ]
         local_history = []  # This agent hasn't generated anything yet
 
@@ -1243,15 +1240,15 @@ class TestBuildFullHistory:
 
         # Both events pass through (no local to match/interpolate)
         assert len(result) == 2
-        assert isinstance(result[0], SpecificAgentTextSent)
-        assert isinstance(result[1], SpecificUserTextSent)
+        assert isinstance(result[0], AgentTextSent)
+        assert isinstance(result[1], UserTextSent)
 
     async def test_partial_match_only_matching_local_observable_kept(self):
         """When local has more observables than input, only matching ones are kept."""
-        user0 = SpecificUserTextSent(content="Question")
+        user0 = UserTextSent(content="Question")
         input_history = [
             user0,
-            SpecificAgentTextSent(content="Answer"),
+            AgentTextSent(content="Answer"),
         ]
         local_history = self._annotate(
             [
@@ -1265,17 +1262,17 @@ class TestBuildFullHistory:
 
         # "Partial..." should be excluded (no match), "Answer" should match
         assert len(result) == 2
-        assert isinstance(result[0], SpecificUserTextSent)
-        assert isinstance(result[1], SpecificAgentTextSent)
+        assert isinstance(result[0], UserTextSent)
+        assert isinstance(result[1], AgentTextSent)
         assert result[1].content == "Answer"
 
     async def test_empty_local_with_full_input_history(self):
         """When local is empty, full input history passes through."""
         input_history = [
-            SpecificUserTextSent(content="First"),
-            SpecificAgentTextSent(content="Response 1"),
-            SpecificUserTextSent(content="Second"),
-            SpecificAgentTextSent(content="Response 2"),
+            UserTextSent(content="First"),
+            AgentTextSent(content="Response 1"),
+            UserTextSent(content="Second"),
+            AgentTextSent(content="Response 2"),
         ]
         local_history = []
 
@@ -1283,11 +1280,11 @@ class TestBuildFullHistory:
 
         # All input events pass through (no local to match/interpolate)
         assert len(result) == 4
-        assert all(isinstance(r, (SpecificUserTextSent, SpecificAgentTextSent)) for r in result)
+        assert all(isinstance(r, (UserTextSent, AgentTextSent)) for r in result)
 
     async def test_mismatched_text_content_not_matched(self):
         """Observable events with different content don't match."""
-        agent0 = SpecificAgentTextSent(content="Hello")
+        agent0 = AgentTextSent(content="Hello")
         input_history = [agent0]
         local_history = self._annotate(
             [AgentSendText(text="Goodbye")],  # Different content
@@ -1301,12 +1298,12 @@ class TestBuildFullHistory:
         # Since local responds to agent0, we process slice with local
         # but they don't match, so local is skipped and input passes through
         assert len(result) == 1
-        assert isinstance(result[0], SpecificAgentTextSent)
+        assert isinstance(result[0], AgentTextSent)
         assert result[0].content == "Hello"
 
     async def test_all_unobservable_local_history(self):
         """When local history contains only unobservable events, all are included."""
-        user0 = SpecificUserTextSent(content="Do something")
+        user0 = UserTextSent(content="Do something")
         input_history = [user0]
         local_history = self._annotate(
             [
@@ -1321,18 +1318,18 @@ class TestBuildFullHistory:
         result = _build_full_history(input_history, local_history, current_event_id="current")
 
         assert len(result) == 5
-        assert isinstance(result[0], SpecificUserTextSent)
+        assert isinstance(result[0], UserTextSent)
         assert isinstance(result[1], AgentToolCalled)
         assert isinstance(result[2], AgentToolReturned)
         assert isinstance(result[3], AgentToolCalled)
         assert isinstance(result[4], AgentToolReturned)
 
     async def test_agent_end_call_observable_matching(self):
-        """Test that AgentEndCall matches with SpecificCallEnded."""
-        user0 = SpecificUserTextSent(content="Goodbye")
+        """Test that AgentEndCall matches with CallEnded."""
+        user0 = UserTextSent(content="Goodbye")
         input_history = [
             user0,
-            SpecificCallEnded(),
+            CallEnded(),
         ]
         local_history = self._annotate(
             [
@@ -1346,8 +1343,8 @@ class TestBuildFullHistory:
 
         # User message + CallEnded (canonical), AgentSendText excluded (no match)
         assert len(result) == 2
-        assert isinstance(result[0], SpecificUserTextSent)
-        assert isinstance(result[1], SpecificCallEnded)
+        assert isinstance(result[0], UserTextSent)
+        assert isinstance(result[1], CallEnded)
 
     # =========================================================================
     # Tests: Prefix Matching
@@ -1355,10 +1352,10 @@ class TestBuildFullHistory:
 
     async def test_prefix_match_input_is_prefix_of_local(self):
         """When input text is a prefix of local text, match and carry forward suffix."""
-        user0 = SpecificUserTextSent(content="Question")
+        user0 = UserTextSent(content="Question")
         input_history = [
             user0,
-            SpecificAgentTextSent(content="Hello"),  # Prefix of "Hello world!"
+            AgentTextSent(content="Hello"),  # Prefix of "Hello world!"
         ]
         local_history = self._annotate(
             [AgentSendText(text="Hello world!")],  # Has suffix " world!"
@@ -1370,19 +1367,19 @@ class TestBuildFullHistory:
         # Should include user message and the canonical input (prefix match)
         # The suffix " world!" should be excluded since there's no matching input for it
         assert len(result) == 2
-        assert isinstance(result[0], SpecificUserTextSent)
-        assert isinstance(result[1], SpecificAgentTextSent)
+        assert isinstance(result[0], UserTextSent)
+        assert isinstance(result[1], AgentTextSent)
         assert result[1].content == "Hello"
 
     async def test_prefix_match_suffix_matches_next_input(self):
         """Suffix from prefix match can match the next input event."""
         # user0 triggers local, slice includes [User0, Agent1, User2, Agent3]
-        user0 = SpecificUserTextSent(content="Start")
+        user0 = UserTextSent(content="Start")
         input_history = [
             user0,
-            SpecificAgentTextSent(content="Hello"),  # Prefix of "Hello world!"
-            SpecificUserTextSent(content="..."),
-            SpecificAgentTextSent(content=" world!"),  # Matches carried suffix
+            AgentTextSent(content="Hello"),  # Prefix of "Hello world!"
+            UserTextSent(content="..."),
+            AgentTextSent(content=" world!"),  # Matches carried suffix
         ]
         local_history = self._annotate(
             [AgentSendText(text="Hello world!")],  # Will be split via prefix match
@@ -1393,20 +1390,20 @@ class TestBuildFullHistory:
 
         # User0, Hello (prefix match), user message, then " world!" matches suffix
         assert len(result) == 4
-        assert isinstance(result[0], SpecificUserTextSent)
-        assert isinstance(result[1], SpecificAgentTextSent)
+        assert isinstance(result[0], UserTextSent)
+        assert isinstance(result[1], AgentTextSent)
         assert result[1].content == "Hello"
-        assert isinstance(result[2], SpecificUserTextSent)
-        assert isinstance(result[3], SpecificAgentTextSent)
+        assert isinstance(result[2], UserTextSent)
+        assert isinstance(result[3], AgentTextSent)
         assert result[3].content == " world!"
 
     async def test_prefix_match_with_tool_calls_between(self):
         """Prefix matching works when tool calls precede the text."""
-        user0 = SpecificUserTextSent(content="Get weather")
+        user0 = UserTextSent(content="Get weather")
         input_history = [
             user0,
-            SpecificAgentTextSent(content="The weather "),
-            SpecificAgentTextSent(content="is sunny today!"),
+            AgentTextSent(content="The weather "),
+            AgentTextSent(content="is sunny today!"),
         ]
         local_history = self._annotate(
             [
@@ -1421,17 +1418,17 @@ class TestBuildFullHistory:
 
         # User, ToolCalled, ToolReturned, then two text events (prefix match then suffix)
         assert len(result) == 5
-        assert isinstance(result[0], SpecificUserTextSent)
+        assert isinstance(result[0], UserTextSent)
         assert isinstance(result[1], AgentToolCalled)
         assert isinstance(result[2], AgentToolReturned)
-        assert isinstance(result[3], SpecificAgentTextSent)
+        assert isinstance(result[3], AgentTextSent)
         assert result[3].content == "The weather "
-        assert isinstance(result[4], SpecificAgentTextSent)
+        assert isinstance(result[4], AgentTextSent)
         assert result[4].content == "is sunny today!"
 
     async def test_prefix_match_single_input_split(self):
         """Single input text that is prefix of local text - suffix is dropped."""
-        agent0 = SpecificAgentTextSent(content="Hello")  # Prefix of "Hello world!"
+        agent0 = AgentTextSent(content="Hello")  # Prefix of "Hello world!"
         input_history = [agent0]
         local_history = self._annotate(
             [AgentSendText(text="Hello world!")],
@@ -1442,19 +1439,19 @@ class TestBuildFullHistory:
 
         # Only the input (prefix) is included, suffix " world!" is dropped (no matching input)
         assert len(result) == 1
-        assert isinstance(result[0], SpecificAgentTextSent)
+        assert isinstance(result[0], AgentTextSent)
         assert result[0].content == "Hello"
 
     async def test_prefix_match_multiple_splits_with_separators(self):
         """Local text split across multiple non-contiguous input events."""
-        user0 = SpecificUserTextSent(content="Start")
+        user0 = UserTextSent(content="Start")
         input_history = [
             user0,
-            SpecificAgentTextSent(content="A"),
-            SpecificUserTextSent(content="u1"),
-            SpecificAgentTextSent(content="B"),
-            SpecificUserTextSent(content="u2"),
-            SpecificAgentTextSent(content="C"),
+            AgentTextSent(content="A"),
+            UserTextSent(content="u1"),
+            AgentTextSent(content="B"),
+            UserTextSent(content="u2"),
+            AgentTextSent(content="C"),
         ]
         local_history = self._annotate(
             [AgentSendText(text="ABC")],
@@ -1465,16 +1462,16 @@ class TestBuildFullHistory:
 
         # User0, A (prefix), u1, B (prefix of "BC"), u2, C (exact match)
         assert len(result) == 6
-        assert isinstance(result[0], SpecificUserTextSent)
+        assert isinstance(result[0], UserTextSent)
         assert result[1].content == "A"
-        assert isinstance(result[2], SpecificUserTextSent)
+        assert isinstance(result[2], UserTextSent)
         assert result[3].content == "B"
-        assert isinstance(result[4], SpecificUserTextSent)
+        assert isinstance(result[4], UserTextSent)
         assert result[5].content == "C"
 
     async def test_preprocessing_local_longer_than_input(self):
         """Local text is longer than input after preprocessing - prefix match."""
-        agent0 = SpecificAgentTextSent(content="Hello")  # Single event
+        agent0 = AgentTextSent(content="Hello")  # Single event
         input_history = [agent0]
         local_history = self._annotate(
             [
@@ -1490,16 +1487,16 @@ class TestBuildFullHistory:
         # Input "Hello" is prefix of local "Hello world!"
         # Suffix " world!" has no matching input, so dropped
         assert len(result) == 1
-        assert isinstance(result[0], SpecificAgentTextSent)
+        assert isinstance(result[0], AgentTextSent)
         assert result[0].content == "Hello"
 
     async def test_pre_tool_call_result_grouped_with_agent_text(self):
         """Tool call and result are grouped together in the final history."""
-        user0 = SpecificUserTextSent(content="Question1")
+        user0 = UserTextSent(content="Question1")
         input_history = [
             user0,
-            SpecificAgentTextSent(content="Response1"),
-            SpecificUserTextSent(content="Question2"),
+            AgentTextSent(content="Response1"),
+            UserTextSent(content="Question2"),
         ]
         local_history = self._annotate(
             [
@@ -1513,21 +1510,21 @@ class TestBuildFullHistory:
         result = _build_full_history(input_history, local_history, current_event_id="current")
 
         assert len(result) == 5
-        assert isinstance(result[0], SpecificUserTextSent)
+        assert isinstance(result[0], UserTextSent)
         assert isinstance(result[1], AgentToolCalled)
         assert isinstance(result[2], AgentToolReturned)
-        assert isinstance(result[3], SpecificAgentTextSent)
-        assert isinstance(result[4], SpecificUserTextSent)
+        assert isinstance(result[3], AgentTextSent)
+        assert isinstance(result[4], UserTextSent)
 
     # ==== TOOL CALL ORDERING ====
 
     async def test_circum_tool_call_result_grouped_with_agent_text(self):
         """Tool call appears before text, tool result after due to local ordering."""
-        user0 = SpecificUserTextSent(content="Question1")
+        user0 = UserTextSent(content="Question1")
         input_history = [
             user0,
-            SpecificAgentTextSent(content="Response1"),
-            SpecificUserTextSent(content="Question2"),
+            AgentTextSent(content="Response1"),
+            UserTextSent(content="Question2"),
         ]
         local_history = self._annotate(
             [
@@ -1541,19 +1538,19 @@ class TestBuildFullHistory:
         result = _build_full_history(input_history, local_history, current_event_id="current")
 
         assert len(result) == 5
-        assert isinstance(result[0], SpecificUserTextSent)
+        assert isinstance(result[0], UserTextSent)
         assert isinstance(result[1], AgentToolCalled)
-        assert isinstance(result[2], SpecificAgentTextSent)
+        assert isinstance(result[2], AgentTextSent)
         assert isinstance(result[3], AgentToolReturned)
-        assert isinstance(result[4], SpecificUserTextSent)
+        assert isinstance(result[4], UserTextSent)
 
     async def test_pre_tool_call_result_grouped_with_trimmed_agent_text(self):
         """Tool call and result are grouped together in the final history."""
-        user0 = SpecificUserTextSent(content="Question1")
+        user0 = UserTextSent(content="Question1")
         input_history = [
             user0,
-            SpecificAgentTextSent(content="Response1"),
-            SpecificUserTextSent(content="Question2"),
+            AgentTextSent(content="Response1"),
+            UserTextSent(content="Question2"),
         ]
         local_history = self._annotate(
             [
@@ -1567,19 +1564,19 @@ class TestBuildFullHistory:
         result = _build_full_history(input_history, local_history, current_event_id="current")
 
         assert len(result) == 5
-        assert isinstance(result[0], SpecificUserTextSent)
+        assert isinstance(result[0], UserTextSent)
         assert isinstance(result[1], AgentToolCalled)
         assert isinstance(result[2], AgentToolReturned)
-        assert isinstance(result[3], SpecificAgentTextSent)
-        assert isinstance(result[4], SpecificUserTextSent)
+        assert isinstance(result[3], AgentTextSent)
+        assert isinstance(result[4], UserTextSent)
 
     async def test_circum_tool_call_result_grouped_with_trimmed_agent_text(self):
         """Tool call appears before text, tool result after due to local ordering."""
-        user0 = SpecificUserTextSent(content="Question1")
+        user0 = UserTextSent(content="Question1")
         input_history = [
             user0,
-            SpecificAgentTextSent(content="Response1"),
-            SpecificUserTextSent(content="Question2"),
+            AgentTextSent(content="Response1"),
+            UserTextSent(content="Question2"),
         ]
         local_history = self._annotate(
             [
@@ -1594,8 +1591,8 @@ class TestBuildFullHistory:
 
         # Tool call interpolated around matched text
         assert len(result) == 5
-        assert isinstance(result[0], SpecificUserTextSent)
+        assert isinstance(result[0], UserTextSent)
         assert isinstance(result[1], AgentToolCalled)
-        assert isinstance(result[2], SpecificAgentTextSent)
+        assert isinstance(result[2], AgentTextSent)
         assert isinstance(result[3], AgentToolReturned)
-        assert isinstance(result[4], SpecificUserTextSent)
+        assert isinstance(result[4], UserTextSent)

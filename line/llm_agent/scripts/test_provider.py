@@ -29,7 +29,6 @@ from line.events import (
     AgentToolCalled,
     AgentToolReturned,
     CallStarted,
-    SpecificUserTextSent,
     UserTextSent,
 )
 from line.llm_agent import (
@@ -137,7 +136,7 @@ async def test_tool_calling(model: str):
     user_message = "What's the weather in Tokyo? Also, what's 25 * 4?"
     event = UserTextSent(
         content=user_message,
-        history=[SpecificUserTextSent(content=user_message)],
+        history=[UserTextSent(content=user_message)],
     )
 
     print("User: What's the weather in Tokyo? Also, what's 25 * 4?")
@@ -209,7 +208,7 @@ async def test_web_search(model: str, search_context_size: str = "medium"):
     user_message = "What is the current weather in New York City? Search the web for this information."
     event = UserTextSent(
         content=user_message,
-        history=[SpecificUserTextSent(content=user_message)],
+        history=[UserTextSent(content=user_message)],
     )
 
     print(f"User: {user_message}")

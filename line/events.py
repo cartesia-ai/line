@@ -81,135 +81,87 @@ OutputEvent = Union[
 # -------------------------
 # Input Events (harness -> agent)
 # -------------------------
-# Specific* events do NOT include history and are used within the history list.
 # Each event has a stable event_id (UUID) for tracking which events trigger responses.
+# history=None indicates the event is used within a history list (no nested history).
 
 
-class SpecificCallStarted(BaseModel):
+class CallStarted(BaseModel):
     type: Literal["call_started"] = "call_started"
     event_id: str = Field(default_factory=_generate_event_id)
+    history: Optional[List["InputEvent"]] = None
 
 
-class SpecificCallEnded(BaseModel):
+class CallEnded(BaseModel):
     type: Literal["call_ended"] = "call_ended"
     event_id: str = Field(default_factory=_generate_event_id)
+    history: Optional[List["InputEvent"]] = None
 
 
-class SpecificAgentHandedOff(BaseModel):
+class AgentHandedOff(BaseModel):
     """Event emitted when control is transferred to the tool target."""
 
     type: Literal["agent_handed_off"] = "agent_handed_off"
     event_id: str = Field(default_factory=_generate_event_id)
+    history: Optional[List["InputEvent"]] = None
 
 
-class SpecificUserTurnStarted(BaseModel):
+class UserTurnStarted(BaseModel):
     type: Literal["user_turn_started"] = "user_turn_started"
     event_id: str = Field(default_factory=_generate_event_id)
+    history: Optional[List["InputEvent"]] = None
 
 
-class SpecificUserDtmfSent(BaseModel):
+class UserDtmfSent(BaseModel):
     type: Literal["user_dtmf_sent"] = "user_dtmf_sent"
     button: str
     event_id: str = Field(default_factory=_generate_event_id)
+    history: Optional[List["InputEvent"]] = None
 
 
-class SpecificUserTextSent(BaseModel):
+class UserTextSent(BaseModel):
     type: Literal["user_text_sent"] = "user_text_sent"
     content: str
     event_id: str = Field(default_factory=_generate_event_id)
+    history: Optional[List["InputEvent"]] = None
 
 
-class SpecificUserTurnEnded(BaseModel):
+class UserTurnEnded(BaseModel):
     type: Literal["user_turn_ended"] = "user_turn_ended"
-    content: List[Union[SpecificUserDtmfSent, SpecificUserTextSent]] = Field(default_factory=list)
+    content: List[Union[UserDtmfSent, UserTextSent]] = Field(default_factory=list)
     event_id: str = Field(default_factory=_generate_event_id)
+    history: Optional[List["InputEvent"]] = None
 
 
-class SpecificAgentTurnStarted(BaseModel):
+class AgentTurnStarted(BaseModel):
     type: Literal["agent_turn_started"] = "agent_turn_started"
     event_id: str = Field(default_factory=_generate_event_id)
+    history: Optional[List["InputEvent"]] = None
 
 
-class SpecificAgentTextSent(BaseModel):
+class AgentTextSent(BaseModel):
     type: Literal["agent_text_sent"] = "agent_text_sent"
     content: str
     event_id: str = Field(default_factory=_generate_event_id)
+    history: Optional[List["InputEvent"]] = None
 
 
-class SpecificAgentDtmfSent(BaseModel):
+class AgentDtmfSent(BaseModel):
     type: Literal["agent_dtmf_sent"] = "agent_dtmf_sent"
     button: str
     event_id: str = Field(default_factory=_generate_event_id)
+    history: Optional[List["InputEvent"]] = None
 
 
-class SpecificAgentTurnEnded(BaseModel):
+class AgentTurnEnded(BaseModel):
     type: Literal["agent_turn_ended"] = "agent_turn_ended"
     content: List[
         Union[
-            SpecificAgentTextSent,
-            SpecificAgentDtmfSent,
+            AgentTextSent,
+            AgentDtmfSent,
         ]
     ] = Field(default_factory=list)
     event_id: str = Field(default_factory=_generate_event_id)
-
-
-SpecificInputEvent = Union[
-    SpecificCallStarted,
-    SpecificAgentHandedOff,
-    SpecificUserTurnStarted,
-    SpecificUserDtmfSent,
-    SpecificUserTextSent,
-    SpecificUserTurnEnded,
-    SpecificAgentTurnStarted,
-    SpecificAgentTextSent,
-    SpecificAgentDtmfSent,
-    SpecificAgentTurnEnded,
-    SpecificCallEnded,
-]
-
-
-class CallStarted(SpecificCallStarted):
-    history: List[SpecificInputEvent] = Field(default_factory=list)
-
-
-class CallEnded(SpecificCallEnded):
-    history: List[SpecificInputEvent] = Field(default_factory=list)
-
-
-class UserTurnStarted(SpecificUserTurnStarted):
-    history: List[SpecificInputEvent] = Field(default_factory=list)
-
-
-class UserDtmfSent(SpecificUserDtmfSent):
-    history: List[SpecificInputEvent] = Field(default_factory=list)
-
-
-class UserTextSent(SpecificUserTextSent):
-    history: List[SpecificInputEvent] = Field(default_factory=list)
-
-
-class UserTurnEnded(SpecificUserTurnEnded):
-    history: List[SpecificInputEvent] = Field(default_factory=list)
-
-
-class AgentTurnStarted(SpecificAgentTurnStarted):
-    history: List[SpecificInputEvent] = Field(default_factory=list)
-
-
-class AgentTextSent(SpecificAgentTextSent):
-    history: List[SpecificInputEvent] = Field(default_factory=list)
-
-
-class AgentDtmfSent(SpecificAgentDtmfSent):
-    history: List[SpecificInputEvent] = Field(default_factory=list)
-
-
-class AgentTurnEnded(SpecificAgentTurnEnded):
-    history: List[SpecificInputEvent] = Field(default_factory=list)
-
-
-class AgentHandedOff(SpecificAgentHandedOff):
-    history: List[SpecificInputEvent] = Field(default_factory=list)
+    history: Optional[List["InputEvent"]] = None
 
 
 InputEvent = Union[
@@ -239,19 +191,7 @@ __all__ = [
     "LogMetric",
     "LogMessage",
     "OutputEvent",
-    # Input specific
-    "SpecificCallStarted",
-    "SpecificCallEnded",
-    "SpecificUserTurnStarted",
-    "SpecificUserDtmfSent",
-    "SpecificUserTextSent",
-    "SpecificUserTurnEnded",
-    "SpecificAgentTurnStarted",
-    "SpecificAgentTextSent",
-    "SpecificAgentDtmfSent",
-    "SpecificAgentTurnEnded",
-    "SpecificInputEvent",
-    # Input with history
+    # Input
     "CallStarted",
     "CallEnded",
     "UserTurnStarted",
@@ -262,6 +202,5 @@ __all__ = [
     "AgentTextSent",
     "AgentDtmfSent",
     "AgentTurnEnded",
-    "AgentHandedOff",
     "InputEvent",
 ]
