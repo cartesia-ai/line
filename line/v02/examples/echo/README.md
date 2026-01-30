@@ -37,7 +37,7 @@ async def echo(ctx: ToolEnv, prefix: Annotated[str, "A prefix to add..."], event
     if isinstance(event, UserTurnEnded):
         # Called for each user message after handoff
         for item in event.content:
-            if isinstance(item, SpecificUserTextSent):
+            if isinstance(item, UserTextSent):
                 yield AgentSendText(text=f"{prefix}: {item.content}")
 ```
 

@@ -42,17 +42,6 @@ from line.events import (
     LogMessage,
     LogMetric,
     OutputEvent,
-    SpecificAgentDtmfSent,
-    SpecificAgentTextSent,
-    SpecificAgentTurnEnded,
-    SpecificAgentTurnStarted,
-    SpecificCallEnded,
-    SpecificCallStarted,
-    SpecificInputEvent,
-    SpecificUserDtmfSent,
-    SpecificUserTextSent,
-    SpecificUserTurnEnded,
-    SpecificUserTurnStarted,
     UserDtmfSent,
     UserTextSent,
     UserTurnEnded,
@@ -282,7 +271,7 @@ class ConversationRunner:
         self.websocket = websocket
         self.env = env
         self.shutdown_event = asyncio.Event()
-        self.history: List[SpecificInputEvent] = []
+        self.history: List[InputEvent] = []
         self.emitted_agent_text: str = (
             ""  # Buffer for all AgentSendText content (for whitespace interpolation)
         )
@@ -347,7 +336,7 @@ class ConversationRunner:
         Processes incoming websocket messages until shutdown.
         """
         # Emit call_started to seed history/context
-        start_event, self.history = self._process_specific_input_event(self.history, SpecificCallStarted())
+        start_event, self.history = self._process_input_event(self.history, CallStarted())
         await self._handle_event(TurnEnv(), start_event)
 
         while not self.shutdown_event.is_set():
@@ -357,16 +346,14 @@ class ConversationRunner:
                 input_msg = TypeAdapter(InputMessage).validate_python(message)
 
                 # Convert and process the input message
-                specific_event = self._convert_input_message(input_msg)
-                ev, self.history = self._process_specific_input_event(self.history, specific_event)
+                event = self._convert_input_message(input_msg)
+                ev, self.history = self._process_input_event(self.history, event)
                 await self._handle_event(TurnEnv(), ev)
 
             except WebSocketDisconnect:
                 logger.info("WebSocket disconnected in loop")
                 self.shutdown_event.set()
-                end_event, self.history = self._process_specific_input_event(
-                    self.history, SpecificCallEnded()
-                )
+                end_event, self.history = self._process_input_event(self.history, CallEnded())
                 await self._handle_event(TurnEnv(), end_event)
             except json.JSONDecodeError as e:
                 logger.exception(f"Failed to parse JSON message: {e}")
@@ -428,98 +415,99 @@ class ConversationRunner:
             logger.warning(f"Failed to send error via WebSocket: {e}")
 
     ######### Event Parsing Methods #########
-    def _convert_input_message(self, message: InputMessage) -> SpecificInputEvent:
-        """Convert an InputMessage to a SpecificInputEvent."""
+    def _convert_input_message(self, message: InputMessage) -> InputEvent:
+        """Convert an InputMessage to an InputEvent (with history=None)."""
         if isinstance(message, UserStateInput):
             if message.value == UserState.SPEAKING:
-                return SpecificUserTurnStarted()
+                return UserTurnStarted()
             elif message.value == UserState.IDLE:
                 content = self._turn_content(
                     self.history,
-                    SpecificUserTurnStarted,
-                    (SpecificUserTextSent, SpecificUserDtmfSent),
+                    UserTurnStarted,
+                    (UserTextSent, UserDtmfSent),
                 )
-                return SpecificUserTurnEnded(content=content)
+                return UserTurnEnded(content=content)
 
         elif isinstance(message, TranscriptionInput):
-            return SpecificUserTextSent(content=message.content)
+            return UserTextSent(content=message.content)
 
         elif isinstance(message, AgentStateInput):
             if message.value == UserState.SPEAKING:
-                return SpecificAgentTurnStarted()
+                return AgentTurnStarted()
             elif message.value == UserState.IDLE:
                 content = self._turn_content(
                     self.history,
-                    SpecificAgentTurnStarted,
-                    (SpecificAgentTextSent, SpecificAgentDtmfSent),
+                    AgentTurnStarted,
+                    (AgentTextSent, AgentDtmfSent),
                 )
-                return SpecificAgentTurnEnded(content=content)
+                return AgentTurnEnded(content=content)
 
         elif isinstance(message, AgentSpeechInput):
-            return SpecificAgentTextSent(content=message.content)
+            return AgentTextSent(content=message.content)
 
         elif isinstance(message, DTMFInput):
-            return SpecificUserDtmfSent(button=message.button)
+            return UserDtmfSent(button=message.button)
 
         raise ValueError(f"Unhandled input message type: {type(message).__name__}")
 
     def _turn_content(
         self,
-        history: List[SpecificInputEvent],
+        history: List[InputEvent],
         start_type: type,
         content_types: tuple[type, ...],
-    ) -> List[SpecificInputEvent]:
+    ) -> List[InputEvent]:
         """Collect turn content since the most recent start_type event."""
         for idx in range(len(history) - 1, -1, -1):
             if isinstance(history[idx], start_type):
                 return [ev for ev in history[idx + 1 :] if isinstance(ev, content_types)]
         return []
 
-    def _process_specific_input_event(
-        self, history: List[SpecificInputEvent], raw_event: SpecificInputEvent
-    ) -> tuple[InputEvent, List[SpecificInputEvent]]:
-        """Create an InputEvent including history from a SpecificInputEvent.
+    def _process_input_event(
+        self, history: List[InputEvent], raw_event: InputEvent
+    ) -> tuple[InputEvent, List[InputEvent]]:
+        """Create an InputEvent including history from an InputEvent (with history=None).
 
         The raw history is updated with the new event, but the history passed to
-        the InputEvent is processed to restore whitespace in SpecificAgentTextSent events.
+        the InputEvent is processed to restore whitespace in AgentTextSent events.
         """
         raw_history = history + [raw_event]
         # Process history to restore whitespace before passing to agent
         processed_history = _get_processed_history(self.emitted_agent_text, raw_history)
         processed_event = processed_history[-1]
-        base_data = processed_event.model_dump()
+        # Extract base data excluding history (we'll set it explicitly)
+        base_data = {k: v for k, v in processed_event.model_dump().items() if k != "history"}
 
         event: InputEvent
-        if isinstance(processed_event, SpecificCallStarted):
+        if isinstance(processed_event, CallStarted):
             event = CallStarted(history=processed_history, **base_data)
             logger.info("-> 📞 Call started")
-        elif isinstance(processed_event, SpecificCallEnded):
+        elif isinstance(processed_event, CallEnded):
             event = CallEnded(history=processed_history, **base_data)
             logger.info("-> 📞 Call ended")
-        elif isinstance(processed_event, SpecificUserTurnStarted):
+        elif isinstance(processed_event, UserTurnStarted):
             event = UserTurnStarted(history=processed_history, **base_data)
             logger.info("-> 🧑🔊 User started speaking")
-        elif isinstance(processed_event, SpecificUserDtmfSent):
+        elif isinstance(processed_event, UserDtmfSent):
             event = UserDtmfSent(history=processed_history, **base_data)
             logger.info(f"-> 🧑🔔 User DTMF received: {event.button}")
-        elif isinstance(processed_event, SpecificUserTextSent):
+        elif isinstance(processed_event, UserTextSent):
             event = UserTextSent(history=processed_history, **base_data)
             logger.info(f'-> 🧑🗣️ User said: "{event.content}"')
-        elif isinstance(processed_event, SpecificUserTurnEnded):
+        elif isinstance(processed_event, UserTurnEnded):
             event = UserTurnEnded(history=processed_history, **base_data)
             logger.info("-> 🧑🔇 User stopped speaking")
-        elif isinstance(processed_event, SpecificAgentTurnStarted):
+        elif isinstance(processed_event, AgentTurnStarted):
             event = AgentTurnStarted(history=processed_history, **base_data)
             logger.info("-> 🤖🔊 Agent started speaking")
-        elif isinstance(processed_event, SpecificAgentTextSent):
+        elif isinstance(processed_event, AgentTextSent):
             event = AgentTextSent(history=processed_history, **base_data)
             # special case: log the raw event content (without whitespace restoration)
             # otherwise we re-log the same text multiple times with the new stuff
             # concatenated
             logger.info(f'-> 🤖🗣️ Agent said: "{raw_event.content}"')
-        elif isinstance(processed_event, SpecificAgentDtmfSent):
+        elif isinstance(processed_event, AgentDtmfSent):
             event = AgentDtmfSent(history=processed_history, **base_data)
-        elif isinstance(processed_event, SpecificAgentTurnEnded):
+        elif isinstance(processed_event, AgentTurnEnded):
             event = AgentTurnEnded(history=processed_history, **base_data)
             logger.info("-> 🤖🔇 Agent stopped speaking")
         else:
@@ -565,9 +553,9 @@ class ConversationRunner:
 NORMAL_CHARACTERS_REGEX = r"(\s+|[^\w\s]+)"
 
 
-def _get_processed_history(pending_text: str, history: List[SpecificInputEvent]) -> List[SpecificInputEvent]:
+def _get_processed_history(pending_text: str, history: List[InputEvent]) -> List[InputEvent]:
     """
-    Process history to reinterpolate whitespace into SpecificAgentTextSent events.
+    Process history to reinterpolate whitespace into AgentTextSent events.
 
     The TTS system strips whitespace when confirming what was spoken. This method
     uses the buffered AgentSendText content to restore proper whitespace formatting
@@ -575,27 +563,27 @@ def _get_processed_history(pending_text: str, history: List[SpecificInputEvent])
 
     Args:
         pending_text: Accumulated text from AgentSendText events (with whitespace)
-        history: Raw history containing SpecificAgentTextSent with stripped whitespace
+        history: Raw history containing AgentTextSent with stripped whitespace
 
     Returns:
-        Processed history with whitespace restored in SpecificAgentTextSent events
+        Processed history with whitespace restored in AgentTextSent events
     """
-    processed_events: List[SpecificInputEvent] = []
+    processed_events: List[InputEvent] = []
     committed_text_buffer = ""
     for event in history:
-        if isinstance(event, SpecificAgentTextSent):
+        if isinstance(event, AgentTextSent):
             committed_text_buffer += event.content
         else:
             committed_text, committed_text_buffer, pending_text = _parse_committed(
                 committed_text_buffer, pending_text
             )
             if committed_text:
-                processed_events.append(SpecificAgentTextSent(content=committed_text))
+                processed_events.append(AgentTextSent(content=committed_text))
             processed_events.append(event)
 
     committed_text, _, _ = _parse_committed(committed_text_buffer, pending_text)
     if committed_text:
-        processed_events.append(SpecificAgentTextSent(content=committed_text))
+        processed_events.append(AgentTextSent(content=committed_text))
     return processed_events
 
 
