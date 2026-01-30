@@ -23,22 +23,19 @@ from loguru import logger
 
 from line.agent import AgentCallable, TurnEnv
 from line.events import (
+    AgentDtmfSent,
     AgentEndCall,
     AgentHandedOff,
     AgentSendDtmf,
     AgentSendText,
+    AgentTextSent,
     AgentToolCalled,
     AgentToolReturned,
     CallEnded,
     CallStarted,
     InputEvent,
     OutputEvent,
-    SpecificAgentDtmfSent,
-    SpecificAgentHandedOff,
-    SpecificAgentTextSent,
-    SpecificCallEnded,
-    SpecificInputEvent,
-    SpecificUserTextSent,
+    UserTextSent,
 )
 from line.llm_agent.config import LlmConfig
 from line.llm_agent.provider import LLMProvider, Message, ToolCall
@@ -406,9 +403,10 @@ class LlmAgent:
                         yield tool_returned_output
 
                         # AgentHandedOff input event is passed to the handoff target to execute the tool
-                        specific_event = SpecificAgentHandedOff()
+                        handed_off_event = AgentHandedOff()
                         event = AgentHandedOff(
-                            history=event.history + [specific_event], **specific_event.model_dump()
+                            history=event.history + [handed_off_event],
+                            **{k: v for k, v in handed_off_event.model_dump().items() if k != "history"},
                         )
                         self._append_to_local_history(event)
                         try:
@@ -442,7 +440,7 @@ class LlmAgent:
 
     def _build_messages(
         self,
-        input_history: List[SpecificInputEvent],
+        input_history: List[InputEvent],
         local_history: List[tuple[str, OutputEvent]],
         current_event_id: str,
     ) -> List[Message]:
@@ -455,17 +453,17 @@ class LlmAgent:
         4. Unobservable events (tool calls) are interpolated relative to observables
 
         The full_history contains:
-        - SpecificInputEvent for events from input_history
+        - InputEvent (with history=None) for events from input_history
         - OutputEvent for unobservable/current events from local_history
         """
         full_history = _build_full_history(input_history, local_history, current_event_id)
 
         messages = []
         for event in full_history:
-            # Handle SpecificInputEvent types (from input_history)
-            if isinstance(event, SpecificUserTextSent):
+            # Handle InputEvent types (from input_history)
+            if isinstance(event, UserTextSent):
                 messages.append(Message(role="user", content=event.content))
-            elif isinstance(event, SpecificAgentTextSent):
+            elif isinstance(event, AgentTextSent):
                 messages.append(Message(role="assistant", content=event.content))
             # Handle OutputEvent types (unobservable events from local_history)
             elif isinstance(event, AgentSendText):
@@ -603,10 +601,10 @@ class LlmAgent:
 
 
 def _build_full_history(
-    input_history: List[SpecificInputEvent],
+    input_history: List[InputEvent],
     local_history: List[tuple[str, OutputEvent]],
     current_event_id: str,
-) -> List[Union[SpecificInputEvent, OutputEvent]]:
+) -> List[Union[InputEvent, OutputEvent]]:
     """
     Build full history by merging input_history (canonical) with local_history.
 
@@ -645,7 +643,7 @@ def _build_full_history(
     trigger_event_ids = set(local_by_event_id.keys())
 
     # Process input in slices
-    result: List[Union[SpecificInputEvent, OutputEvent]] = []
+    result: List[Union[InputEvent, OutputEvent]] = []
     i = 0
 
     while i < len(input_history):
@@ -693,9 +691,9 @@ def _concat_contiguous_agent_send_text(local_history: List[OutputEvent]) -> List
 
 
 def _build_history_rec(
-    input_history: List[SpecificInputEvent],
+    input_history: List[InputEvent],
     local_history: List[OutputEvent],
-) -> List[Union[SpecificInputEvent, OutputEvent]]:
+) -> List[Union[InputEvent, OutputEvent]]:
     """
     Recursive implementation of history merging.
 
@@ -793,20 +791,20 @@ def _is_local_observable(event: OutputEvent) -> bool:
 
 
 OBSERVABLE_INPUT_EVENT_TYPES = (
-    SpecificAgentDtmfSent,
-    SpecificAgentTextSent,
-    SpecificCallEnded,
+    AgentDtmfSent,
+    AgentTextSent,
+    CallEnded,
 )
 
 
-def _is_input_observable(event: SpecificInputEvent) -> bool:
-    """Check if a SpecificInputEvent is observable (can be matched to local history)."""
+def _is_input_observable(event: InputEvent) -> bool:
+    """Check if an InputEvent is observable (can be matched to local history)."""
     return isinstance(event, OBSERVABLE_INPUT_EVENT_TYPES)
 
 
 def _try_match_events(
-    local: OutputEvent, input_evt: SpecificInputEvent
-) -> Optional[tuple[SpecificInputEvent, Optional[OutputEvent]]]:
+    local: OutputEvent, input_evt: InputEvent
+) -> Optional[tuple[InputEvent, Optional[OutputEvent]]]:
     """Try to match a local observable event to an input observable event.
 
     Returns:
@@ -817,16 +815,16 @@ def _try_match_events(
     For text events, supports prefix matching (input is prefix of local).
     For DTMF and EndCall events, only exact matching is supported.
     """
-    if isinstance(local, AgentSendText) and isinstance(input_evt, SpecificAgentTextSent):
+    if isinstance(local, AgentSendText) and isinstance(input_evt, AgentTextSent):
         if local.text == input_evt.content:
             return (input_evt, None)
         if local.text.startswith(input_evt.content):
             suffix = local.text[len(input_evt.content) :]
             return (input_evt, AgentSendText(text=suffix))
-    elif isinstance(local, AgentSendDtmf) and isinstance(input_evt, SpecificAgentDtmfSent):
+    elif isinstance(local, AgentSendDtmf) and isinstance(input_evt, AgentDtmfSent):
         if local.button == input_evt.button:
             return (input_evt, None)
-    elif isinstance(local, AgentEndCall) and isinstance(input_evt, SpecificCallEnded):
+    elif isinstance(local, AgentEndCall) and isinstance(input_evt, CallEnded):
         return (input_evt, None)
     return None
 
