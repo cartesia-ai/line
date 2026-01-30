@@ -7,8 +7,8 @@ from typing import Annotated
 from exa_py import Exa
 from loguru import logger
 
-from line.v02.llm_agent import LlmAgent, LlmConfig, ToolEnv, end_call, loopback_tool
-from line.v02.voice_agent_app import AgentEnv, CallRequest, VoiceAgentApp
+from line.llm_agent import LlmAgent, LlmConfig, ToolEnv, end_call, loopback_tool
+from line.voice_agent_app import AgentEnv, CallRequest, VoiceAgentApp
 
 SYSTEM_PROMPT = """You are an intelligent web research assistant with access to real-time \
 web search capabilities.
