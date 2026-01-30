@@ -4,13 +4,8 @@ version = "0.1.0"
 description = "Guardrails wrapper example - LLM agent with preprocessing/postprocessing for content filtering"
 requires-python = ">=3.10"
 dependencies = [
-    "cartesia-line-v02",
-    "cartesia-line",
+   "cartesia-line==0.2.0.dev0",
 ]
 
 [project.scripts]
 guardrails-wrapper = "main:app.run"
-
-[tool.uv.sources]
-cartesia-line-v02 = { path = "../../", editable = true }
-cartesia-line={ path = "../../../../", editable = true }
