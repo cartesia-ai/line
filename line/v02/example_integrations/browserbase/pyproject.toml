@@ -4,7 +4,6 @@ version = "0.1.0"
 description = "Voice agent that fills web forms using Stagehand browser automation (Line SDK v02)"
 requires-python = ">=3.10"
 dependencies = [
-    "cartesia-line-v02",
     "cartesia-line",
     "stagehand>=3.0.0",
     "google-genai>=1.26.0",
@@ -16,5 +15,4 @@ dependencies = [
 browserbase-form-filler = "main:app.run"
 
 [tool.uv.sources]
-cartesia-line-v02 = { path = "../../", editable = true }
 cartesia-line = { path = "../../../../", editable = true }

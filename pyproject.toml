@@ -41,6 +41,7 @@ dependencies = [
     "duckduckgo-search>=8.1.1",
     "ddgs>=9.8.0",
     "phonenumbers>=9.0.22",
+    "build>=1.4.0",
 ]
 
 [project.optional-dependencies]

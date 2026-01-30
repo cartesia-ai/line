@@ -42,7 +42,6 @@ You will need:
 ### Dependencies
 
 ```
-cartesia-line-v02
 cartesia-line
 stagehand>=3.0.0
 google-genai>=1.26.0
