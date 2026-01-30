@@ -1,0 +1,15 @@
+[project]
+name = "thinker-talker"
+version = "0.1.0"
+description = "Thinker/Talker example: A fast Haiku agent that consults Opus for complex questions"
+requires-python = ">=3.10"
+dependencies = [
+    "cartesia-line",
+    "websockets>=16.0",
+]
+
+[tool.uv.sources]
+cartesia-line = { path = "../../../..", editable = true }
+
+[project.scripts]
+thinker-talker = "main:app.run"
