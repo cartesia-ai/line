@@ -2,9 +2,8 @@ from typing import Annotated
 
 from loguru import logger
 
-from line.v02.events import AgentHandedOff, AgentSendText, SpecificUserTextSent, UserTurnEnded
-from line.v02.llm import handoff_tool
-from line.v02.llm.agent import ToolEnv
+from line.events import AgentHandedOff, AgentSendText, SpecificUserTextSent, UserTurnEnded
+from line.llm_agent import ToolEnv, handoff_tool
 
 
 @handoff_tool
