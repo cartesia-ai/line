@@ -21,7 +21,7 @@ async def get_agent(env: AgentEnv, call_request: CallRequest):
         config=LlmConfig(
             system_prompt=(
                 "Eres un asistente amable y servicial."
-                "Tenga una conversación natural con el usuario." 
+                "Tenga una conversación natural con el usuario."
                 "Habla sólo en español."
             ),
             introduction=("¡Hola! Soy tu asistente de IA. ¿Cómo puedo ayudarte hoy?"),
