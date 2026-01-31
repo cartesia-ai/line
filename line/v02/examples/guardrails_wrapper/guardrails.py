@@ -12,19 +12,19 @@ from typing import AsyncIterable, Optional
 
 from loguru import logger
 
-from line.v02.llm import (
+from line.events import (
     AgentEndCall,
     AgentSendText,
     CallEnded,
     CallStarted,
     InputEvent,
-    LlmAgent,
-    LlmConfig,
     OutputEvent,
     TurnEnv,
     UserTurnEnded,
 )
-from line.v02.llm.provider import LLMProvider, Message
+from line.llm_agent.config import LlmConfig
+from line.llm_agent.llm_agent import LlmAgent
+from line.llm_agent.provider import LLMProvider, Message
 
 
 @dataclass

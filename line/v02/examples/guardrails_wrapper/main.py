@@ -25,7 +25,9 @@ from guardrails import GuardrailConfig, GuardrailsWrapper
 from loguru import logger
 
 from line.call_request import CallRequest
-from line.v02.llm import LlmAgent, LlmConfig, end_call, web_search
+from line.llm_agent.config import LlmConfig
+from line.llm_agent.llm_agent import LlmAgent
+from line.llm_agent.tools import end_call, web_search
 from line.v02.voice_agent_app import AgentEnv, VoiceAgentApp
 
 SYSTEM_PROMPT = """You are a helpful AI assistant for Cartesia AI, a voice AI startup that \
