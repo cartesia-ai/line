@@ -99,6 +99,12 @@ jobs:
             exit 1
           fi
 
+          # Skip example version check for dev releases
+          if [[ "$CURRENT_VERSION" == *"dev"* ]]; then
+            echo "✅ Dev release detected, skipping example version pin check"
+            exit 0
+          fi
+
           # Check that ALL example pyproject.toml files are updated to the new version
           MISSING_UPDATES=""
           for EXAMPLE_FILE in $(find examples example_integrations -name 'pyproject.toml' 2>/dev/null); do

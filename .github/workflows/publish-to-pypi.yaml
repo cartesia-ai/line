@@ -156,4 +156,4 @@ jobs:
 
             Published to PyPI: https://pypi.org/project/cartesia-line/${{ needs.check-prerequisites.outputs.version }}/
           draft: false
-          prerelease: ${{ contains(needs.check-prerequisites.outputs.version, 'alpha') || contains(needs.check-prerequisites.outputs.version, 'beta') || contains(needs.check-prerequisites.outputs.version, 'rc') }}
+          prerelease: ${{ contains(needs.check-prerequisites.outputs.version, 'alpha') || contains(needs.check-prerequisites.outputs.version, 'beta') || contains(needs.check-prerequisites.outputs.version, 'rc') || contains(needs.check-prerequisites.outputs.version, 'dev') }}

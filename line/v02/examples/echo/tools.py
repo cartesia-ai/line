@@ -2,8 +2,8 @@ from typing import Annotated
 
 from loguru import logger
 
-from line.v02.events import AgentHandedOff, AgentSendText, SpecificUserTextSent, UserTurnEnded
-from line.v02.llm_agent import ToolEnv, handoff_tool
+from line.events import AgentHandedOff, AgentSendText, UserTextSent, UserTurnEnded
+from line.llm_agent import ToolEnv, handoff_tool
 
 
 @handoff_tool
@@ -16,6 +16,6 @@ async def echo(ctx: ToolEnv, prefix: Annotated[str, "A prefix to add before each
     if isinstance(event, UserTurnEnded):
         logger.info(f"Tool call echo: User turn ended: {event.content}")
         for item in event.content:
-            if isinstance(item, SpecificUserTextSent):
+            if isinstance(item, UserTextSent):
                 logger.info(f"Tool call echo: Echoing message: {prefix}: {item.content}")
                 yield AgentSendText(text=f"{prefix}: {item.content}")
