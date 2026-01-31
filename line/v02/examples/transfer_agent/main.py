@@ -3,9 +3,9 @@ import os
 from loguru import logger
 
 from line.call_request import CallRequest
-from line.v02.llm import LlmAgent, LlmConfig, agent_as_handoff
-from line.v02.llm.tools import end_call
-from line.v02.voice_agent_app import AgentEnv, VoiceAgentApp
+from line.llm_agent import LlmAgent, LlmConfig, agent_as_handoff
+from line.llm_agent.tools import end_call
+from line.voice_agent_app import AgentEnv, VoiceAgentApp
 
 #  OPENAI_API_KEY=your-key GEMINI_API_KEY=your-key uv run python main.py
 
@@ -20,9 +20,9 @@ async def get_agent(env: AgentEnv, call_request: CallRequest):
         tools=[end_call],
         config=LlmConfig(
             system_prompt=(
-                "You are a friendly and helpful assistant. "
-                "Have a natural conversation with the user. "
-                "You speak only in Spanish."
+                "Eres un asistente amable y servicial."
+                "Tenga una conversación natural con el usuario." 
+                "Habla sólo en español."
             ),
             introduction=("¡Hola! Soy tu asistente de IA. ¿Cómo puedo ayudarte hoy?"),
         ),
