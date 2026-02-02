@@ -8,7 +8,7 @@ dependencies = [
 ]
 
 [project.scripts]
-form-filler = "main:app.run"
+echo = "main:app.run"
 
 [tool.setuptools]
 py-modules = ["main", "tools"]
