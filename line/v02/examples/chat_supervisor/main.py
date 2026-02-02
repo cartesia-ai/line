@@ -100,8 +100,8 @@ class ChatSupervisorAgent(AgentClass):
 
     async def _cleanup(self):
         """Cleanup resources."""
-        await self._supervisor.cleanup()
         await self._chatter.cleanup()
+        await self._supervisor.cleanup()
 
 
 CHAT_SYSTEM_PROMPT = """You are a friendly and helpful voice assistant.
