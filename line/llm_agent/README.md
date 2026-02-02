@@ -297,25 +297,6 @@ config = LlmConfig.from_call_request(
 - `AgentToolCalled` - Tool was called
 - `AgentToolReturned` - Tool returned result
 
-## Built-in Tools
-
-The SDK provides ready-to-use tools:
-
-```python
-from line.v02.llm import end_call, send_dtmf, transfer_call, web_search
-
-agent = LlmAgent(
-    model="gpt-4o",
-    tools=[end_call, send_dtmf, transfer_call, web_search],
-    ...
-)
-```
-
-- **`end_call`** - Ends the call. Note: this just ends the call without saying anything. If you want a goodbye message, instruct your agent to say goodbye before calling this tool.
-- **`send_dtmf`** - Sends DTMF tones (for IVR navigation)
-- **`transfer_call`** - Transfers to another phone number (E.164 format)
-- **`web_search`** - Search the web (uses native LLM search or DuckDuckGo fallback)
-
 ## Testing
 
 Run the integration test script to verify LLM provider connectivity:
