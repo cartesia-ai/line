@@ -5,8 +5,8 @@ A voice agent demonstrating a two-tier model architecture: a fast "talker" (Clau
 ## Overview
 
 This example creates a voice agent that:
-- Uses **Claude 3.5 Haiku** as the primary conversational model (fast, efficient)
-- Can escalate to **Claude 3 Opus** via a tool call when facing difficult questions
+- Uses **Claude 4.5 Haiku** as the primary conversational model (fast, efficient)
+- Can escalate to **Claude 4.5 Opus** via a tool call when facing difficult questions
 - Passes the **full conversation history** to the thinker for context
 - Synthesizes the thinker's deep analysis into natural spoken responses
 
@@ -74,7 +74,7 @@ ANTHROPIC_API_KEY=your-key uv run python main.py
 > Agent: "The capital of France is Paris!"
 
 **Complex question (escalates to Opus with full context):**
-> User: "I'm building a web app. Can you explain the proof of the Pythagorean theorem using similar triangles?"
+> User: "Can you explain the proof of the Pythagorean theorem using similar triangles?"
 > Agent: *calls ask_thinker with full conversation history*
 > Agent: "Great question! The proof using similar triangles works like this..."
 
