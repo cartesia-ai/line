@@ -269,20 +269,17 @@ class StagehandFormFiller:
         This method safely handles cleanup even if initialization is still in progress.
         It will wait for initialization to complete (or fail) before cleaning up the session.
         """
-        # Wait for initialization to complete (or fail) before cleanup
         try:
+            # Wait for initialization to complete (or fail) before cleanup
             await self._init_future
-        except Exception as e:
-            logger.info(f"Initialization failed or was cancelled during cleanup: {e}")
-        
-        if self.session:
-            session = self.session
-            self.session = None  # Prevent double cleanup
-            try:
+            
+            if self.session:
+                session = self.session
+                self.session = None  # Prevent double cleanup
                 await session.end()
                 logger.info("Session ended")
-            except Exception as e:
-                logger.error(f"Error ending session: {e}")
+        except Exception as e:
+            logger.info(f"Error during cleanup: {e}")
 
     # =========================================================================
     # Tool methods for use with LlmAgent
