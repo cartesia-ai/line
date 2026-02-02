@@ -29,12 +29,11 @@ async def get_agent(env: AgentEnv, call_request: CallRequest):
         model="gemini/gemini-2.0-flash",
         api_key=os.getenv("GEMINI_API_KEY"),
         tools=[end_call],
-        config=LlmConfig(
-            system_prompt=call_request.agent.system_prompt or "You are a friendly...",
-            introduction=call_request.agent.introduction or "Hello! I'm your AI assistant...",
-        ),
+        config=LlmConfig.from_call_request(call_request),
     )
 ```
+
+The `LlmConfig.from_call_request()` helper automatically uses prompts from the call request with sensible defaults.
 
 ## Key Concepts
 
