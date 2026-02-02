@@ -56,15 +56,6 @@ dev = [
     "google-genai>=1.26.0,<2",
 ]
 
-
-gemini = [
-    "google-genai>=1.26.0,<2; python_version>='3.9'",
-    "aiohttp>=3.12.0",
-]
-openai = [
-    "openai>=1.70.0",
-]
-
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["line*"]
