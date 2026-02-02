@@ -11,4 +11,4 @@ dependencies = [
 form-filler = "main:app.run"
 
 [tool.setuptools]
-py-modules = ["main"]
+py-modules = ["main", "tools"]

@@ -15,4 +15,4 @@ dependencies = [
 browserbase-form-filler = "main:app.run"
 
 [tool.setuptools]
-py-modules = ["main"]
+py-modules = ["main", "stagehand_form_filler"]
