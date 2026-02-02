@@ -234,8 +234,9 @@ class VoiceAgentApp:
         env = AgentEnv(loop)
         try:
             agent_spec = await self.get_agent(env, call_request)
-        except Exception as e:
-            error_string = f"Error in get_agent for {call_request.call_id}: {str(e)}"
+        except Exception:
+            error_msg = traceback.format_exc()
+            error_string = f"Error in get_agent for {call_request.call_id}: {error_msg}"
             logger.error(error_string)
             await websocket.send_json(ErrorOutput(content=error_string).model_dump())
             await websocket.close()
@@ -357,6 +358,10 @@ class ConversationRunner:
                 end_event, self.history = self._process_input_event(self.history, CallEnded())
                 await self._handle_event(TurnEnv(), end_event)
             except json.JSONDecodeError as e:
+                # Don't send EndCall event, as that may trigger side effects
+                # we accept the risk of incomplete call cleanup in this case,
+                # since this is an exceptional case that we will fix at the
+                # SDK level
                 self.shutdown_event.set()
                 logger.error(f"Failed to parse JSON message: {e}")
                 await self.send_error(f"Failed to parse JSON message: {e}")
@@ -364,6 +369,10 @@ class ConversationRunner:
             except Exception:
                 # Most non-input processing messages are handled in the #runner loop
                 # so this is almost certianly a message processing error.
+                # Don't send EndCall event, as that may trigger side effects
+                # we accept the risk of incomplete call cleanup in this case,
+                # since this is an exceptional case that we will fix at the
+                # SDK level
                 self.shutdown_event.set()
                 error_msg = traceback.format_exc()
                 logger.error(f"Error in websocket loop (likely message processing): {error_msg}")
