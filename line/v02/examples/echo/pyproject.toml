@@ -8,4 +8,4 @@ dependencies = [
 ]
 
 [project.scripts]
-form-filler = "main:app.run"
+echo = "main:app.run"
