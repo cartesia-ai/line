@@ -286,7 +286,6 @@ async def get_agent(env, call_request):
 | **OpenAI** | `gpt-5-nano`, `gpt-5.2` |
 | **Anthropic** | `anthropic/claude-haiku-4-5-20251001`, `anthropic/claude-sonnet-4-5` |
 | **Google** | `gemini/gemini-2.5-flash-preview-09-2025`, `gemini/gemini-3.0-preview` |
-| **Meta (via Together)** | `together_ai/meta-llama/Llama-3.1-70B` |
 
 
 ## Agent Examples
