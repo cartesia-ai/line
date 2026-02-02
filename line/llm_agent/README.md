@@ -24,11 +24,11 @@ app.run()
 
 ## Models (via LiteLLM)
 
-| Provider | Format | Examples |
-|----------|--------|----------|
-| OpenAI | `model-name` | `gpt-4o`, `gpt-4o-mini` |
-| Anthropic | `anthropic/model-name` | `anthropic/claude-sonnet-4-20250514` |
-| Google | `gemini/model-name` | `gemini/gemini-2.0-flash`, `gemini/gemini-2.5-pro-preview-05-06` |
+| Provider | Model format |
+|----------|--------------|
+| **OpenAI** | `gpt-5-nano`, `gpt-5.2` |
+| **Anthropic** | `anthropic/claude-haiku-4-5-20251001`, `anthropic/claude-sonnet-4-5` |
+| **Google** | `gemini/gemini-2.5-flash-preview-09-2025`, `gemini/gemini-3.0-preview` |
 
 See [LiteLLM docs](https://docs.litellm.ai/docs/providers) for 100+ more providers.
 
