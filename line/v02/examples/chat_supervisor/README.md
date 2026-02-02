@@ -1,14 +1,14 @@
-# Thinker/Talker Example
+# Chat/Supervisor Example
 
-A voice agent demonstrating a two-tier model architecture: a fast "talker" (Claude Haiku) for conversational interactions, with access to a powerful "thinker" (Claude Opus) for complex reasoning tasks.
+A voice agent demonstrating a two-tier model architecture: a fast "chat" model (Claude Haiku) for conversational interactions, with access to a powerful "supervisor" (Claude Opus) for complex reasoning tasks.
 
 ## Overview
 
 This example creates a voice agent that:
 - Uses **Claude 4.5 Haiku** as the primary conversational model (fast, efficient)
 - Can escalate to **Claude 4.5 Opus** via a tool call when facing difficult questions
-- Passes the **full conversation history** to the thinker for context
-- Synthesizes the thinker's deep analysis into natural spoken responses
+- Passes the **full conversation history** to the supervisor for context
+- Synthesizes the supervisor's deep analysis into natural spoken responses
 
 ## Architecture
 
@@ -17,27 +17,27 @@ User Question
      │
      ▼
 ┌─────────────────────────────────────┐
-│      ThinkerTalkerAgent             │
+│      ChatSupervisorAgent            │
 │  ┌─────────────┐                    │
-│  │   Talker    │  (Claude Haiku)    │
+│  │    Chat     │  (Claude Haiku)    │
 │  │  LlmAgent   │                    │
 │  └─────────────┘                    │
 │        │                            │
 │        │ Simple question? → Respond │
 │        │                            │
 │        │ Complex question?          │
-│        │ ↓ ask_thinker tool         │
+│        │ ↓ ask_supervisor tool      │
 │        │ (has access to full        │
 │        │  conversation history)     │
 │        ▼                            │
 │  ┌─────────────┐                    │
-│  │   Thinker   │  (Claude Opus)     │
+│  │  Supervisor │  (Claude Opus)     │
 │  │  LlmAgent   │                    │
 │  └─────────────┘                    │
 │        │                            │
 │        │ Detailed analysis          │
 │        ▼                            │
-│  Talker synthesizes response        │
+│  Chat synthesizes response          │
 └─────────────────────────────────────┘
      │
      ▼
@@ -46,24 +46,24 @@ Spoken Response
 
 ## Key Implementation Details
 
-The `ThinkerTalkerAgent` class wraps both LlmAgents:
-- Stores the current event to give the `ask_thinker` tool access to conversation history
+The `ChatSupervisorAgent` class wraps both LlmAgents:
+- Stores the current event to give the `ask_supervisor` tool access to conversation history
 - The tool is a method on the class, allowing it to close over the agent's state
-- Both talker and thinker use `LlmAgent` for consistent behavior
+- Both chat and supervisor use `LlmAgent` for consistent behavior
 
-## When the Thinker is Consulted
+## When the Supervisor is Consulted
 
-The talker agent is instructed to use `ask_thinker` for:
+The chat agent is instructed to use `ask_supervisor` for:
 - Complex mathematical problems or proofs
 - Multi-step logical reasoning puzzles
 - Questions requiring deep domain expertise
 - Philosophical or ethical dilemmas
-- Any question the talker is uncertain about
+- Any question the chat model is uncertain about
 
 ## Running the Example
 
 ```bash
-cd line/v02/examples/thinker_talker
+cd line/v02/examples/chat_supervisor
 ANTHROPIC_API_KEY=your-key uv run python main.py
 ```
 
@@ -75,7 +75,7 @@ ANTHROPIC_API_KEY=your-key uv run python main.py
 
 **Complex question (escalates to Opus with full context):**
 > User: "Can you explain the proof of the Pythagorean theorem using similar triangles?"
-> Agent: *calls ask_thinker with full conversation history*
+> Agent: *calls ask_supervisor with full conversation history*
 > Agent: "Great question! The proof using similar triangles works like this..."
 
 ## Cost Considerations
