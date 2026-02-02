@@ -110,7 +110,14 @@ async def get_agent(env: AgentEnv, call_request: CallRequest):
         A FormFillingAgent wrapping LlmAgent.
     """
     form_filler = StagehandFormFiller(form_url=FORM_URL)
-    return FormFillingAgent(form_filler)
+    try:
+        return FormFillingAgent(form_filler)
+    except Exception:
+        # If FormFillingAgent creation fails (e.g., LlmAgent construction error),
+        # clean up the browser session that's being initialized in the background
+        logger.error("Failed to create FormFillingAgent, cleaning up browser resources")
+        await form_filler.cleanup()
+        raise
 
 
 app = VoiceAgentApp(get_agent=get_agent)
