@@ -9,8 +9,5 @@ dependencies = [
     "python-dotenv>=1.0.0",
 ]
 
-[project.scripts]
-exa-research = "main:app.run"
-
 [tool.setuptools]
 py-modules = ["main"]

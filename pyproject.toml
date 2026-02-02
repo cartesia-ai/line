@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cartesia-line"
-version = "0.2.0.dev0"
+version = "0.2.0.dev1"
 description = "Cartesia Voice Agents SDK"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -37,8 +37,8 @@ dependencies = [
     "aiohttp>=3.8.0",
     "pydantic>=2.0.0,<3",
     "uvicorn>=0.35.0,<1",
-    "litellm>=1.81.1",
-    "duckduckgo-search>=8.1.1",
+    "websockets>=13.0.0",
+    "litellm>=1.81.6",
     "ddgs>=9.8.0",
     "phonenumbers>=9.0.22",
     "build>=1.4.0",
@@ -63,9 +63,6 @@ gemini = [
 ]
 openai = [
     "openai>=1.70.0",
-]
-llm = [
-    "litellm>=1.56.0",
 ]
 
 [tool.setuptools.packages.find]
