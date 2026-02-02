@@ -11,4 +11,4 @@ dependencies = [
 guardrails-wrapper = "main:app.run"
 
 [tool.setuptools]
-py-modules = ["main", "guardails"]
+py-modules = ["main", "guardrails"]
