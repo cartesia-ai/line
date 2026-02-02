@@ -9,3 +9,6 @@ dependencies = [
 
 [project.scripts]
 guardrails-wrapper = "main:app.run"
+
+[tool.setuptools]
+py-modules = ["main", "guardails"]

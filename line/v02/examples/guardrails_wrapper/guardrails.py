@@ -12,6 +12,7 @@ from typing import AsyncIterable, Optional
 
 from loguru import logger
 
+from line.agent import TurnEnv
 from line.events import (
     AgentEndCall,
     AgentSendText,
@@ -19,7 +20,6 @@ from line.events import (
     CallStarted,
     InputEvent,
     OutputEvent,
-    TurnEnv,
     UserTurnEnded,
 )
 from line.llm_agent.config import LlmConfig
