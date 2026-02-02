@@ -230,9 +230,9 @@ Respond with ONLY a JSON object (no markdown, no explanation):
 
             result = json.loads(response_text)
             return GuardrailCheckResult(
-                toxic=result.get("toxic", False),
-                prompt_injection=result.get("prompt_injection", False),
-                off_topic=result.get("off_topic", False),
+                toxic=self._to_bool(result.get("toxic", False)),
+                prompt_injection=self._to_bool(result.get("prompt_injection", False)),
+                off_topic=self._to_bool(result.get("off_topic", False)),
                 reasoning=result.get("reasoning", ""),
             )
 
@@ -255,6 +255,17 @@ Respond with ONLY a JSON object (no markdown, no explanation):
 
         # Return concatenated text if any exists
         return " ".join(text_parts) if text_parts else None
+
+    def _to_bool(self, value) -> bool:
+        """
+        Convert various types to boolean, handling LLM responses that might return
+        strings like "true"/"false" instead of actual JSON booleans.
+        """
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            return value.lower() in ("true", "yes", "1")
+        return bool(value)
 
     async def cleanup(self) -> None:
         """Clean up resources."""
