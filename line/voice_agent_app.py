@@ -15,9 +15,9 @@ from datetime import datetime, timezone
 import json
 import os
 import re
+import traceback
 from typing import Any, AsyncIterable, Awaitable, Callable, Dict, List, Optional
 from urllib.parse import urlencode
-import traceback
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
@@ -232,7 +232,7 @@ class VoiceAgentApp:
         # Create the AgentEnv with the current event loop
         loop = asyncio.get_running_loop()
         env = AgentEnv(loop)
-        try: 
+        try:
             agent_spec = await self.get_agent(env, call_request)
         except Exception as e:
             error_string = f"Error in get_agent for {call_request.call_id}: {str(e)}"
@@ -360,6 +360,14 @@ class ConversationRunner:
                 self.shutdown_event.set()
                 logger.error(f"Failed to parse JSON message: {e}")
                 await self.send_error(f"Failed to parse JSON message: {e}")
+                await self.websocket.close()
+            except Exception:
+                # Most non-input processing messages are handled in the #runner loop
+                # so this is almost certianly a message processing error.
+                self.shutdown_event.set()
+                error_msg = traceback.format_exc()
+                logger.error(f"Error in websocket loop (likely message processing): {error_msg}")
+                await self.send_error(f"Error in websocket loop (likely message processing): {error_msg}")
                 await self.websocket.close()
 
         if self.agent_task:
