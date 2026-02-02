@@ -1,8 +1,0 @@
-[app]
-name = "form-filling"
-
-[build]
-cmd = "pip install -r requirements.txt"
-
-[run]
-cmd = "python main.py"
