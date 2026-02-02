@@ -1,20 +1,11 @@
 [project]
-name = "echo-agent"
+name = "echo"
 version = "0.1.0"
-description = "Simple echo voice agent that repeats user messages"
+description = "Handoff echo example using Line SDK v02"
+requires-python = ">=3.10"
 dependencies = [
-    "cartesia-line==0.1.12",
-    "uvicorn[standard]",
+    "cartesia-line==0.2.0.dev0",
 ]
 
-requires-python = ">=3.10"
-
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
-
-[tool.hatch.metadata]
-allow-direct-references = true
-
-[tool.hatch.build.targets.wheel]
-packages = ["."]
+[project.scripts]
+echo = "main:app.run"

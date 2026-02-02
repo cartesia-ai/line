@@ -1,5 +1,0 @@
-[build]
-cmd = "pip3 install -r requirements.txt"
-
-[run]
-cmd = "python3 main.py"
