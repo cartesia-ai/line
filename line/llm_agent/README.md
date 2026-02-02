@@ -28,11 +28,13 @@ app.run()
 from typing import Annotated
 from line.llm_agent import LlmAgent, LlmConfig, end_call, loopback_tool
 
+# Define a custom tool
 @loopback_tool
 async def get_weather(ctx, city: Annotated[str, "City name"]) -> str:
     """Get weather for a city."""
     return f"72°F in {city}"
 
+# Create agent with custom tool + built-in end_call
 agent = LlmAgent(
     model="gpt-4o",
     tools=[get_weather, end_call],
@@ -294,6 +296,25 @@ config = LlmConfig.from_call_request(
 - `AgentSendDtmf` - Send DTMF tones
 - `AgentToolCalled` - Tool was called
 - `AgentToolReturned` - Tool returned result
+
+## Built-in Tools
+
+The SDK provides ready-to-use tools:
+
+```python
+from line.v02.llm import end_call, send_dtmf, transfer_call, web_search
+
+agent = LlmAgent(
+    model="gpt-4o",
+    tools=[end_call, send_dtmf, transfer_call, web_search],
+    ...
+)
+```
+
+- **`end_call`** - Ends the call. Note: this just ends the call without saying anything. If you want a goodbye message, instruct your agent to say goodbye before calling this tool.
+- **`send_dtmf`** - Sends DTMF tones (for IVR navigation)
+- **`transfer_call`** - Transfers to another phone number (E.164 format)
+- **`web_search`** - Search the web (uses native LLM search or DuckDuckGo fallback)
 
 ## Testing
 
