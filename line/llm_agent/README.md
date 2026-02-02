@@ -5,11 +5,28 @@ A unified interface for building LLM-powered voice agents with 100+ provider sup
 ## Quick Start
 
 ```python
-from typing import Annotated, Literal, Optional
-from line.events import AgentSendText, AgentEndCall, AgentHandedOff
-from line.llm_agent import (
-    LlmAgent, LlmConfig, loopback_tool, passthrough_tool, handoff_tool,
-)
+import os
+
+from line.llm_agent import LlmAgent, LlmConfig, end_call
+from line.voice_agent_app import AgentEnv, CallRequest, VoiceAgentApp
+
+async def get_agent(env: AgentEnv, call_request: CallRequest):
+    return LlmAgent(
+        model="gemini/gemini-2.0-flash",
+        api_key=os.getenv("GEMINI_API_KEY"),
+        tools=[end_call],
+        config=LlmConfig.from_call_request(call_request),
+    )
+
+app = VoiceAgentApp(get_agent=get_agent)
+app.run()
+```
+
+### With Custom Tools
+
+```python
+from typing import Annotated
+from line.llm_agent import LlmAgent, LlmConfig, end_call, loopback_tool
 
 # Define a custom tool
 @loopback_tool
@@ -28,13 +45,13 @@ agent = LlmAgent(
 )
 ```
 
-## Model Naming (LiteLLM Format)
+## Models (using LiteLLM)
 
 | Provider | Format | Examples |
 |----------|--------|----------|
-| OpenAI | `model-name` | `gpt-4o`, `gpt-4o-mini`, `o1` |
-| Anthropic | `anthropic/model-name` | `anthropic/claude-3-5-sonnet-20241022` |
-| Google | `gemini/model-name` | `gemini/gemini-2.0-flash` |
+| OpenAI | `model-name` | `gpt-5-nano`, `gpt-5.2` |
+| Anthropic | `anthropic/model-name` | `anthropic/claude-haiku-4-5-20251001`, `anthropic/claude-sonnet-4-5` |
+| Google | `gemini/model-name` | `gemini/gemini-2.5-flash-preview-09-2025`, `gemini/gemini-3.0-preview` |
 
 See [LiteLLM docs](https://docs.litellm.ai/docs/providers) for 100+ more providers.
 
@@ -45,6 +62,9 @@ See [LiteLLM docs](https://docs.litellm.ai/docs/providers) for 100+ more provide
 Result is sent back to the LLM for continued generation. Use for information retrieval.
 
 ```python
+from typing import Annotated
+from line.llm_agent import loopback_tool
+
 @loopback_tool
 async def lookup_order(ctx, order_id: Annotated[str, "Order ID"]) -> str:
     """Look up order status."""
@@ -57,12 +77,18 @@ async def lookup_order(ctx, order_id: Annotated[str, "Order ID"]) -> str:
 Response bypasses the LLM and goes directly to the user. Use for deterministic actions.
 
 ```python
+from typing import Annotated
+from line.events import AgentSendText, AgentEndCall
+from line.llm_agent import passthrough_tool
+
 @passthrough_tool
-async def transfer_call(ctx, department: Annotated[str, "Department name"]):
-    """Transfer to another department."""
-    yield AgentSendText(text=f"Transferring to {department}...")
-    yield AgentTransferCall(target_phone_number=DEPT_NUMBERS[department])
+async def goodbye_and_hang_up(ctx, message: Annotated[str, "Goodbye message"]):
+    """Say a custom goodbye message and end the call."""
+    yield AgentSendText(text=message)
+    yield AgentEndCall()
 ```
+
+Built-in passthrough tools: `end_call`, `send_dtmf`, `transfer_call`
 
 ### Handoff Tools
 
@@ -70,6 +96,10 @@ Transfers control to another agent. After handoff, all future input events are p
 handoff tool, which routes them to the target agent. Use for multi-agent workflows.
 
 ```python
+from typing import Annotated
+from line.events import AgentHandedOff, AgentSendText
+from line.llm_agent import handoff_tool
+
 @handoff_tool
 async def transfer_to_billing(
     ctx,
@@ -90,11 +120,78 @@ The `event` parameter is required for handoff tools:
 - **First call**: `event` is `AgentHandedOff` - use this to send initial transfer messages
 - **Subsequent calls**: `event` is the actual input event (e.g., `UserTextSent`) - route to target agent
 
-## Tool Parameters
+## Built-in Tools
 
-Use `Annotated` with a string description to define parameters:
+The SDK provides commonly-used tools out of the box:
 
 ```python
+from line.llm_agent import end_call, send_dtmf, transfer_call, web_search, agent_as_handoff
+```
+
+| Tool | Type | Description |
+|------|------|-------------|
+| `end_call` | passthrough | End the call |
+| `send_dtmf` | passthrough | Send DTMF tones (0-9, *, #) |
+| `transfer_call` | passthrough | Transfer to a phone number (E.164 format) |
+| `web_search` | loopback | Web search with native LLM support or DuckDuckGo fallback |
+| `agent_as_handoff` | handoff | Create a handoff tool from another agent |
+
+### Web Search
+
+Uses native LLM web search when available, falls back to DuckDuckGo:
+
+```python
+from line.llm_agent import LlmAgent, web_search
+
+# Default settings
+agent = LlmAgent(model="gpt-4o", tools=[web_search])
+
+# Custom settings
+agent = LlmAgent(model="gpt-4o", tools=[web_search(search_context_size="high")])
+```
+
+### Agent Handoffs
+
+Use `agent_as_handoff` to create a tool that transfers control to another agent:
+
+```python
+from line.llm_agent import LlmAgent, LlmConfig, agent_as_handoff, end_call
+
+spanish_agent = LlmAgent(
+    model="gpt-4o",
+    tools=[end_call],
+    config=LlmConfig(
+        system_prompt="You are a helpful assistant. Speak only in Spanish.",
+        introduction="¡Hola! ¿Cómo puedo ayudarte hoy?",
+    ),
+)
+
+main_agent = LlmAgent(
+    model="gemini/gemini-2.0-flash",
+    tools=[
+        end_call,
+        agent_as_handoff(
+            spanish_agent,
+            handoff_message="Transferring you to our Spanish-speaking agent...",
+            name="transfer_to_spanish",
+            description="Transfer to a Spanish-speaking agent when requested.",
+        ),
+    ],
+    config=LlmConfig(
+        system_prompt="You are a helpful assistant. If the user asks to speak in Spanish, use transfer_to_spanish.",
+        introduction="Hello! How can I help you today?",
+    ),
+)
+```
+
+## Tool Parameters
+
+The SDK leverages the function docstring, and the `Annotated` parameters to tell the LLM how to use the tool and its params. *Note: The first argument to every tool call must be `env`*
+
+```python
+from typing import Annotated, Literal, Optional
+from line.llm_agent import loopback_tool
+
 @loopback_tool
 async def search_products(
     ctx,
@@ -112,6 +209,8 @@ async def search_products(
 Tools receive a `ToolEnv` object:
 
 ```python
+from line.llm_agent import ToolEnv, loopback_tool
+
 @loopback_tool
 async def my_tool(ctx: ToolEnv, ...) -> str:
     # Access turn environment (session metadata)
@@ -180,20 +279,6 @@ config = LlmConfig.from_call_request(
 **Empty string handling**:
 - `system_prompt=""` is treated as None and falls back to defaults (a valid system prompt is always required)
 - `introduction=""` is preserved (agent waits for user to speak first rather than using a default)
-
-## Streaming
-
-Responses stream automatically. Tool calls arrive incrementally:
-
-```python
-async for output in agent.process(env, event):
-    if isinstance(output, AgentSendText):
-        print(output.text, end="", flush=True)
-    elif isinstance(output, AgentToolCalled):
-        print(f"\nCalling {output.tool_name}...")
-    elif isinstance(output, AgentToolReturned):
-        print(f"Result: {output.result}")
-```
 
 ## Events
 
