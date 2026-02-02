@@ -9,3 +9,6 @@ dependencies = [
 
 [project.scripts]
 transfer-phone-call = "main:app.run"
+
+[tool.setuptools]
+py-modules = ["main"]

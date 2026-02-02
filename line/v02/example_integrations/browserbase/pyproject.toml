@@ -13,3 +13,6 @@ dependencies = [
 
 [project.scripts]
 browserbase-form-filler = "main:app.run"
+
+[tool.setuptools]
+py-modules = ["main"]
