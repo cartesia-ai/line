@@ -2,6 +2,22 @@
 
 Build production-ready, low-latency voice AI agents with real-time speech and tool calling.
 
+**With Line you can,**
+- **Create** your first voice agent from scratch, **deploy**, and **talk to it in under 5 minutes**.
+- **Turn any existing chatbot** or text agent you've already built into a low-latency voice agent.
+- **Spin up common use cases** for support or scheduling from **ready-made templates**.
+- **Deploy production-ready systems** with auto-scaling, telephony integration, metrics, and call analytics.
+
+**Why Line?**
+
+- 🔗 **Event-driven design** to easily define multi-agent architectures with powerful background reasoning.
+- ⚡ **State-of-the-art voice models** using Sonic TTS and Ink STT deliver the lowest latency voice experience.
+- 📋 **Pre-built templates** for common use cases like customer support, sales agents, form filling, and more.
+- 🔌 **Easy integrations** with tools, MCPs, and other frameworks out of the box.
+- 🤝 **Support for handoffs** between agents and humans.
+- 🧠 **Reasoning agnostic** works with any LLM, text agent, or chatbot code.
+- 🚀 **Instant deployment** so you can build, deploy, and start talking in minutes with no infrastructure setup.
+
 ## Quick Start
 
 **1. Clone and run an example:**
