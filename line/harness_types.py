@@ -1,3 +1,9 @@
+"""
+Raw websocket message types
+
+ConversationRunner maps from these to the "internal" InputEvent and OutputEvent types.
+"""
+
 from typing import Dict, Literal, Optional, Union
 
 from pydantic import BaseModel

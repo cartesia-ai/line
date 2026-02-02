@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cartesia-line"
-version = "0.1.12"
+version = "0.2.0.dev0"
 description = "Cartesia Voice Agents SDK"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -41,6 +41,7 @@ dependencies = [
     "duckduckgo-search>=8.1.1",
     "ddgs>=9.8.0",
     "phonenumbers>=9.0.22",
+    "build>=1.4.0",
 ]
 
 [project.optional-dependencies]

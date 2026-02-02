@@ -10,9 +10,8 @@ from pathlib import Path
 from form_filler import FormFiller
 from loguru import logger
 
-from line.call_request import CallRequest
-from line.v02.llm import LlmAgent, LlmConfig, end_call
-from line.v02.voice_agent_app import AgentEnv, VoiceAgentApp
+from line.llm_agent import LlmAgent, LlmConfig, end_call
+from line.voice_agent_app import AgentEnv, CallRequest, VoiceAgentApp
 
 FORM_PATH = Path(__file__).parent / "schedule_form.yaml"
 

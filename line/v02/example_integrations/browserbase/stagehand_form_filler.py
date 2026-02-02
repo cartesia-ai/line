@@ -16,9 +16,8 @@ from typing import Annotated, AsyncGenerator, Dict, List, Optional
 
 from loguru import logger
 
-from line.v02.events import AgentEndCall, AgentSendText, OutputEvent
-from line.v02.llm.agent import ToolEnv
-from line.v02.llm.tool_types import passthrough_tool
+from line.events import AgentEndCall, AgentSendText, OutputEvent
+from line.llm_agent import ToolEnv, passthrough_tool
 
 
 class FieldType(Enum):
