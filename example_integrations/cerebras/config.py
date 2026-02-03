@@ -1,5 +1,24 @@
-from pydantic import BaseModel
+"""
+Configuration for the Interview Practice Agent.
 
+Contains model settings, prompts, and schemas for the interviewer and judge agents.
+"""
+
+# Model IDs in LiteLLM format (cerebras/ prefix)
+MODEL_ID = "cerebras/llama3.3-70b"
+MODEL_ID_BACK = "cerebras/llama3.1-8b"
+
+# Model parameters
+MAX_OUTPUT_TOKENS = 100
+TEMPERATURE = 0.4
+
+# Introduction message spoken when the call starts
+INTRODUCTION = (
+    "Welcome to the Interview Practice Platform! "
+    "Please let me know what role you are applying for and when you are ready to begin the interview."
+)
+
+# Main interviewer system prompt
 prompt_main = """You are a helpful interview practice assistant with access to an interview starter tool.
 If the user says they are ready to start the interview, call the tool `start_interview` with `confirmed=True`.
 If the user says they need to leave or they want to stop, end the interview and call the tool `end_call`.
@@ -10,6 +29,7 @@ Do not communicate your reasoning steps or thinking process to the user.
 Be concise, like a coach. /no_think .
 """
 
+# Technical expertise judge prompt
 prompt_agent1 = """
 You are an expert at evaluating interviewer response quality in terms of technical expertise.
 
@@ -31,18 +51,7 @@ COMPETENCE LEVEL ASSESSMENT:
 - LOW: gives vague or inappropriate responses, does not show technical skill
 """
 
-
-schema_background = {
-    "type": "object",
-    "properties": {
-        "competence": {"type": "string", "enum": ["HIGH", "MEDIUM", "LOW"]},
-        "strengths": {"type": "string"},
-        "weaknesses": {"type": "string"},
-    },
-    "required": ["competence", "strengths", "weaknesses"],
-    "additionalProperties": False,
-}
-
+# Communication skills judge prompt
 prompt_agent2 = """
 You are an expert at evaluating interviewer response quality in terms of communication skills.
 
@@ -65,7 +74,7 @@ COMPETENCE LEVEL ASSESSMENT:
 - LOW: gives vague or inappropriate responses
 """
 
-
+# Reasoning and logic judge prompt
 prompt_agent3 = """
 You are an expert at evaluating interviewer response quality in terms of reasoning and thinking logic.
 
@@ -85,17 +94,14 @@ COMPETENCE LEVEL ASSESSMENT:
 - LOW: the candidate does not reason for their answer
 """
 
-INTERVIEW_STARTED = False
-
-
-class PerfAnalysis(BaseModel):
-    """Performance analysis results from the interview."""
-
-    perf_info: str = "N/A"
-    confidence: str = "medium"
-
-
-MAX_OUTPUT_TOKENS = 100
-MODEL_ID = "llama3.3-70b"
-MODEL_ID_BACK = "llama3.1-8b"
-TEMPERATURE = 0.4
+# JSON schema for structured output from judge agents
+schema_background = {
+    "type": "object",
+    "properties": {
+        "competence": {"type": "string", "enum": ["HIGH", "MEDIUM", "LOW"]},
+        "strengths": {"type": "string"},
+        "weaknesses": {"type": "string"},
+    },
+    "required": ["competence", "strengths", "weaknesses"],
+    "additionalProperties": False,
+}

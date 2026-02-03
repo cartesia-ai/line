@@ -1,126 +1,151 @@
-import json
-from typing import AsyncGenerator
+"""
+Background Judge Agents using LlmAgent with Cerebras via LiteLLM.
 
-import config
-from cs_utils import convert_messages_to_cs, make_table
+These agents analyze interview responses in the background without speaking to the user.
+They evaluate technical expertise, communication skills, and reasoning ability.
+
+Note: This implementation intentionally uses LlmAgent (rather than litellm.acompletion directly)
+to surface any API friction for future SDK improvements.
+"""
+
+import asyncio
+import os
+from typing import List, Optional
+
+from config import (
+    MODEL_ID_BACK,
+    TEMPERATURE,
+    prompt_agent1,
+    prompt_agent2,
+    prompt_agent3,
+    schema_background,
+)
 from loguru import logger
 from pydantic import BaseModel, Field
 from report_logger import SimpleLogger
 
-from line.events import AgentResponse
-from line.nodes.conversation_context import ConversationContext
-from line.nodes.reasoning import ReasoningNode
+from line.agent import TurnEnv
+from line.events import AgentSendText, UserTextSent, UserTurnEnded
+from line.llm_agent import LlmAgent, LlmConfig
 
 
 class EvalInfo(BaseModel):
-    """Schema for extracted information."""
+    """Schema for extracted evaluation information."""
 
-    competence: str = Field(..., description="competence")
-    strengths: str = Field(..., description="strengths")
-    weaknesses: str = Field(..., description="weaknesses")
+    competence: str = Field(..., description="Competence level: HIGH, MEDIUM, or LOW")
+    strengths: str = Field(..., description="Identified strengths")
+    weaknesses: str = Field(..., description="Identified weaknesses")
 
 
-class JudgeNode(ReasoningNode):
+class BackgroundJudge:
     """
-    Node that extracts information from conversations using Cerebras API call.
+    Background judge that uses LlmAgent to analyze interview responses.
 
-    Inherits conversation management from ReasoningNode and adds agent-specific processing.
+    Note: This is intentionally using LlmAgent (rather than litellm directly)
+    to surface any API friction for future SDK improvements.
+
+    Awkwardness notes:
+    1. LlmConfig doesn't have first-class response_format support - must use `extra`
+    2. Need to construct a synthetic UserTurnEnded event just to pass history
+    3. Agent produces AgentSendText events that we consume but don't yield
     """
 
-    def __init__(self, system_prompt: str, client, node_schema=None, node_name="background node"):
-        self.sys_prompt = system_prompt
-        super().__init__(self.sys_prompt)
-
-        self.client = client
-        self.model_name = config.MODEL_ID_BACK
-        self.node_name = node_name
-        self.text_logger = SimpleLogger(node_name)  # <-- optional to save reports from the background agents
-        self.schema = node_schema
-
-    async def process_context(self, context: ConversationContext) -> AsyncGenerator[AgentResponse, None]:
-        """
-        evaluate response quality from conversation context.
-
-        Args:
-            context: Conversation context with messages.
-
-        Yields:
-            NodeMessage: evaluation results.
-        """
-
-        if config.INTERVIEW_STARTED:
-            logger.warning("starting the interview analysis process for current agent")
-        else:
-            logger.warning("background agents not activated")
-            return
-
-        latest_response = context.get_latest_user_transcript_message()
-
-        if not context.events:
-            logger.warning("No conversation messages to analyze performance")
-            return
-
-        try:
-            # Convert messages to cs format
-            cs_messages = convert_messages_to_cs(context.events, self.sys_prompt)  # [:-1]
-
-            if self.schema:
-                format_ = {
-                    "type": "json_schema",
-                    "json_schema": {"name": "analysis_schema", "strict": True, "schema": self.schema},
-                }
-            else:
-                format_ = None
-
-            stream = await self.client.chat.completions.create(
-                messages=cs_messages,
-                model=self.model_name,
+    def __init__(self, system_prompt: str, node_name: str):
+        self._node_name = node_name
+        self._logger = SimpleLogger(node_name)
+        self._agent = LlmAgent(
+            model=MODEL_ID_BACK,
+            api_key=os.getenv("CEREBRAS_API_KEY"),
+            config=LlmConfig(
+                system_prompt=system_prompt,
+                temperature=TEMPERATURE,
                 max_tokens=50,
-                temperature=config.TEMPERATURE,
-                stream=False,
-                response_format=format_,
+                # Pass structured output schema via extra
+                # NOTE: This is awkward - LlmConfig doesn't have first-class response_format support
+                extra={
+                    "response_format": {
+                        "type": "json_schema",
+                        "json_schema": {
+                            "name": "analysis_schema",
+                            "strict": True,
+                            "schema": schema_background,
+                        },
+                    }
+                },
+            ),
+        )
+
+    async def analyze(self, env: TurnEnv, history: List) -> Optional[EvalInfo]:
+        """
+        Run analysis on the conversation history.
+
+        Creates a synthetic UserTurnEnded event to trigger the LlmAgent,
+        then consumes (but doesn't yield) the output events.
+        """
+        try:
+            # Get the latest user response for logging
+            latest_response = ""
+            for event in reversed(history or []):
+                if isinstance(event, UserTextSent):
+                    latest_response = event.content
+                    break
+
+            # Create synthetic event with history
+            # NOTE: This is awkward - we need to construct an event just to pass history
+            synthetic_event = UserTurnEnded(
+                content=[UserTextSent(content="Please analyze the interview so far.")],
+                history=history,
             )
 
-            extracted_info = None
+            # Collect output text (consume but don't yield events)
+            full_text = ""
+            async for output in self._agent.process(env, synthetic_event):
+                if isinstance(output, AgentSendText):
+                    full_text += output.text
 
-            if stream:
-                extracted_info = stream.choices[0].message.content
+            # Parse as structured output
+            if full_text:
+                eval_info = EvalInfo.model_validate_json(full_text)
 
-            # Process the extracted information
-            if extracted_info:
-                if format_:
-                    try:
-                        # Parse as JSON to validate structure
-                        perf_data = json.loads(extracted_info)
+                # Log to file
+                self._logger._write(f"\n[RESPONSE]\n{latest_response}\n")
+                self._logger._write("-" * 40 + "\n")
+                self._logger._write(f"{self._node_name}:\n")
+                self._logger._write(f"  competence: {eval_info.competence}\n")
+                self._logger._write(f"  strengths: {eval_info.strengths}\n")
+                self._logger._write(f"  weaknesses: {eval_info.weaknesses}\n")
+                self._logger._write("-" * 40 + "\n")
 
-                        perf_info = EvalInfo.model_validate(perf_data)
-
-                        self.text_logger._write("\n[RESPONSE] \n" + latest_response + "\n")
-                        self.text_logger._write("-" * len(latest_response) + "\n")
-                        self.text_logger._write(make_table(perf_info.model_dump_json(), self.node_name))
-                        self.text_logger._write("-" * len(latest_response) + "\n")
-
-                        logger.info(f'🤖 Agent {self.node_name} :\n{perf_info.model_dump_json()}")')
-                        yield config.PerfAnalysis(
-                            perf_info=f"Evaluation from {self.node_name}:\n{perf_info.model_dump_json()}"
-                        )
-
-                    except (json.JSONDecodeError, ValueError) as e:
-                        logger.warning(f"Failed to parse evaluation as JSON: {e}")
-                        logger.info(f"🤖 Agent {self.node_name} evaluation:\n{extracted_info}")
-                        yield config.PerfAnalysis(
-                            perf_info=f"Unparsed evaluation from {self.node_name}:\n{extracted_info}"
-                        )
-
-                else:
-                    logger.warning(f"No structured report: {extracted_info}")
-                    logger.info(f"🤖 Agent {self.node_name} unstructured feedback:\n{extracted_info}")
-                    yield config.PerfAnalysis(
-                        perf_info=f"Unstructured feedback from {self.node_name}:\n{extracted_info}"
-                    )
-
-            else:
-                logger.warning("No evaluation extracted from conversation")
+                logger.info(f"Judge {self._node_name}: {eval_info.model_dump_json()}")
+                return eval_info
 
         except Exception as e:
-            logger.exception(f"Error during judge node evaluation: {e}")
+            logger.exception(f"Judge {self._node_name} failed: {e}")
+        return None
+
+
+# Pre-instantiated judges (created once, reused across calls)
+_technical_judge: Optional[BackgroundJudge] = None
+_communication_judge: Optional[BackgroundJudge] = None
+_reasoning_judge: Optional[BackgroundJudge] = None
+
+
+def _get_judges() -> tuple[BackgroundJudge, BackgroundJudge, BackgroundJudge]:
+    """Lazy initialization of judge instances."""
+    global _technical_judge, _communication_judge, _reasoning_judge
+    if _technical_judge is None:
+        _technical_judge = BackgroundJudge(prompt_agent1, "Technical Report")
+        _communication_judge = BackgroundJudge(prompt_agent2, "Communication Report")
+        _reasoning_judge = BackgroundJudge(prompt_agent3, "Reasoning Report")
+    return _technical_judge, _communication_judge, _reasoning_judge
+
+
+async def run_all_judges(env: TurnEnv, history: List):
+    """Run all three judges in parallel."""
+    technical, communication, reasoning = _get_judges()
+    await asyncio.gather(
+        technical.analyze(env, history),
+        communication.analyze(env, history),
+        reasoning.analyze(env, history),
+        return_exceptions=True,
+    )

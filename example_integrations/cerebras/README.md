@@ -1,39 +1,125 @@
 # Interview Practice Agent with Cartesia and Cerebras
-Let's design a real-time interviewer voice agent integrating Cerebras and Cartesia. The general workflow looks like this:
+
+A real-time interviewer voice agent integrating Cerebras (via LiteLLM) and Cartesia Line SDK v0.2.
+
 ![Workflow](Demo_workflow.png)
 
+## Architecture
 
-We will guide you step by step on how to implement this workflow using Cartesia and Cerebras API's !
+This example demonstrates a multi-agent architecture:
 
-## Getting started
-First things first, here is what you will need:
-- A [Cerebras API Key](https://cloud.cerebras.ai/platform/org_vf4x9pfwd8wwcktm6jvp2rne/playground)
-- A [Cartesia](https://play.cartesia.ai/agents) account and api key
+- **InterviewAgent**: Main conversation agent using `LlmAgent` with `cerebras/llama3.3-70b`
+- **BackgroundJudges**: Three silent analysis agents using `LlmAgent` with `cerebras/llama3.1-8b`
+  - Technical Report: Evaluates technical expertise
+  - Communication Report: Evaluates communication skills
+  - Reasoning Report: Evaluates logical thinking
 
-Make sure to add the api keys in your `.env` file or to the API keys section in your Cartesia account.
-- Required packages:
-  ```bash
-  cartesia-line
-  cerebras.cloud.sdk
-  python-dotenv
-  loguru
-  ```
-Make sure to add the project details along with requirements to `pyproject.toml`.
-System prompts, model ID and hyperparameters can be added to the `config.py` file. This file also includes the boolean parameter that determines if the background agents should be activated.
+The background judges run in parallel on each user turn (after the interview starts) and write their evaluations to the `reports/` folder.
 
-## Talking Agent
-`interviewer.py` includes the ReasoningNode subclass that is customized to match Cerebras API. The required utility functions are included in the `cs_utils.py`. Please note that you will need to ensure the tool call schema matches the Cerebras Inference API format [here](https://inference-docs.cerebras.ai/capabilities/tool-use).
-This agent calls a tool named `start_interview` which sets a flag to trigger the background agents. This is to ensure that the background agents don't evaluate responses from the user that are given prior to the mock interview.
+## Getting Started
 
-## Background (Judge) Agents
-The ReasoningNode subclass defined in `judges.py` implements the background agent that will evaluate the performance of the user during the mock interview. You could either save the evaluation report in a text file or log it in the output window. These nodes use structured outputs with Cerebras provided models to evaluate the user's performance in real-time. They will not directly interact with the user.
+### Prerequisites
 
-## Handling the call
-In the `main.py` file, we need to select the client as below:
-```python
-cs_client = AsyncCerebras(api_key=os.environ.get("CEREBRAS_API_KEY"))
+- A [Cerebras API Key](https://cloud.cerebras.ai/)
+- A [Cartesia](https://play.cartesia.ai/agents) account and API key
+
+### Installation
+
+```bash
+pip install -e .
+# or with uv
+uv pip install -e .
 ```
-The async call handling function `handle_new_call` should include all the nodes and bridges between them. This function will be used to initialize the application object using the `VoiceAgentApp` class.
 
-## Deploying the agent
-Finally, don't forget to add the `cartesia.toml` file that will install and run your script when deployed on the Agents platform. You can simply clone this repository and add it to your [agents dashboard](https://play.cartesia.ai/agents) along with your API Keys.
+### Configuration
+
+Add your API keys to a `.env` file:
+
+```
+CEREBRAS_API_KEY=your-cerebras-key
+```
+
+Or add them to the API keys section in your Cartesia account.
+
+### Running Locally
+
+```bash
+python main.py
+```
+
+## File Structure
+
+| File | Description |
+|------|-------------|
+| `main.py` | Entry point with `get_agent()` callback |
+| `interviewer.py` | `InterviewAgent` class wrapping `LlmAgent` |
+| `judges.py` | `BackgroundJudge` class for silent analysis |
+| `config.py` | Model IDs, prompts, and schemas |
+| `report_logger.py` | Simple file logger for judge reports |
+| `cartesia.toml` | Deployment configuration |
+
+## How It Works
+
+1. **Call Starts**: Agent introduces itself and asks about the role
+2. **User Ready**: When user confirms, agent calls `start_interview` tool
+3. **Interview Loop**:
+   - User responds to questions
+   - Background judges analyze each response (fire-and-forget)
+   - Agent asks follow-up questions
+4. **Call Ends**: User says goodbye, agent calls `end_call` tool
+
+## Key v0.2.0 Patterns
+
+### Agent Wrapper Pattern
+
+```python
+class InterviewAgent(AgentClass):
+    def __init__(self):
+        self._agent = LlmAgent(
+            model="cerebras/llama3.3-70b",
+            tools=[end_call, self.start_interview],
+            config=LlmConfig(...),
+        )
+
+    async def process(self, env: TurnEnv, event: InputEvent) -> AsyncIterable[OutputEvent]:
+        # Custom logic before/after LlmAgent
+        async for output in self._agent.process(env, event):
+            yield output
+```
+
+### Instance Method as Tool
+
+```python
+@loopback_tool
+async def start_interview(self, ctx: ToolEnv, confirmed: Annotated[bool, "..."]) -> str:
+    self._interview_started = confirmed  # Update instance state
+    return "Interview started."
+```
+
+### Background Analysis with LlmAgent
+
+```python
+class BackgroundJudge:
+    def __init__(self, system_prompt: str):
+        self._agent = LlmAgent(
+            model="cerebras/llama3.1-8b",
+            config=LlmConfig(
+                system_prompt=system_prompt,
+                extra={"response_format": {...}},  # Structured output
+            ),
+        )
+
+    async def analyze(self, env: TurnEnv, history: List):
+        # Create synthetic event to pass history
+        event = UserTurnEnded(content=[...], history=history)
+
+        # Consume but don't yield output events
+        async for output in self._agent.process(env, event):
+            if isinstance(output, AgentSendText):
+                # Parse and log, don't yield
+                pass
+```
+
+## Deploying to Cartesia
+
+Add the `cartesia.toml` file to your [agents dashboard](https://play.cartesia.ai/agents) along with your API keys.

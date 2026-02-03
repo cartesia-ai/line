@@ -1,118 +1,78 @@
-import json
-from typing import AsyncGenerator
+"""
+Interview Agent using LlmAgent with Cerebras via LiteLLM.
 
-import config
-from cs_utils import convert_messages_to_cs, end_call_schema, interview_schema
+This is the main conversation agent that speaks to users during mock interviews.
+It wraps an LlmAgent and coordinates with background judge agents.
+"""
+
+import asyncio
+import os
+from typing import Annotated, AsyncIterable
+
+from config import INTRODUCTION, MAX_OUTPUT_TOKENS, MODEL_ID, TEMPERATURE, prompt_main
+from judges import run_all_judges
 from loguru import logger
 
-from line.events import AgentResponse, ToolResult
-from line.nodes.conversation_context import ConversationContext
-from line.nodes.reasoning import ReasoningNode
-from line.tools.system_tools import EndCallArgs, EndCallTool, end_call
+from line.agent import AgentClass, TurnEnv
+from line.events import CallEnded, InputEvent, OutputEvent, UserTurnEnded
+from line.llm_agent import LlmAgent, LlmConfig, ToolEnv, end_call, loopback_tool
 
 
-class TalkingNode(ReasoningNode):
+class InterviewAgent(AgentClass):
     """
-    Node that extracts information from conversations using Cerebras API call.
+    Main interview agent that conducts mock interviews.
 
-    Inherits conversation management from ReasoningNode and adds agent-specific processing.
+    Uses LlmAgent internally for conversation, with a wrapper to:
+    1. Track interview state (started/not started)
+    2. Trigger background judge analysis on each user turn
     """
 
-    def __init__(
-        self,
-        system_prompt: str,
-        client,
-    ):
-        self.sys_prompt = system_prompt
-        super().__init__(
-            self.sys_prompt,
+    def __init__(self):
+        self._interview_started = False
+
+        # Main LlmAgent for conversation
+        self._agent = LlmAgent(
+            model=MODEL_ID,
+            api_key=os.getenv("CEREBRAS_API_KEY"),
+            tools=[end_call, self.start_interview],
+            config=LlmConfig(
+                system_prompt=prompt_main,
+                introduction=INTRODUCTION,
+                temperature=TEMPERATURE,
+                max_tokens=MAX_OUTPUT_TOKENS,
+            ),
         )
 
-        self.client = client
-        self.tools = [end_call_schema, interview_schema]
-
-    async def process_context(self, context: ConversationContext) -> AsyncGenerator[AgentResponse, None]:
+    @loopback_tool
+    async def start_interview(
+        self,
+        ctx: ToolEnv,
+        confirmed: Annotated[bool, "Set to true when user confirms ready to start the interview"],
+    ) -> str:
         """
-        evaluate response quality from conversation context.
+        Starts the interview after user confirmation.
 
-        Args:
-            context: Conversation context with messages.
-
-        Yields:
-            NodeMessage: evaluation results.
+        Call this when the user says they are ready to begin the interview.
         """
+        self._interview_started = confirmed
+        logger.info(f"Interview started: {self._interview_started}")
 
-        if not context.events:
-            logger.info("No conversation messages to analyze performance")
-            return
+        if confirmed:
+            return "Interview started. Ask the first interview question based on the role they mentioned."
+        return "User declined to start the interview."
 
-        try:
-            # Convert messages to cs format
-            cs_messages = convert_messages_to_cs(context.events, self.sys_prompt)
+    async def process(self, env: TurnEnv, event: InputEvent) -> AsyncIterable[OutputEvent]:
+        """Process input events and yield output events."""
 
-            # Call Cerebras API
+        # Fire background judges on each user turn (if interview started)
+        if isinstance(event, UserTurnEnded) and self._interview_started:
+            # Fire-and-forget: judges run in background and log results
+            asyncio.create_task(run_all_judges(env, event.history))
 
-            stream = await self.client.chat.completions.create(
-                messages=cs_messages,
-                model=config.MODEL_ID,
-                max_tokens=config.MAX_OUTPUT_TOKENS,
-                temperature=config.TEMPERATURE,
-                stream=False,
-                tools=self.tools,
-                parallel_tool_calls=True,
-            )
-            extracted_info = None
+        # Delegate to LlmAgent for conversation
+        async for output in self._agent.process(env, event):
+            yield output
 
-            if stream:
-                choice = stream.choices[0].message
-
-                if choice.tool_calls:
-                    function_call = choice.tool_calls[0].function
-                    arguments = json.loads(function_call.arguments)
-                    yield ToolResult(tool_name=function_call.name, tool_args=arguments)
-
-                    if function_call.name == EndCallTool.name():
-                        args = EndCallArgs(**arguments)
-
-                        logger.info(
-                            f"🤖 End call tool called. Ending conversation with goodbye message: "
-                            f"{args.goodbye_message}"
-                        )
-                        async for item in end_call(args):
-                            yield item
-
-                    if function_call.name == "start_interview":
-                        config.INTERVIEW_STARTED = arguments["confirmed"]
-                        logger.info(f"🤖 Interview started: {config.INTERVIEW_STARTED}")
-
-                        # Send the result back to the model to fulfill the request.
-                        if config.INTERVIEW_STARTED:
-                            cs_messages.append(
-                                {
-                                    "role": "system",
-                                    "content": "Based on the current conversation context,\
-                                          ask the next question. /no_think ",
-                                }
-                            )
-
-                        # Request the final response from the model, now that it has the result.
-                        final_response = await self.client.chat.completions.create(
-                            messages=cs_messages,
-                            model=config.MODEL_ID,
-                            stream=False,
-                        )
-
-                        extracted_info = final_response.choices[0].message.content
-
-                else:
-                    extracted_info = stream.choices[0].message.content
-
-            # Process the extracted information
-            if extracted_info:
-                yield AgentResponse(content=f"{extracted_info}")
-
-            else:
-                logger.warning("No evaluation extracted from conversation")
-
-        except Exception as e:
-            logger.exception(f"Error during interviewer node operation: {e}")
+        # Cleanup on call end
+        if isinstance(event, CallEnded):
+            await self._agent.cleanup()
