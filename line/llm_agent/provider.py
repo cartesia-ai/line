@@ -6,8 +6,8 @@ See https://docs.litellm.ai/docs/providers for supported providers.
 
 Model naming:
 - OpenAI: "gpt-4o", "gpt-4o-mini"
-- Anthropic: "anthropic/claude-3-5-sonnet-20241022"
-- Google: "gemini/gemini-2.0-flash"
+- Anthropic: "anthropic/claude-haiku-4-5-20251001"
+- Google: "gemini/gemini-2.5-flash-preview-09-2025"
 """
 
 from dataclasses import dataclass, field

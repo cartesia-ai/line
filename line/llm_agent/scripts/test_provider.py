@@ -8,7 +8,7 @@ Usage:
 Environment variables:
     OPENAI_API_KEY      - For OpenAI models (gpt-4o, gpt-4o-mini)
     ANTHROPIC_API_KEY   - For Anthropic models (anthropic/claude-sonnet-4-20250514)
-    GEMINI_API_KEY      - For Google models (gemini/gemini-2.0-flash)
+    GEMINI_API_KEY      - For Google models (gemini/gemini-2.5-flash-preview-09-2025)
 
 The script will test whichever providers have API keys set.
 """
@@ -243,7 +243,7 @@ async def test_web_search(model: str, search_context_size: str = "medium"):
 MODELS = [
     ("OPENAI_API_KEY", "gpt-4o-mini"),
     ("ANTHROPIC_API_KEY", "anthropic/claude-sonnet-4-20250514"),
-    ("GEMINI_API_KEY", "gemini/gemini-2.0-flash"),
+    ("GEMINI_API_KEY", "gemini/gemini-2.5-flash-preview-09-2025"),
 ]
 
 

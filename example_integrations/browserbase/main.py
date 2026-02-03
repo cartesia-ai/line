@@ -30,7 +30,7 @@ from line.llm_agent import LlmAgent, LlmConfig
 from line.voice_agent_app import AgentEnv, CallRequest, VoiceAgentApp
 
 # Model configuration
-MODEL_ID = os.getenv("MODEL_ID", "gemini/gemini-2.0-flash")
+MODEL_ID = os.getenv("MODEL_ID", "gemini/gemini-2.5-flash-preview-09-2025")
 # Target form URL - the actual web form to fill
 FORM_URL = "https://forms.fillout.com/t/rff6XZTSApus"
 
