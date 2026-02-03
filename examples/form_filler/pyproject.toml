@@ -1,12 +1,11 @@
 [project]
-name = "echo"
+name = "form-filler"
 version = "0.1.0"
-description = "Handoff echo example using Line SDK"
+description = "Form filling example using Line SDK"
 requires-python = ">=3.10"
 dependencies = [
     "cartesia-line==0.2.0.dev0",
-    "loguru>=0.7.0",
 ]
 
 [tool.setuptools]
-py-modules = ["main"]
+py-modules = ["main", "form_filler"]

@@ -231,7 +231,6 @@ async def transfer_to_billing(
 ```
 
 The `event` parameter is required for handoff tools:
-
 - **First call**: `event` is `AgentHandedOff` - use this to send initial transfer messages
 - **Subsequent calls**: `event` is the actual input event (e.g., `UserTextSent`) - route to target agent
 
@@ -355,4 +354,4 @@ class GuardrailsAgent:
         await self._llm_agent.cleanup()
 ```
 
-See the [guardrails_wrapper example](https://github.com/cartesia-ai/line/tree/main/line/v02/examples/guardrails_wrapper) for a complete implementation with content filtering.
+See the [guardrails_wrapper example](https://github.com/cartesia-ai/line/tree/main/examples/guardrails_wrapper) for a complete implementation with content filtering.

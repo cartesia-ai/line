@@ -1,4 +1,4 @@
-# Cartesia Line SDK
+# Line SDK
 
 Build intelligent, low-latency voice agents with Line.
 
@@ -19,7 +19,7 @@ Line brings voice to your text agents with Cartesia's state-of-the-art speech mo
 
 ```bash
 git clone https://github.com/cartesia-ai/line.git
-cd line/line/v02/examples/basic_chat
+cd line/examples/basic_chat
 GEMINI_API_KEY=your-key uv run python main.py
 ```
 
@@ -274,7 +274,7 @@ async def get_agent(env, call_request):
 
 ## LLM Provider Support
 
-Line uses [LiteLLM](https://github.com/BerriAI/litellm) to support 100+ LLM providers. Pass any LiteLLM-compatible model string to `LlmAgent`:
+Line leverages [LiteLLM](https://github.com/BerriAI/litellm) to support 100+ LLM providers. Pass any LiteLLM-compatible model string to `LlmAgent`:
 
 | Provider | Model format |
 |----------|--------------|
@@ -286,11 +286,11 @@ Line uses [LiteLLM](https://github.com/BerriAI/litellm) to support 100+ LLM prov
 
 | Example | Description |
 |---------|-------------|
-| [Basic Chat](./line/v02/examples/basic_chat) | Simple conversational agent |
-| [Form Filler](./line/v02/examples/form_filler) | Collect structured data |
-| [Phone Transfer](./line/v02/examples/transfer_phone_call) | IVR navigation & transfers |
-| [Multi-Agent](./line/v02/examples/transfer_agent) | Hand off between agents |
-| [Echo Tool](./line/v02/examples/echo) | Custom handoff tool |
+| [Basic Chat](./examples/basic_chat) | Simple conversational agent |
+| [Form Filler](./examples/form_filler) | Collect structured data |
+| [Phone Transfer](./examples/transfer_phone_call) | IVR navigation & transfers |
+| [Multi-Agent](./examples/transfer_agent) | Hand off between agents |
+| [Echo Tool](./examples/echo) | Custom handoff tool |
 
 ### Integrations
 
@@ -314,6 +314,6 @@ Line uses [LiteLLM](https://github.com/BerriAI/litellm) to support 100+ LLM prov
 
 ## Acknowledgments
 
-Line is built on top of the fantastic work by the maintainers of [LiteLLM](https://github.com/BerriAI/litellm). Their open-source library provides the unified LLM interface that makes it possible to support 100+ providers out of the box.
+Line leverages the fantastic work by the maintainers of [LiteLLM](https://github.com/BerriAI/litellm). Their open-source library provides the unified LLM interface that makes it possible to support 100+ providers out of the box.
 
 LiteLLM is licensed under the [MIT License](https://github.com/BerriAI/litellm/blob/main/LICENSE).

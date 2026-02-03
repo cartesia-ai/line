@@ -1,11 +1,10 @@
 [project]
-name = "echo"
+name = "transfer-phone-call"
 version = "0.1.0"
-description = "Handoff echo example using Line SDK"
+description = "Phone transfer example using Line SDK"
 requires-python = ">=3.10"
 dependencies = [
     "cartesia-line==0.2.0.dev0",
-    "loguru>=0.7.0",
 ]
 
 [tool.setuptools]
