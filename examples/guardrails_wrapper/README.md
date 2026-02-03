@@ -103,7 +103,7 @@ GuardrailConfig(
     allowed_topics="Cartesia AI, voice AI, TTS, ...",
 
     # Model for guardrail classification (use a fast model)
-    guardrail_model="gemini/gemini-2.0-flash",
+    guardrail_model="gemini/gemini-2.5-flash-preview-09-2025",
     guardrail_api_key=None,  # Uses env var if not set
 
     # Toggle individual checks
