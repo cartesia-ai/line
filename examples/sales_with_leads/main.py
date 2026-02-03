@@ -124,7 +124,6 @@ class SalesWithLeadsAgent(AgentClass):
 
     def __init__(self, api_key: Optional[str] = None):
         self._api_key = api_key or os.getenv("ANTHROPIC_API_KEY")
-        self._input_event: Optional[InputEvent] = None
 
         # Stateful leads tracking
         self._leads = LeadsState()
@@ -158,8 +157,6 @@ class SalesWithLeadsAgent(AgentClass):
         logger.info("SalesWithLeadsAgent initialized")
 
     async def process(self, env: TurnEnv, event: InputEvent) -> AsyncIterable[OutputEvent]:
-        self._input_event = event
-
         if isinstance(event, CallEnded):
             logger.info(f"Call ended. Final leads: {self._leads.to_dict()}")
             await self._cleanup()
@@ -269,7 +266,6 @@ class SalesWithLeadsAgent(AgentClass):
             return
 
         logger.info(f"Researching company: {company_name}")
-        self._researched_companies.add(company_key)
         self._researching = True
 
         # Build detailed research prompt matching original research_node.py
@@ -312,6 +308,9 @@ Focus on official sources and recent information. End with a brief structured JS
             "company_info": company_info,
             "research_summary": research_text[:500],
         }
+
+        # Only mark as researched after successful completion
+        self._researched_companies.add(company_key)
         logger.info(f"Company research complete for {company_name}")
 
         yield json.dumps(
