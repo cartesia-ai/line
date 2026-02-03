@@ -1,14 +1,11 @@
 [cartesia]
-name = "Cartesia sales"
-description = "Sales agent that uses RAG to answer questions and runs a background agent to extract leads"
+name = "Sales with Leads"
+description = "Sales agent with stateful leads extraction and company research"
 version = "1.0.0"
 
 [cartesia.server]
 port = 8000
 host = "0.0.0.0"
 
-[cartesia.dependencies]
-requirements_file = "requirements.txt"
-
 [cartesia.environment]
-required_vars = ["GEMINI_API_KEY"]
+required_vars = ["ANTHROPIC_API_KEY"]

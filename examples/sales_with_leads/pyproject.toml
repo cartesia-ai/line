@@ -1,0 +1,13 @@
+[project]
+name = "sales-with-leads"
+version = "0.1.0"
+description = "Sales agent with stateful leads extraction and company research"
+requires-python = ">=3.10"
+dependencies = [
+    "cartesia-line==0.2.0",
+    "loguru>=0.7.0",
+    "litellm>=1.0.0",
+]
+
+[tool.setuptools]
+py-modules = ["main"]
