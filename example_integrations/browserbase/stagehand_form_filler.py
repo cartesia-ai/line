@@ -264,15 +264,22 @@ class StagehandFormFiller:
                     await self.session.act(input=f"Uncheck the '{field.label}' checkbox")
 
     async def cleanup(self) -> None:
-        """Clean up browser resources."""
-        if self.session:
-            session = self.session
-            self.session = None  # Prevent double cleanup
-            try:
+        """Clean up browser resources.
+        
+        This method safely handles cleanup even if initialization is still in progress.
+        It will wait for initialization to complete (or fail) before cleaning up the session.
+        """
+        try:
+            # Wait for initialization to complete (or fail) before cleanup
+            await self._init_future
+            
+            if self.session:
+                session = self.session
+                self.session = None  # Prevent double cleanup
                 await session.end()
                 logger.info("Session ended")
-            except Exception as e:
-                logger.error(f"Error ending session: {e}")
+        except Exception as e:
+            logger.info(f"Error during cleanup: {e}")
 
     # =========================================================================
     # Tool methods for use with LlmAgent
@@ -320,16 +327,25 @@ class StagehandFormFiller:
 
         # Get the field
         field = self._get_field_by_id(field_name)
+        
+        if not field:
+            # Field not recognized - don't skip the question, re-ask without revealing technical details
+            logger.warning(f"Unknown field: {field_name}, asking current question again")
+            current_question = self._get_current_question()
+            if current_question:
+                yield AgentSendText(
+                    text=f"Let me ask that again. {current_question.question}"
+                )
+            else:
+                yield AgentSendText(text="Let me continue with the next question.")
+            return
+        
         # Store the answer
         self.collected_data[field_name] = value
         logger.info(f"Collected: {field_name}={value.strip()}")
 
-        if field:
-            # Fill the form field in the background (non-blocking)
-            asyncio.create_task(self._fill_field_background(field, value.strip()))
-        else:
-            logger.warning(f"Unknown field: {field_name}")
-            yield AgentSendText(text="I don't recognize that field. Let me continue.")
+        # Fill the form field in the background (non-blocking)
+        asyncio.create_task(self._fill_field_background(field, value.strip()))
 
         # Move to next question
         self.current_question_index += 1
