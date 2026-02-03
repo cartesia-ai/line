@@ -13,7 +13,7 @@ This example creates a basic voice agent that:
 
 ```bash
 cd examples/basic_chat
-GEMINI_API_KEY=your-key uv run python main.py
+ANTHROPIC_API_KEY=your-key uv run python main.py
 ```
 
 ## How It Works
@@ -26,8 +26,8 @@ The agent is configured with:
 ```python
 async def get_agent(env: AgentEnv, call_request: CallRequest):
     return LlmAgent(
-        model="gemini/gemini-2.0-flash",
-        api_key=os.getenv("GEMINI_API_KEY"),
+        model="anthropic/claude-haiku-4-5",
+        api_key=os.getenv("ANTHROPIC_API_KEY"),
         tools=[end_call],
         config=LlmConfig(
             system_prompt=call_request.agent.system_prompt or "You are a friendly...",

@@ -21,7 +21,7 @@ User Input (speech → text)
 │  ┌─────────────────────────────┐   │
 │  │ PREPROCESS                  │   │
 │  │                             │   │
-│  │ Guardrail LLM (batched)     │◄───── Gemini Flash (fast/cheap)
+│  │ Guardrail LLM (batched)     │◄───── Anthropic Haiku
 │  │    → toxicity check         │   │
 │  │    → prompt injection check │   │
 │  │    → off-topic check        │   │
@@ -36,7 +36,7 @@ User Input (speech → text)
 │     └────────────────────┘         │
 │              ↓                     │
 │  ┌─────────────────────────────┐   │
-│  │     Inner LlmAgent          │◄───── Anthropic Claude
+│  │     Inner LlmAgent          │◄───── Anthropic Haiku
 │  │     (Cartesia assistant     │   │
 │  │      with web search)       │   │
 │  └─────────────────────────────┘   │
@@ -87,7 +87,6 @@ This example uses two different LLMs optimized for their roles:
 ```bash
 # Set your API keys
 export ANTHROPIC_API_KEY=your-anthropic-key
-export GEMINI_API_KEY=your-gemini-key
 
 # Run the example
 uv run python main.py
@@ -103,7 +102,7 @@ GuardrailConfig(
     allowed_topics="Cartesia AI, voice AI, TTS, ...",
 
     # Model for guardrail classification (use a fast model)
-    guardrail_model="gemini/gemini-2.0-flash",
+    guardrail_model="anthropic/claude-haiku-4-5",
     guardrail_api_key=None,  # Uses env var if not set
 
     # Toggle individual checks
