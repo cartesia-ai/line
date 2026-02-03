@@ -27,7 +27,7 @@ async def get_agent(env: AgentEnv, call_request: CallRequest):
     )
 
     return LlmAgent(
-        model="gemini/gemini-2.0-flash",
+        model="gemini/gemini-2.5-flash-preview-09-2025",
         api_key=os.getenv("GEMINI_API_KEY"),
         tools=[
             end_call,

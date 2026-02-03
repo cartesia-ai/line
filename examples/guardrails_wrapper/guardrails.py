@@ -38,7 +38,7 @@ class GuardrailConfig:
     )
 
     # Guardrail LLM settings (use a fast model for classification)
-    guardrail_model: str = "gemini/gemini-2.0-flash"
+    guardrail_model: str = "gemini/gemini-2.5-flash-preview-09-2025"
     guardrail_api_key: Optional[str] = None
 
     # Behavior toggles

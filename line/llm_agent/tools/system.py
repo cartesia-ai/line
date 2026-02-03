@@ -200,12 +200,12 @@ def agent_as_handoff(
 
     Example:
         spanish_agent = LlmAgent(
-            model="gemini/gemini-2.0-flash",
+            model="gemini/gemini-2.5-flash-preview-09-2025",
             config=LlmConfig(system_prompt="You speak only in Spanish."),
         )
 
         main_agent = LlmAgent(
-            model="gemini/gemini-2.0-flash",
+            model="gemini/gemini-2.5-flash-preview-09-2025",
             tools=[
                 agent_as_handoff(
                     spanish_agent,

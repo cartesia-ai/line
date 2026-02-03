@@ -92,7 +92,7 @@ async def get_agent(env: AgentEnv, call_request: CallRequest):
             "PlayHT, Amazon Polly, Google Cloud TTS, Microsoft Azure Speech, "
             "and the voice AI market landscape"
         ),
-        guardrail_model="gemini/gemini-2.0-flash",
+        guardrail_model="gemini/gemini-2.5-flash-preview-09-2025",
         guardrail_api_key=os.getenv("GEMINI_API_KEY"),
         max_violations_before_end_call=3,
         # Custom messages
