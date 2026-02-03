@@ -12,7 +12,7 @@ from line.voice_agent_app import AgentEnv, CallRequest, VoiceAgentApp
 
 async def get_agent(env: AgentEnv, call_request: CallRequest):
     return LlmAgent(
-        model="gemini/gemini-2.0-flash",
+        model="gemini/gemini-2.5-flash-preview-09-2025",
         api_key=os.getenv("GEMINI_API_KEY"),
         tools=[end_call],
         config=LlmConfig.from_call_request(call_request),
@@ -53,7 +53,7 @@ config = LlmConfig(
 
     # Resilience
     num_retries=3,
-    fallbacks=["anthropic/claude-3-5-sonnet-20241022"],
+    fallbacks=["anthropic/claude-haiku-4-5-20251001"],
     timeout=30.0,
 
     # Provider-specific options
@@ -70,7 +70,7 @@ from line.llm_agent import LlmAgent, LlmConfig
 
 async def get_agent(env, call_request):
     return LlmAgent(
-        model="gemini/gemini-2.0-flash",
+        model="gemini/gemini-2.5-flash-preview-09-2025",
         tools=[...],
         config=LlmConfig.from_call_request(call_request),
     )
@@ -144,7 +144,7 @@ spanish_agent = LlmAgent(
 )
 
 main_agent = LlmAgent(
-    model="gemini/gemini-2.0-flash",
+    model="gemini/gemini-2.5-flash-preview-09-2025",
     tools=[
         end_call,
         agent_as_handoff(
