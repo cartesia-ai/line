@@ -7,5 +7,5 @@ dependencies = [
     "cartesia-line==0.2.0.dev0",
 ]
 
-[project.scripts]
-chat-supervisor = "main:app.run"
+[tool.setuptools]
+py-modules = ["main"]
