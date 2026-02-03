@@ -136,7 +136,9 @@ class SalesWithLeadsAgent(AgentClass):
         self._leads_extractor = LlmAgent(
             model=MODEL,
             api_key=self._api_key,
-            config=LlmConfig(system_prompt=LEADS_EXTRACTION_PROMPT),
+            config=LlmConfig(
+                system_prompt=LEADS_EXTRACTION_PROMPT, extra={"response_format": {"type": "json_object"}}
+            ),
         )
 
         # Research agent for company research
@@ -144,7 +146,9 @@ class SalesWithLeadsAgent(AgentClass):
             model=MODEL,
             api_key=self._api_key,
             tools=[web_search],
-            config=LlmConfig(system_prompt=RESEARCH_PROMPT),
+            config=LlmConfig(
+                system_prompt=RESEARCH_PROMPT, extra={"response_format": {"type": "json_object"}}
+            ),
         )
 
         # Main chat agent
