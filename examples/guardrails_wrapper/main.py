@@ -16,7 +16,7 @@ Architecture:
 - Inner agent: Anthropic Claude (supports web search + function calling together)
 - Guardrail LLM: Gemini Flash (fast/cheap, used only for classification - no tools needed)
 
-Run with: ANTHROPIC_API_KEY=your-key GEMINI_API_KEY=your-key uv run python main.py
+Run with: ANTHROPIC_API_KEY=your-key uv run python main.py
 """
 
 import os
@@ -75,7 +75,7 @@ async def get_agent(env: AgentEnv, call_request: CallRequest):
     # Using Anthropic Claude which supports web search + function calling together
     # (Gemini's standard API doesn't support this combination)
     inner_agent = LlmAgent(
-        model="anthropic/claude-sonnet-4-20250514",
+        model="anthropic/claude-haiku-4-5",
         api_key=os.getenv("ANTHROPIC_API_KEY"),
         tools=[web_search, end_call],
         config=LlmConfig(
@@ -92,8 +92,8 @@ async def get_agent(env: AgentEnv, call_request: CallRequest):
             "PlayHT, Amazon Polly, Google Cloud TTS, Microsoft Azure Speech, "
             "and the voice AI market landscape"
         ),
-        guardrail_model="gemini/gemini-2.0-flash",
-        guardrail_api_key=os.getenv("GEMINI_API_KEY"),
+        guardrail_model="anthropic/claude-haiku-4-5",
+        guardrail_api_key=os.getenv("ANTHROPIC_API_KEY"),
         max_violations_before_end_call=3,
         # Custom messages
         toxic_response=(

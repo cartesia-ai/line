@@ -1,7 +1,7 @@
 """
 Form Filler Example - Collects user information via YAML-defined form.
 
-Run with: GEMINI_API_KEY=your-key uv run python main.py
+Run with: ANTHROPIC_API_KEY=your-key uv run python main.py
 """
 
 import os
@@ -37,8 +37,8 @@ async def get_agent(env: AgentEnv, call_request: CallRequest):
     first_question = form.get_current_question_text()
 
     return LlmAgent(
-        model="gemini/gemini-2.5-flash-preview-09-2025",
-        api_key=os.getenv("GEMINI_API_KEY"),
+        model="anthropic/claude-haiku-4-5",
+        api_key=os.getenv("ANTHROPIC_API_KEY"),
         tools=[form.record_answer_tool, end_call],
         config=LlmConfig(
             system_prompt=form.get_system_prompt(),
