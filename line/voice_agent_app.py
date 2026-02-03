@@ -67,7 +67,7 @@ from line.harness_types import (
 )
 
 
-# Call request types (copied from line.call_request for v02 self-containment)
+# Call request types
 class PreCallResult(BaseModel):
     """Result from pre_call_handler containing metadata and config."""
 
@@ -256,7 +256,7 @@ class VoiceAgentApp:
 class ConversationRunner:
     """
     Manages the websocket loop for a single conversation.
-    Converts websocket messages to v0.2 InputEvents, applies run/cancel filters,
+    Converts websocket messages to InputEvents, applies run/cancel filters,
     drives the agent async iterable, and serializes agent OutputEvents back to
     the websocket.
     """

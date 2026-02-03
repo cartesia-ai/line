@@ -1,7 +1,7 @@
 [project]
 name = "form-filler"
 version = "0.1.0"
-description = "Form filling example using Line SDK v02"
+description = "Form filling example using Line SDK"
 requires-python = ">=3.10"
 dependencies = [
     "cartesia-line==0.2.0.dev0",

@@ -12,7 +12,7 @@ This example creates a basic voice agent that:
 ## Running the Example
 
 ```bash
-cd v02/examples/basic_chat
+cd examples/basic_chat
 GEMINI_API_KEY=your-key uv run python main.py
 ```
 

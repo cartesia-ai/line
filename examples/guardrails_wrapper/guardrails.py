@@ -22,8 +22,7 @@ from line.events import (
     OutputEvent,
     UserTurnEnded,
 )
-from line.llm_agent.config import LlmConfig
-from line.llm_agent.llm_agent import LlmAgent
+from line.llm_agent import LlmAgent, LlmConfig
 from line.llm_agent.provider import LLMProvider, Message
 
 

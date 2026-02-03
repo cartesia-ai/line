@@ -14,7 +14,7 @@ This example creates a voice agent that:
 ## Running the Example
 
 ```bash
-cd v02/examples/form_filler
+cd examples/form_filler
 GEMINI_API_KEY=your-key uv run python main.py
 ```
 
