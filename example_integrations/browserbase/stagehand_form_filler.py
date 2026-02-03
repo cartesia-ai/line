@@ -265,14 +265,14 @@ class StagehandFormFiller:
 
     async def cleanup(self) -> None:
         """Clean up browser resources.
-        
+
         This method safely handles cleanup even if initialization is still in progress.
         It will wait for initialization to complete (or fail) before cleaning up the session.
         """
         try:
             # Wait for initialization to complete (or fail) before cleanup
             await self._init_future
-            
+
             if self.session:
                 session = self.session
                 self.session = None  # Prevent double cleanup
@@ -327,19 +327,17 @@ class StagehandFormFiller:
 
         # Get the field
         field = self._get_field_by_id(field_name)
-        
+
         if not field:
             # Field not recognized - don't skip the question, re-ask without revealing technical details
             logger.warning(f"Unknown field: {field_name}, asking current question again")
             current_question = self._get_current_question()
             if current_question:
-                yield AgentSendText(
-                    text=f"Let me ask that again. {current_question.question}"
-                )
+                yield AgentSendText(text=f"Let me ask that again. {current_question.question}")
             else:
                 yield AgentSendText(text="Let me continue with the next question.")
             return
-        
+
         # Store the answer
         self.collected_data[field_name] = value
         logger.info(f"Collected: {field_name}={value.strip()}")
