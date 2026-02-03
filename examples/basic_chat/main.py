@@ -16,7 +16,7 @@ async def get_agent(env: AgentEnv, call_request: CallRequest):
     )
 
     return LlmAgent(
-        model="anthropic/claude-haiku-4-5",
+        model="anthropic/claude-haiku-4-5-20251001",
         api_key=os.getenv("ANTHROPIC_API_KEY"),
         tools=[end_call, web_search],
         config=LlmConfig.from_call_request(call_request),
