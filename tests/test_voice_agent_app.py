@@ -140,12 +140,6 @@ class TestConversationRunner:
         assert runner.shutdown_event.is_set()
         ws.close.assert_called_once()
 
-        # Verify error message contains traceback info
-        ws.send_json.assert_called()
-        sent_data = ws.send_json.call_args[0][0]
-        assert "Something went wrong" in str(sent_data)
-        assert "ValueError" in str(sent_data)
-
         # Verify error message contains full traceback
         ws.send_json.assert_called()
         sent_data = ws.send_json.call_args[0][0]

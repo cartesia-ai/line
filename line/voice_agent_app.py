@@ -368,7 +368,7 @@ class ConversationRunner:
                 await self.websocket.close()
             except Exception:
                 # Most non-input processing messages are handled in the #runner loop
-                # so this is almost certianly a message processing error.
+                # so this is almost certainly a message processing error.
                 # Don't send EndCall event, as that may trigger side effects
                 # we accept the risk of incomplete call cleanup in this case,
                 # since this is an exceptional case that we will fix at the
