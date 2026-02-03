@@ -14,7 +14,7 @@ before passing it to the main agent.
 
 Architecture:
 - Inner agent: Anthropic Claude (supports web search + function calling together)
-- Guardrail LLM: Gemini Flash (fast/cheap, used only for classification - no tools needed)
+- Guardrail LLM: Anthropic Haiku (fast/cheap, used only for classification - no tools needed)
 
 Run with: ANTHROPIC_API_KEY=your-key uv run python main.py
 """
@@ -73,7 +73,6 @@ async def get_agent(env: AgentEnv, call_request: CallRequest):
 
     # Create the inner LLM agent
     # Using Anthropic Claude which supports web search + function calling together
-    # (Gemini's standard API doesn't support this combination)
     inner_agent = LlmAgent(
         model="anthropic/claude-haiku-4-5",
         api_key=os.getenv("ANTHROPIC_API_KEY"),
@@ -126,7 +125,7 @@ if __name__ == "__main__":
     print()
     print("Models:")
     print("  - Inner agent: Anthropic Claude (web search + tools)")
-    print("  - Guardrail LLM: Gemini Flash (fast classification)")
+    print("  - Guardrail LLM: Anthropic Haiku (fast classification)")
     print()
     print("Guardrails enabled:")
     print("  - PII detection and redaction")

@@ -38,8 +38,8 @@ class GuardrailConfig:
     )
 
     # Guardrail LLM settings (use a fast model for classification)
-    guardrail_model: str = "gemini/gemini-2.0-flash"
-    guardrail_api_key: Optional[str] = None
+    guardrail_model: str = "anthropic/claude-haiku-4-5"
+    guardrail_api_key: Optional[str] = os.getenv("ANTHROPIC_API_KEY")
 
     # Behavior toggles
     block_toxicity: bool = True
