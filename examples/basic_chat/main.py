@@ -2,7 +2,7 @@ import os
 
 from loguru import logger
 
-from line.llm_agent import LlmAgent, LlmConfig, end_call
+from line.llm_agent import LlmAgent, LlmConfig, end_call, web_search
 from line.voice_agent_app import AgentEnv, CallRequest, VoiceAgentApp
 
 #  ANTHROPIC_API_KEY=your-key uv python main.py
@@ -18,7 +18,7 @@ async def get_agent(env: AgentEnv, call_request: CallRequest):
     return LlmAgent(
         model="anthropic/claude-haiku-4-5",
         api_key=os.getenv("ANTHROPIC_API_KEY"),
-        tools=[end_call],
+        tools=[end_call, web_search],
         config=LlmConfig.from_call_request(call_request),
     )
 
