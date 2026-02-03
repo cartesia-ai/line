@@ -314,6 +314,6 @@ Line uses [LiteLLM](https://github.com/BerriAI/litellm) to support 100+ LLM prov
 
 ## Acknowledgments
 
-Line is built on top of the fantastic work by the maintainers of [LiteLLM](https://github.com/BerriAI/litellm). Their open-source library provides the unified LLM interface that makes it possible to support 100+ providers out of the box. 
+Line is built on top of the fantastic work by the maintainers of [LiteLLM](https://github.com/BerriAI/litellm). Their open-source library provides the unified LLM interface that makes it possible to support 100+ providers out of the box.
 
 LiteLLM is licensed under the [MIT License](https://github.com/BerriAI/litellm/blob/main/LICENSE).
