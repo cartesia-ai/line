@@ -8,7 +8,6 @@ from line.voice_agent_app import AgentEnv, CallRequest, VoiceAgentApp
 #  GEMINI_API_KEY=your-key uv python main.py
 
 
-
 async def get_agent(env: AgentEnv, call_request: CallRequest):
     logger.info(
         f"Starting new call for {call_request.call_id}. "

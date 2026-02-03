@@ -11,5 +11,5 @@ dependencies = [
     "pydantic>=2.0.0",
 ]
 
-[tools.setuptools]
-py-moduls = ["main", "stagehand"]
+[tool.setuptools]
+py-modules = ["main", "stagehand_form_filler"]
