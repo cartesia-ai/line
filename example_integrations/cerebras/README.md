@@ -136,7 +136,7 @@ class BackgroundJudge:
 1) Upload API keys to Cartesia:
 
 ```bash
-cartesia env set CEREBRAS_API_KEY your-cerebras-key
+cartesia env set CEREBRAS_API_KEY=your-cerebras-key
 ```
 
 2) Init your agent:

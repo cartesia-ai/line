@@ -1,8 +1,0 @@
-[app]
-name = "cerebras"
-
-[build]
-cmd = "echo 'No build cmd specified'"
-
-[run]
-cmd = "echo 'No run cmd specified'"
