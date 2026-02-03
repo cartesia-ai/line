@@ -11,5 +11,5 @@ dependencies = [
     "pydantic>=2.0.0",
 ]
 
-[project.scripts]
-browserbase-form-filler = "main:app.run"
+[tool.setuptools]
+py-modules = ["main", "stagehand_form_filler"]

@@ -37,7 +37,7 @@ async def get_agent(env: AgentEnv, call_request: CallRequest):
     first_question = form.get_current_question_text()
 
     return LlmAgent(
-        model="gemini/gemini-2.0-flash",
+        model="gemini/gemini-2.5-flash-preview-09-2025",
         api_key=os.getenv("GEMINI_API_KEY"),
         tools=[form.record_answer_tool, end_call],
         config=LlmConfig(
