@@ -10,7 +10,7 @@ import os
 from typing import Annotated, AsyncIterable
 
 from config import INTRODUCTION, MAX_OUTPUT_TOKENS, MODEL_ID, TEMPERATURE, prompt_main
-from judges import run_all_judges
+from judges import create_judges, run_all_judges
 from loguru import logger
 
 from line.agent import AgentClass, TurnEnv
@@ -29,6 +29,9 @@ class InterviewAgent(AgentClass):
 
     def __init__(self):
         self._interview_started = False
+
+        # Create per-call judge instances
+        self._judges = create_judges()
 
         # Main LlmAgent for conversation
         self._agent = LlmAgent(
@@ -64,15 +67,18 @@ class InterviewAgent(AgentClass):
     async def process(self, env: TurnEnv, event: InputEvent) -> AsyncIterable[OutputEvent]:
         """Process input events and yield output events."""
 
+        # Cleanup on call end
+        if isinstance(event, CallEnded):
+            await self._agent.cleanup()
+            for judge in self._judges:
+                await judge.cleanup()
+            return
+
         # Fire background judges on each user turn (if interview started)
         if isinstance(event, UserTurnEnded) and self._interview_started:
-            # Fire-and-forget: judges run in background and log results
-            asyncio.create_task(run_all_judges(env, event.history))
+            asyncio.create_task(run_all_judges(self._judges, env, event.history))
 
         # Delegate to LlmAgent for conversation
         async for output in self._agent.process(env, event):
             yield output
 
-        # Cleanup on call end
-        if isinstance(event, CallEnded):
-            await self._agent.cleanup()

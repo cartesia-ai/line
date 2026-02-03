@@ -44,10 +44,6 @@ class BackgroundJudge:
     Note: This is intentionally using LlmAgent (rather than litellm directly)
     to surface any API friction for future SDK improvements.
 
-    Awkwardness notes:
-    1. LlmConfig doesn't have first-class response_format support - must use `extra`
-    2. Need to construct a synthetic UserTurnEnded event just to pass history
-    3. Agent produces AgentSendText events that we consume but don't yield
     """
 
     def __init__(self, system_prompt: str, node_name: str):
@@ -61,7 +57,6 @@ class BackgroundJudge:
                 temperature=TEMPERATURE,
                 max_tokens=50,
                 # Pass structured output schema via extra
-                # NOTE: This is awkward - LlmConfig doesn't have first-class response_format support
                 extra={
                     "response_format": {
                         "type": "json_schema",
@@ -91,10 +86,12 @@ class BackgroundJudge:
                     break
 
             # Create synthetic event with history
-            # NOTE: This is awkward - we need to construct an event just to pass history
-            synthetic_event = UserTurnEnded(
+            synthetic_event_without_history = UserTurnEnded(
                 content=[UserTextSent(content="Please analyze the interview so far.")],
-                history=history,
+            )
+            synthetic_event = UserTurnEnded(
+                **synthetic_event_without_history.model_dump(),
+                history=history + [synthetic_event_without_history],
             )
 
             # Collect output text (consume but don't yield events)
@@ -123,26 +120,31 @@ class BackgroundJudge:
             logger.exception(f"Judge {self._node_name} failed: {e}")
         return None
 
-
-# Pre-instantiated judges (created once, reused across calls)
-_technical_judge: Optional[BackgroundJudge] = None
-_communication_judge: Optional[BackgroundJudge] = None
-_reasoning_judge: Optional[BackgroundJudge] = None
+    async def cleanup(self):
+        await self._agent.cleanup()
 
 
-def _get_judges() -> tuple[BackgroundJudge, BackgroundJudge, BackgroundJudge]:
-    """Lazy initialization of judge instances."""
-    global _technical_judge, _communication_judge, _reasoning_judge
-    if _technical_judge is None:
-        _technical_judge = BackgroundJudge(prompt_agent1, "Technical Report")
-        _communication_judge = BackgroundJudge(prompt_agent2, "Communication Report")
-        _reasoning_judge = BackgroundJudge(prompt_agent3, "Reasoning Report")
-    return _technical_judge, _communication_judge, _reasoning_judge
+def create_judges() -> tuple["BackgroundJudge", "BackgroundJudge", "BackgroundJudge"]:
+    """
+    Create a fresh set of judge instances for a new call.
+
+    Each call should have its own judges to avoid state mixing between
+    concurrent interviews (LlmAgent maintains per-conversation state).
+    """
+    return (
+        BackgroundJudge(prompt_agent1, "Technical Report"),
+        BackgroundJudge(prompt_agent2, "Communication Report"),
+        BackgroundJudge(prompt_agent3, "Reasoning Report"),
+    )
 
 
-async def run_all_judges(env: TurnEnv, history: List):
+async def run_all_judges(
+    judges: tuple["BackgroundJudge", "BackgroundJudge", "BackgroundJudge"],
+    env: TurnEnv,
+    history: List,
+):
     """Run all three judges in parallel."""
-    technical, communication, reasoning = _get_judges()
+    technical, communication, reasoning = judges
     await asyncio.gather(
         technical.analyze(env, history),
         communication.analyze(env, history),
