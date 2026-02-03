@@ -1,4 +1,4 @@
-# Web Research Agent with Exa (v0.2 SDK)
+# Web Research Agent with Exa
 
 A voice agent that searches the web using Exa API and synthesizes results into conversational responses.
 

@@ -1,4 +1,4 @@
-"""Web Research Agent with Exa and Cartesia Line v0.2 SDK."""
+"""Web Research Agent with Exa and Cartesia Line SDK."""
 
 import asyncio
 import os

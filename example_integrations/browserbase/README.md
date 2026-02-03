@@ -1,10 +1,10 @@
-# Voice Agent with Real-time Web Form Filling (v02)
+# Voice Agent with Real-time Web Form Filling
 
 This example demonstrates a voice agent that conducts phone questionnaires while automatically filling out web forms in real-time using Stagehand browser automation powered by Browserbase.
 
 ## Features
 
-- **Voice Conversations**: Natural voice interactions using Line SDK v02
+- **Voice Conversations**: Natural voice interactions using Line SDK
 - **Real-time Form Filling**: Automatically fills web forms as answers are collected
 - **Browser Automation**: Uses Stagehand AI to interact with any web form
 - **Deterministic Flow**: Passthrough tools provide predictable conversation flow without LLM generation
@@ -27,7 +27,7 @@ Voice Call → VoiceAgentApp → FormFillingAgent (wraps LlmAgent)
                            Web Form Filled
 ```
 
-The v02 implementation uses:
+The implementation uses:
 - **`VoiceAgentApp`**: The main application entry point
 - **`LlmAgent`**: Handles LLM interactions with tool calling
 - **Passthrough tools**: Directly emit `OutputEvent`s (like `AgentSendText`) without requiring LLM generation, providing deterministic conversation flow
@@ -88,7 +88,7 @@ Browser automation manager that handles all web interactions. Key components:
 - **Background filling**: Form fields are filled asynchronously without blocking conversation
 
 ### `pyproject.toml`
-Package configuration with dependencies for the Line SDK v02.
+Package configuration with dependencies for the Line SDK.
 
 ## Example Flow
 

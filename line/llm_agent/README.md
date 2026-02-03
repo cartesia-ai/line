@@ -348,4 +348,4 @@ class BirdAgent:
         await self._llm_agent.cleanup()
 ```
 
-See the [guardrails_wrapper example](https://github.com/cartesia-ai/line/tree/main/v02/examples/guardrails_wrapper) for a complete implementation with content filtering.
+See the [guardrails_wrapper example](https://github.com/cartesia-ai/line/tree/main/examples/guardrails_wrapper) for a complete implementation with content filtering.

@@ -12,7 +12,7 @@ This example creates a phone assistant that:
 ## Running the Example
 
 ```bash
-cd v02/examples/transfer_phone_call
+cd examples/transfer_phone_call
 ANTHROPIC_API_KEY=your-key uv run python main.py
 ```
 

@@ -1,7 +1,7 @@
 [project]
 name = "browserbase-form-filler"
 version = "0.1.0"
-description = "Voice agent that fills web forms using Stagehand browser automation (Line SDK v02)"
+description = "Voice agent that fills web forms using Stagehand browser automation (Line SDK)"
 requires-python = ">=3.10"
 dependencies = [
     "cartesia-line==0.2.0.dev0",

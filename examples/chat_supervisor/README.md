@@ -63,7 +63,7 @@ The chat agent is instructed to use `ask_supervisor` for:
 ## Running the Example
 
 ```bash
-cd line/v02/examples/chat_supervisor
+cd examples/chat_supervisor
 ANTHROPIC_API_KEY=your-key uv run python main.py
 ```
 
