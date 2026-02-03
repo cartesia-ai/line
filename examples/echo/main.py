@@ -1,68 +1,29 @@
-import asyncio
 import os
-from typing import AsyncGenerator
 
-from loguru import logger
+from tools import echo
 
-from line import (
-    Bridge,
-    CallRequest,
-    ConversationContext,
-    ReasoningNode,
-    VoiceAgentApp,
-    VoiceAgentSystem,
-)
-from line.events import AgentResponse, UserStoppedSpeaking, UserTranscriptionReceived
+from line.llm_agent import LlmAgent, LlmConfig, end_call
+from line.voice_agent_app import AgentEnv, CallRequest, VoiceAgentApp
 
-# Set the log level to INFO
-logger.remove()
-logger.add(lambda msg: print(msg, end=""), level="INFO")
+#  GEMINI_API_KEY=your-key uv python main.py
 
 
-class EchoNode(ReasoningNode):
-    def __init__(self, node_id: str):
-        """
-        Initialize the Echo node.
-
-        Args:
-            node_id: The ID of the node.
-        """
-        super().__init__(
-            node_id=node_id,
-            system_prompt="You are an echo agent that repeats back what users say.",
-        )
-        self.sleep_ms = int(os.environ.get("SLEEP_MS", "0"))
-        logger.info(f"EchoNode initialized with sleep_ms={self.sleep_ms}")
-
-    async def process_context(self, context: ConversationContext) -> AsyncGenerator[AgentResponse, None]:
-        if self.sleep_ms > 0:
-            await asyncio.sleep(self.sleep_ms / 1000.0)
-
-        latest_user_message = context.get_latest_user_transcript_message()
-        echo_content = f"You said: {latest_user_message}"
-        logger.info(f"Echoing back: {echo_content}")
-        yield AgentResponse(content=echo_content)
-
-
-async def handle_new_call(system: VoiceAgentSystem, call_request: CallRequest):
-    """Configure nodes and bridges for echo functionality."""
-    logger.info(
-        f"Starting echo call for {call_request.call_id} from {call_request.from_} to {call_request.to}"
+async def get_agent(env: AgentEnv, call_request: CallRequest):
+    return LlmAgent(
+        model="gemini/gemini-2.0-flash",
+        api_key=os.getenv("GEMINI_API_KEY"),
+        tools=[end_call, echo],
+        config=LlmConfig(
+            system_prompt="""
+            You are a friendly and helpful assistant. Have a natural conversation with the user.
+Once the user says `I'm ready to talk to myself`, call the echo tool to echo back what the user says.""",
+            introduction="Hello! I'm your Echo Agent. How can I help you today?",
+        ),
     )
 
-    node = EchoNode(node_id="echo")
-    bridge = Bridge(node)
-    system.with_speaking_node(node, bridge)
 
-    bridge.on(UserTranscriptionReceived).map(node.add_event)
-
-    (bridge.on(UserStoppedSpeaking).stream(node.generate).broadcast())
-
-    await system.start()
-    await system.wait_for_shutdown()
-
-
-app = VoiceAgentApp(handle_new_call)
+app = VoiceAgentApp(get_agent=get_agent)
 
 if __name__ == "__main__":
+    print("Starting Echo app")
     app.run()

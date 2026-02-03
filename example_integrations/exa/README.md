@@ -1,103 +1,72 @@
-# Web Research Agent with Exa and Cartesia
+# Web Research Agent with Exa (v0.2 SDK)
 
-A real-time web research voice agent that combines Cartesia's voice capabilities with Exa's powerful web search API to provide accurate, up-to-date information through natural conversation.
+A voice agent that searches the web using Exa API and synthesizes results into conversational responses.
 
-## Getting Started
+## Setup
 
 ### Prerequisites
 
-- [Cartesia account](https://play.cartesia.ai/agents) and API key
-- [OpenAI API key](https://platform.openai.com/api-keys) for conversation synthesis
-- [Exa API key](https://dashboard.exa.ai/api-keys) for web search
+- [OpenAI API key](https://platform.openai.com/api-keys)
+- [Exa API key](https://dashboard.exa.ai/api-keys)
 
 ### Environment Variables
 
-Make sure to add these API keys to your `.env` file or Cartesia dashboard:
+Create a `.env` file:
 
-| Variable | Description | Required |
-|----------|-------------|----------|
-| `OPENAI_API_KEY` | OpenAI API key for conversation | Yes |
-| `EXA_API_KEY` | Exa API key for web search | Yes |
+```bash
+OPENAI_API_KEY=your-openai-key
+EXA_API_KEY=your-exa-key
+```
 
 ### Installation
 
 ```bash
-# Install dependencies
-pip install exa-py openai cartesia-line python-dotenv loguru
-
-# Or using uv (recommended)
-uv add exa-py openai cartesia-line python-dotenv loguru
+uv sync
 ```
 
-## Architecture
+## Running
 
-### Core Components
+```bash
+python main.py
+```
 
-1. **ResearchNode** (`research_node.py`)
-   - Extends ReasoningNode for conversation management
-   - Integrates OpenAI for natural language processing
-   - Uses Exa for real-time web search
-   - Synthesizes search results into conversational responses
+Then connect:
 
-2. **ExaSearchClient** (`exa_utils.py`)
-   - Wrapper for Exa API with optimized search parameters
-   - Formats search results for LLM consumption
-   - Handles errors and edge cases gracefully
+```bash
+cartesia chat 8000
+```
 
-3. **Configuration** (`config.py`)
-   - System prompts optimized for web research
-   - Exa search parameters for best results
-   - Custom events for search result handling
+## How It Works
+
+Everything is in `main.py`:
+
+1. **`web_search`** - A `@loopback_tool` that calls Exa API and returns formatted results to the LLM
+2. **`get_agent`** - Creates an `LlmAgent` with the web search tool and system prompt
+3. **`VoiceAgentApp`** - Handles the voice connection
+
+The tool uses `asyncio.to_thread` to run the synchronous Exa API without blocking.
 
 ## Configuration
 
 ### Exa Search Parameters
 
-The integration uses optimized search settings:
-
 ```python
-# Using the exact API call format
-result = exa.search_and_contents(
-    "query",
+client.search_and_contents(
+    query,
     num_results=10,
     type="fast",
     livecrawl="never",
-    text={
-        "max_characters": 1000
-    }
+    text={"max_characters": 1000}
 )
 ```
 
-## Local Development
+### LLM Configuration
 
-1. **Set up environment variables**:
-   ```bash
-   # Copy the example file
-   cp .env.example .env
-
-   # Edit .env with your actual API keys
-   # OPENAI_API_KEY=your-openai-key-here
-   # EXA_API_KEY=your-exa-key-here
-   ```
-
-2. **Run locally**:
-   ```bash
-   python3 main.py
-   ```
-
-   The `.env` file will automatically load your API keys!
-
-3. **Test with voice**:
-   ```bash
-   cartesia chat 8000
-   ```
-
-## Deployment
-
-Deploy to Cartesia's platform:
-
-1. **Add API keys** to your Cartesia dashboard
-2. **Upload the integration** files
-3. **Deploy** and start talking to your research agent
-
-Perfect for building voice-powered research tools, fact-checking assistants, and information discovery applications.
+```python
+LlmConfig(
+    system_prompt=SYSTEM_PROMPT,
+    introduction=INTRODUCTION,
+    max_tokens=300,
+    temperature=0.7,
+)
+```
