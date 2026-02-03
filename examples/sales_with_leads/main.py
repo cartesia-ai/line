@@ -9,10 +9,10 @@ Architecture:
 Run with: ANTHROPIC_API_KEY=your-key uv run python main.py
 """
 
+from dataclasses import dataclass, field
 import json
 import os
 import re
-from dataclasses import dataclass, field
 from typing import Annotated, AsyncIterable, Optional
 
 import litellm
@@ -250,18 +250,22 @@ class SalesWithLeadsAgent(AgentClass):
         company_key = company_name.strip().lower()
 
         if company_key in self._researched_companies:
-            yield json.dumps({
-                "status": "already_researched",
-                "company": company_name,
-                "research": self._company_research.get(company_key, {}),
-            })
+            yield json.dumps(
+                {
+                    "status": "already_researched",
+                    "company": company_name,
+                    "research": self._company_research.get(company_key, {}),
+                }
+            )
             return
 
         if self._researching:
-            yield json.dumps({
-                "status": "research_in_progress",
-                "company": company_name,
-            })
+            yield json.dumps(
+                {
+                    "status": "research_in_progress",
+                    "company": company_name,
+                }
+            )
             return
 
         logger.info(f"Researching company: {company_name}")
@@ -310,12 +314,14 @@ Focus on official sources and recent information. End with a brief structured JS
         }
         logger.info(f"Company research complete for {company_name}")
 
-        yield json.dumps({
-            "status": "success",
-            "company": company_name,
-            "company_info": company_info,
-            "research_summary": research_text[:500] if len(research_text) > 500 else research_text,
-        })
+        yield json.dumps(
+            {
+                "status": "success",
+                "company": company_name,
+                "company_info": company_info,
+                "research_summary": research_text[:500] if len(research_text) > 500 else research_text,
+            }
+        )
 
     def _extract_research_json(self, research_text: str) -> dict:
         """
