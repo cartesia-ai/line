@@ -104,11 +104,13 @@ class TestConversationRunner:
         # Verify shutdown_event is set
         assert runner.shutdown_event.is_set()
 
-        # Verify error was sent
+        # Verify error was sent with full traceback
         ws.send_json.assert_called()
         sent_data = ws.send_json.call_args[0][0]
         assert "error" in sent_data.get("type", "") or "content" in sent_data
+        # Error message should contain both the exception and traceback info
         assert "Simulated fatal error" in str(sent_data)
+        assert "RuntimeError" in str(sent_data)
 
         # Verify websocket was closed
         ws.close.assert_called_once()
@@ -137,6 +139,12 @@ class TestConversationRunner:
         assert call_count == 2
         assert runner.shutdown_event.is_set()
         ws.close.assert_called_once()
+
+        # Verify error message contains full traceback
+        ws.send_json.assert_called()
+        sent_data = ws.send_json.call_args[0][0]
+        assert "Something went wrong" in str(sent_data)
+        assert "ValueError" in str(sent_data)
 
     @pytest.mark.asyncio
     async def test_disconnect_stops_loop(self):

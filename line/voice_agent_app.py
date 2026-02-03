@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 import json
 import os
 import re
+import traceback
 from typing import Any, AsyncIterable, Awaitable, Callable, Dict, List, Optional
 from urllib.parse import urlencode
 
@@ -228,22 +229,23 @@ class VoiceAgentApp:
         )
 
         runner: Optional[ConversationRunner] = None
+        # Create the AgentEnv with the current event loop
+        loop = asyncio.get_running_loop()
+        env = AgentEnv(loop)
         try:
-            # Create the AgentEnv with the current event loop
-            loop = asyncio.get_running_loop()
-            env = AgentEnv(loop)
             agent_spec = await self.get_agent(env, call_request)
-
-            # Create and run the conversation runner
             runner = ConversationRunner(websocket, agent_spec, env)
-            await runner.run()
+        except Exception:
+            error_msg = traceback.format_exc()
+            error_string = f"Error in get_agent for {call_request.call_id}: {error_msg}"
+            logger.error(error_string)
+            await websocket.send_json(ErrorOutput(content=error_string).model_dump())
+            await websocket.close()
+            return
 
-        except Exception as e:
-            logger.exception(f"Error: {str(e)}")
-            if runner:
-                await runner.send_error("System has encountered an error, please try again later.")
-        finally:
-            logger.info("Websocket session ended")
+        # Create and run the conversation runner
+        await runner.run()
+        logger.info("Websocket session ended")
 
     def run(self, host="0.0.0.0", port=None):
         """Run the voice agent server."""
@@ -356,10 +358,25 @@ class ConversationRunner:
                 end_event, self.history = self._process_input_event(self.history, CallEnded())
                 await self._handle_event(TurnEnv(), end_event)
             except json.JSONDecodeError as e:
-                logger.exception(f"Failed to parse JSON message: {e}")
-            except Exception as e:
+                # Don't send EndCall event, as that may trigger side effects
+                # we accept the risk of incomplete call cleanup in this case,
+                # since this is an exceptional case that we will fix at the
+                # SDK level
                 self.shutdown_event.set()
-                await self.send_error(f"Error processing message: {e}")
+                logger.error(f"Failed to parse JSON message: {e}")
+                await self.send_error(f"Failed to parse JSON message: {e}")
+                await self.websocket.close()
+            except Exception:
+                # Most non-input processing messages are handled in the #runner loop
+                # so this is almost certainly a message processing error.
+                # Don't send EndCall event, as that may trigger side effects
+                # we accept the risk of incomplete call cleanup in this case,
+                # since this is an exceptional case that we will fix at the
+                # SDK level
+                self.shutdown_event.set()
+                error_msg = traceback.format_exc()
+                logger.error(f"Error in websocket loop (likely message processing): {error_msg}")
+                await self.send_error(f"Error in websocket loop (likely message processing): {error_msg}")
                 await self.websocket.close()
 
         if self.agent_task:
@@ -391,9 +408,12 @@ class ConversationRunner:
                     await self.websocket.send_json(mapped.model_dump())
             except asyncio.CancelledError:
                 pass
-            except Exception as exc:  # noqa: BLE001
-                logger.exception(f"Agent iterable error: {exc}")
-                await self.send_error(f"Unexpected error: {exc}")
+            except Exception:
+                self.shutdown_event.set()
+                error_msg = traceback.format_exc()
+                logger.error(f"Error in agent.process: {error_msg}")
+                await self.send_error(f"Error in agent.process: {error_msg}")
+                await self.websocket.close()
 
         self.agent_task = asyncio.create_task(runner())
 
