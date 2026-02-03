@@ -22,8 +22,8 @@ from line.events import AgentSendText, CallEnded, InputEvent, OutputEvent, UserT
 from line.llm_agent import LlmAgent, LlmConfig, ToolEnv, end_call, loopback_tool, web_search
 from line.voice_agent_app import AgentEnv, CallRequest, VoiceAgentApp
 
-
 MODEL = "anthropic/claude-haiku-4-5"
+
 
 @dataclass
 class LeadsState:
@@ -334,12 +334,12 @@ Focus on official sources and recent information. End with a brief structured JS
         """Parse JSON from LLM response, handling markdown code blocks."""
         try:
             # Try to find JSON in code blocks first
-            json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', text, re.DOTALL)
+            json_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
             if json_match:
                 return json.loads(json_match.group(1))
 
             # Try to find raw JSON object
-            json_match = re.search(r'\{[^{}]*\}', text, re.DOTALL)
+            json_match = re.search(r"\{[^{}]*\}", text, re.DOTALL)
             if json_match:
                 return json.loads(json_match.group(0))
 
