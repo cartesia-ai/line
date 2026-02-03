@@ -133,7 +133,7 @@ class SalesWithLeadsAgent(AgentClass):
 
         # Research agent for company research (similar to _supervisor in chat_supervisor)
         self._researcher = LlmAgent(
-            model="anthropic/claude-haiku-4-5",
+            model="anthropic/claude-opus-4-5",
             api_key=self._api_key,
             tools=[web_search],
             config=LlmConfig(system_prompt=RESEARCH_PROMPT),
@@ -268,13 +268,14 @@ class SalesWithLeadsAgent(AgentClass):
         logger.info(f"Researching company: {company_name}")
         self._researching = True
 
-        # Build detailed research prompt matching original research_node.py
-        research_prompt = f'Research the company "{company_name}" to help our sales agent.'
+        try:
+            # Build detailed research prompt matching original research_node.py
+            research_prompt = f'Research the company "{company_name}" to help our sales agent.'
 
-        if contact_name:
-            research_prompt += f" Contact person: {contact_name}."
+            if contact_name:
+                research_prompt += f" Contact person: {contact_name}."
 
-        research_prompt += """
+            research_prompt += """
 
 Find information about:
 1. Company size, industry, and business model
@@ -284,16 +285,15 @@ Find information about:
 
 Focus on official sources and recent information. End with a brief structured JSON summary."""
 
-        # Create research request (matching chat_supervisor pattern)
-        # History must include the message itself for the LLM to receive it
-        research_request = UserTextSent(
-            content=research_prompt,
-            history=[UserTextSent(content=research_prompt)],
-        )
+            # Create research request (matching chat_supervisor pattern)
+            # History must include the message itself for the LLM to receive it
+            research_request = UserTextSent(
+                content=research_prompt,
+                history=[UserTextSent(content=research_prompt)],
+            )
 
-        # Use the persistent researcher agent (like chat_supervisor uses _supervisor)
-        research_text = ""
-        try:
+            # Use the persistent researcher agent (like chat_supervisor uses _supervisor)
+            research_text = ""
             async for output in self._researcher.process(ctx.turn_env, research_request):
                 if isinstance(output, AgentSendText):
                     research_text += output.text
