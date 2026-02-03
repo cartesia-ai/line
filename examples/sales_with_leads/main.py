@@ -15,7 +15,6 @@ import os
 import re
 from typing import Annotated, AsyncIterable, Optional
 
-import litellm
 from loguru import logger
 
 from line.agent import AgentClass, TurnEnv
@@ -23,6 +22,8 @@ from line.events import AgentSendText, CallEnded, InputEvent, OutputEvent, UserT
 from line.llm_agent import LlmAgent, LlmConfig, ToolEnv, end_call, loopback_tool, web_search
 from line.voice_agent_app import AgentEnv, CallRequest, VoiceAgentApp
 
+
+MODEL = "anthropic/claude-haiku-4-5"
 
 @dataclass
 class LeadsState:
@@ -131,9 +132,16 @@ class SalesWithLeadsAgent(AgentClass):
         self._company_research: dict[str, dict] = {}
         self._researching = False
 
-        # Research agent for company research (similar to _supervisor in chat_supervisor)
+        # Leads extraction agent (extracts JSON from conversation)
+        self._leads_extractor = LlmAgent(
+            model=MODEL,
+            api_key=self._api_key,
+            config=LlmConfig(system_prompt=LEADS_EXTRACTION_PROMPT),
+        )
+
+        # Research agent for company research
         self._researcher = LlmAgent(
-            model="anthropic/claude-opus-4-5",
+            model=MODEL,
             api_key=self._api_key,
             tools=[web_search],
             config=LlmConfig(system_prompt=RESEARCH_PROMPT),
@@ -141,7 +149,7 @@ class SalesWithLeadsAgent(AgentClass):
 
         # Main chat agent
         self._chatter = LlmAgent(
-            model="anthropic/claude-haiku-4-5",
+            model=MODEL,
             api_key=self._api_key,
             tools=[
                 self.extract_leads,
@@ -165,7 +173,7 @@ class SalesWithLeadsAgent(AgentClass):
         async for output in self._chatter.process(env, event):
             yield output
 
-    @loopback_tool(is_background=True)
+    @loopback_tool
     async def extract_leads(
         self,
         ctx: ToolEnv,
@@ -184,19 +192,19 @@ class SalesWithLeadsAgent(AgentClass):
         logger.info("Extracting leads from conversation")
 
         try:
-            # Use litellm to extract leads
-            response = await litellm.acompletion(
-                model="anthropic/claude-haiku-4-5",
-                api_key=self._api_key,
-                messages=[
-                    {"role": "system", "content": LEADS_EXTRACTION_PROMPT},
-                    {"role": "user", "content": f"Extract leads from:\n\n{conversation_summary}"},
-                ],
-                temperature=0.1,
-                max_tokens=500,
+            # Create extraction request
+            extraction_prompt = f"Extract leads from:\n\n{conversation_summary}"
+            extraction_request = UserTextSent(
+                content=extraction_prompt,
+                history=[UserTextSent(content=extraction_prompt)],
             )
 
-            content = response.choices[0].message.content
+            # Use the leads extractor agent to get JSON output
+            content = ""
+            async for output in self._leads_extractor.process(ctx.turn_env, extraction_request):
+                if isinstance(output, AgentSendText):
+                    content += output.text
+
             # Parse JSON from response
             extracted = self._parse_json(content)
 
@@ -206,8 +214,8 @@ class SalesWithLeadsAgent(AgentClass):
 
                 # Check if we have a new company to research
                 if "company" in updated and self._leads.company:
-                    company = self._leads.company.lower()
-                    if company not in self._researched_companies:
+                    company_key = self._leads.company.lower()
+                    if company_key not in self._researched_companies:
                         logger.info(f"New company identified: {self._leads.company}")
 
         except Exception as e:
@@ -322,6 +330,25 @@ Focus on official sources and recent information. End with a brief structured JS
             }
         )
 
+    def _parse_json(self, text: str) -> dict:
+        """Parse JSON from LLM response, handling markdown code blocks."""
+        try:
+            # Try to find JSON in code blocks first
+            json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', text, re.DOTALL)
+            if json_match:
+                return json.loads(json_match.group(1))
+
+            # Try to find raw JSON object
+            json_match = re.search(r'\{[^{}]*\}', text, re.DOTALL)
+            if json_match:
+                return json.loads(json_match.group(0))
+
+            # Try parsing the whole text as JSON
+            return json.loads(text)
+        except (json.JSONDecodeError, Exception) as e:
+            logger.warning(f"Failed to parse JSON: {e}")
+            return {}
+
     def _extract_research_json(self, research_text: str) -> dict:
         """
         Extract structured JSON from research response.
@@ -351,27 +378,9 @@ Focus on official sources and recent information. End with a brief structured JS
             "raw_research": research_text[:300],
         }
 
-    def _parse_json(self, content: str) -> Optional[dict]:
-        """Parse JSON from LLM response, handling markdown code blocks."""
-        content = content.strip()
-
-        # Remove markdown code blocks if present
-        if content.startswith("```json"):
-            content = content[7:]
-        elif content.startswith("```"):
-            content = content[3:]
-        if content.endswith("```"):
-            content = content[:-3]
-        content = content.strip()
-
-        try:
-            return json.loads(content)
-        except json.JSONDecodeError as e:
-            logger.warning(f"Failed to parse JSON: {e}")
-            return None
-
     async def _cleanup(self):
         await self._chatter.cleanup()
+        await self._leads_extractor.cleanup()
         await self._researcher.cleanup()
 
 
@@ -481,11 +490,9 @@ NEVER use the end_call tool unless ALL of these conditions are met:
 4. You have confirmed they are ready to wrap up
 """
 
-LEADS_EXTRACTION_PROMPT = """You are an expert data extraction specialist. Analyze the conversation and extract ALL available leads information.
+LEADS_EXTRACTION_PROMPT = """You are an expert data extraction specialist. Analyze conversations and extract lead information.
 
-CRITICAL: You must respond with ONLY a valid JSON object. No markdown, no explanations.
-
-Extract these fields (use empty string/false/[] if not mentioned):
+Extract these fields from the conversation:
 - name: Contact's full name
 - company: Company or organization name
 - email: Email address
@@ -496,22 +503,24 @@ Extract these fields (use empty string/false/[] if not mentioned):
 - next_steps: Any agreed follow-up actions
 - notes: Other relevant observations about the prospect
 
-INTEREST LEVEL:
+INTEREST LEVEL ASSESSMENT:
 - HIGH: Actively engaged, detailed questions, mentions budget/timeline
 - MEDIUM: Interested but cautious, some questions
 - LOW: Polite but disengaged, minimal interest
 
-Return ONLY valid JSON:
+Only extract information explicitly mentioned. Use empty strings/false/[] for missing fields.
+
+CRITICAL: Output ONLY a JSON object with no additional text. Example:
 {
-    "name": "",
-    "company": "",
-    "email": "",
-    "phone": "",
-    "interest_level": "unknown",
-    "pain_points": [],
-    "budget_mentioned": false,
-    "next_steps": "",
-    "notes": ""
+  "name": "John Smith",
+  "company": "Acme Corp",
+  "email": "",
+  "phone": "",
+  "interest_level": "medium",
+  "pain_points": ["long customer wait times"],
+  "budget_mentioned": false,
+  "next_steps": "",
+  "notes": "Interested in voice AI for customer support"
 }
 """
 

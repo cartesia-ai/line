@@ -1,6 +1,6 @@
 # Sales with Leads Extraction and Research
 
-A sales representative voice agent with stateful leads extraction and company research. Uses a two-tier architecture similar to `chat_supervisor`.
+A sales representative voice agent with stateful leads extraction and company research. Uses a three-agent architecture similar to `chat_supervisor`.
 
 ## Quick Start
 
@@ -11,51 +11,54 @@ ANTHROPIC_API_KEY=your-key uv run python main.py
 ## Architecture
 
 ```
-┌──────────────────────────────────────────────────────────────────────┐
-│                       SalesWithLeadsAgent                            │
-│                                                                      │
-│  ┌──────────────────┐                                                │
-│  │   LeadsState     │                                                │
-│  │   (dataclass)    │                                                │
-│  │                  │                                                │
-│  │  - name          │     ┌─────────────────────────────────────┐   │
-│  │  - company       │     │           Chat Agent                │   │
-│  │  - phone         │◀────│       (claude-haiku-4-5)            │   │
-│  │  - email         │     │                                     │   │
-│  │  - interest_level│     │  Tools:                             │   │
-│  │  - pain_points   │     │  ├── extract_leads (background)     │   │
-│  │  - budget        │     │  ├── research_company (background)  │   │
-│  │  - next_steps    │     │  └── end_call                       │   │
-│  │  - notes         │     └─────────────────────────────────────┘   │
-│  └──────────────────┘                     │                          │
-│                                           │ research_company         │
-│  ┌──────────────────┐                     ▼                          │
-│  │ Company Research │     ┌─────────────────────────────────────┐   │
-│  │     Cache        │◀────│        Researcher Agent             │   │
-│  │                  │     │       (claude-haiku-4-5)            │   │
-│  │  {company: info} │     │                                     │   │
-│  └──────────────────┘     │  Tools: [web_search]                │   │
-│                           └─────────────────────────────────────┘   │
-└──────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                          SalesWithLeadsAgent                                 │
+│                                                                              │
+│  ┌─────────────────┐      ┌──────────────────────────────────────┐          │
+│  │   LeadsState    │      │         Chat Agent                   │          │
+│  │   (dataclass)   │      │      (claude-haiku-4-5)              │          │
+│  │                 │      │                                      │          │
+│  │  - name         │      │  Tools:                              │          │
+│  │  - company      │      │  ├── extract_leads ──────────────────┼─────┐    │
+│  │  - phone        │      │  ├── research_company ───────────────┼────┐│    │
+│  │  - email        │      │  └── end_call                        │    ││    │
+│  │  - interest     │      └──────────────────────────────────────┘    ││    │
+│  │  - pain_points  │                                                  ││    │
+│  │  - budget       │◀─────────────────────────────────────────────────┘│    │
+│  │  - next_steps   │      ┌──────────────────────────────────────┐     │    │
+│  │  - notes        │      │    Leads Extractor Agent             │     │    │
+│  └─────────────────┘      │      (claude-haiku-4-5)              │◀────┘    │
+│                           │                                      │          │
+│  ┌─────────────────┐      │  Extracts structured lead info       │          │
+│  │  Company Cache  │      │  and returns JSON                    │          │
+│  │                 │      └──────────────────────────────────────┘          │
+│  │ {company: info} │                                                        │
+│  └─────────────────┘      ┌──────────────────────────────────────┐          │
+│           ▲               │       Researcher Agent               │◀─────────┘
+│           │               │      (claude-haiku-4-5)              │
+│           └───────────────│                                      │
+│                           │  Tools: [web_search]                 │
+│                           └──────────────────────────────────────┘
+└──────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ## How It Works
 
-Similar to `chat_supervisor`, this agent has two LLM agents:
+This agent has three LLM agents:
 
-1. **Chat Agent** (`_chatter`) - Handles the sales conversation
-2. **Researcher Agent** (`_researcher`) - Handles company research via web_search
+1. **Chat Agent** (`_chatter`) - Handles the sales conversation (Haiku)
+2. **Leads Extractor** (`_leads_extractor`) - Extracts structured lead info (Haiku)
+3. **Researcher Agent** (`_researcher`) - Researches companies via web_search (Opus)
 
 ### Tools
 
-- **extract_leads**: Called after each user response
-  - Uses litellm to extract lead info from conversation
+- **extract_leads**: Delegates to `_leads_extractor` agent
+  - Extracts lead info from conversation summary
   - Merges into `LeadsState` (accumulates, doesn't overwrite)
   - Returns current state + missing required fields
 
-- **research_company**: Triggers when company is identified
-  - Delegates to `_researcher` agent with web_search
-  - Finds company info, pain points, key people, opportunities
+- **research_company**: Delegates to `_researcher` agent
+  - Uses web_search to find company info, pain points, key people
   - Caches results to avoid duplicate research
   - Returns structured JSON + research summary
 
@@ -64,9 +67,15 @@ Similar to `chat_supervisor`, this agent has two LLM agents:
 ```python
 class SalesWithLeadsAgent(AgentClass):
     def __init__(self):
-        # Researcher agent for company research (like _supervisor in chat_supervisor)
-        self._researcher = LlmAgent(
+        # Leads extraction agent
+        self._leads_extractor = LlmAgent(
             model="anthropic/claude-haiku-4-5",
+            config=LlmConfig(system_prompt=LEADS_EXTRACTION_PROMPT),
+        )
+
+        # Research agent (like _supervisor in chat_supervisor)
+        self._researcher = LlmAgent(
+            model="anthropic/claude-opus-4-5",
             tools=[web_search],
             config=LlmConfig(system_prompt=RESEARCH_PROMPT),
         )
@@ -78,12 +87,17 @@ class SalesWithLeadsAgent(AgentClass):
             config=LlmConfig(system_prompt=SALES_SYSTEM_PROMPT),
         )
 
+    @loopback_tool
+    async def extract_leads(self, ctx, conversation_summary):
+        """Delegates to _leads_extractor agent."""
+        async for output in self._leads_extractor.process(ctx.turn_env, request):
+            ...
+
     @loopback_tool(is_background=True)
     async def research_company(self, ctx, company_name, contact_name=None):
         """Delegates to _researcher agent."""
         async for output in self._researcher.process(ctx.turn_env, request):
             ...
-        yield result
 ```
 
 ## Stateful Leads Accumulation
