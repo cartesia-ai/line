@@ -1,22 +1,17 @@
-# Line SDK
+# Cartesia Line SDK
 
-Build production-ready, low-latency voice AI agents with real-time speech and tool calling.
+Build intelligent, low-latency voice agents with Line.
 
-**With Line you can,**
-- **Create** your first voice agent from scratch, **deploy**, and **talk to it in under 5 minutes**.
-- **Turn any existing chatbot** or text agent you've already built into a low-latency voice agent.
-- **Spin up common use cases** for support or scheduling from **ready-made templates**.
-- **Deploy production-ready systems** with auto-scaling, telephony integration, metrics, and call analytics.
+Line brings voice to your text agents with Cartesia's state-of-the-art speech models. We handle audio orchestration, deployment, and observability so you can focus on your agent's reasoning.
 
-**Why Line?**
+## Features
 
-- 🔗 **Event-driven design** to easily define multi-agent architectures with powerful background reasoning.
-- ⚡ **State-of-the-art voice models** using Sonic TTS and Ink STT deliver the lowest latency voice experience.
-- 📋 **Pre-built templates** for common use cases like customer support, sales agents, form filling, and more.
-- 🔌 **Easy integrations** with tools, MCPs, and other frameworks out of the box.
-- 🤝 **Support for handoffs** between agents and humans.
-- 🧠 **Reasoning agnostic** works with any LLM, text agent, or chatbot code.
-- 🚀 **Instant deployment** so you can build, deploy, and start talking in minutes with no infrastructure setup.
+- **Real-time interruption support** — Handles audio interruptions and turn-taking out-of-the-box
+- **Tool calling** — Connect to databases, APIs, and external services
+- **Multi-agent handoffs** — Route conversations between specialized agents
+- **Web search** — Built-in tool for real-time information lookup
+- **100+ LLM providers** — Works with any LLM via LiteLLM
+- **Instant deployment** — Build, deploy, and start talking in minutes
 
 ## Quick Start
 
@@ -32,16 +27,7 @@ GEMINI_API_KEY=your-key uv run python main.py
 
 ```bash
 mkdir my-agent && cd my-agent
-```
-
-Create `pyproject.toml`:
-
-```toml
-[project]
-name = "my-agent"
-version = "0.1.0"
-requires-python = ">=3.10"
-dependencies = ["cartesia-line"]
+uv init && uv add cartesia-line
 ```
 
 Create `main.py`:
@@ -49,11 +35,11 @@ Create `main.py`:
 ```python
 import os
 from line.llm_agent import LlmAgent, LlmConfig, end_call
-from line.voice_agent_app import AgentEnv, CallRequest, VoiceAgentApp
+from line.voice_agent_app import VoiceAgentApp
 
-async def get_agent(env: AgentEnv, call_request: CallRequest):
+async def get_agent(env, call_request):
     return LlmAgent(
-        model="gemini/gemini-2.0-flash",
+        model="gemini/gemini-2.5-flash-preview-09-2025",
         api_key=os.getenv("GEMINI_API_KEY"),
         tools=[end_call],
         config=LlmConfig(
@@ -71,7 +57,7 @@ if __name__ == "__main__":
 Run it:
 
 ```bash
-uv sync && uv run python main.py
+GEMINI_API_KEY=your-key uv run python main.py
 ```
 
 **3. (Optional) Install the CLI to test locally:**
@@ -116,7 +102,7 @@ async def get_agent(env: AgentEnv, call_request: CallRequest):
     # Prompts come from call_request.agent.system_prompt and call_request.agent.introduction
     # Falls back to your defaults if not provided
     return LlmAgent(
-        model="gemini/gemini-2.0-flash",
+        model="gemini/gemini-2.5-flash-preview-09-2025",
         tools=[end_call],
         config=LlmConfig.from_call_request(
             call_request,
@@ -138,7 +124,7 @@ Ready-to-use tools for common actions:
 from line.llm_agent import LlmAgent, LlmConfig, end_call, send_dtmf, transfer_call, web_search
 
 agent = LlmAgent(
-    model="gemini/gemini-2.0-flash",
+    model="gemini/gemini-2.5-flash-preview-09-2025",
     tools=[end_call, send_dtmf, transfer_call, web_search],
     config=LlmConfig(...),
 )
@@ -197,7 +183,7 @@ Transfer control to a specialized agent:
 from line.llm_agent import LlmAgent, LlmConfig, agent_as_handoff, end_call
 
 spanish_agent = LlmAgent(
-    model="gpt-4o",
+    model="anthropic/claude-sonnet-4-5",
     tools=[end_call],
     config=LlmConfig(
         system_prompt="You speak only in Spanish.",
@@ -206,7 +192,7 @@ spanish_agent = LlmAgent(
 )
 
 main_agent = LlmAgent(
-    model="gemini/gemini-2.0-flash",
+    model="gemini/gemini-2.5-flash-preview-09-2025",
     tools=[
         end_call,
         agent_as_handoff(
@@ -222,11 +208,11 @@ main_agent = LlmAgent(
 
 ### Tool Types Summary
 
-| Type | Decorator | Result goes to | Use for |
-|------|-----------|----------------|---------|
+| Type | How to create | Result goes to | Use for |
+|------|---------------|----------------|---------|
 | **Loopback** | `@loopback_tool` | Back to LLM | API calls, data lookup |
 | **Passthrough** | `@passthrough_tool` | Directly to user | Deterministic actions |
-| **Handoff** | `@handoff_tool` | Another agent | Multi-agent workflows |
+| **Handoff** | `agent_as_handoff()` or `@handoff_tool` | Another agent | Multi-agent workflows |
 
 ### Long-Running Tools
 
@@ -235,6 +221,9 @@ By default, tool calls are terminated when the agent is interrupted (though any 
 For tools that take a long time to complete, set `is_background=True`. The tool will continue running in the background until completion regardless of interruptions, then loop back to the LLM:
 
 ```python
+from typing import Annotated
+from line.llm_agent import loopback_tool
+
 @loopback_tool(is_background=True)
 async def search_database(ctx, query: Annotated[str, "Search query"]) -> str:
     """Search that may take a while."""
@@ -252,7 +241,8 @@ Implement the `Agent` protocol to add guardrails, logging, or preprocessing:
 
 ```python
 from line.agent import TurnEnv
-from line.events import InputEvent, UserTextSent, AgentSendText
+from line.events import InputEvent, OutputEvent, UserTurnEnded, AgentSendText
+from line.llm_agent import LlmAgent, LlmConfig, end_call
 
 class GuardedAgent:
     def __init__(self, inner_agent):
@@ -260,33 +250,37 @@ class GuardedAgent:
         self.blocked_words = ["competitor", "confidential"]
 
     async def process(self, env: TurnEnv, event: InputEvent):
-        # Pre-process: check input
-        if isinstance(event, UserTextSent):
-            if any(word in event.content.lower() for word in self.blocked_words):
+        # Pre-process: check user input for blocked words
+        if isinstance(event, UserTurnEnded):
+            user_text = " ".join(
+                item.content for item in event.content if hasattr(item, "content")
+            )
+            if any(word in user_text.lower() for word in self.blocked_words):
                 yield AgentSendText(text="I can't discuss that topic.")
                 return
 
         # Delegate to inner agent
         async for output in self.inner.process(env, event):
-            # Post-process: modify or log outputs here
             yield output
 
 async def get_agent(env, call_request):
-    inner = LlmAgent(model="gemini/gemini-2.0-flash", tools=[end_call], ...)
+    inner = LlmAgent(
+        model="gemini/gemini-2.5-flash-preview-09-2025",
+        tools=[end_call],
+        config=LlmConfig(system_prompt="You are a helpful assistant."),
+    )
     return GuardedAgent(inner)
 ```
 
-
 ## LLM Provider Support
 
-100+ providers via [LiteLLM](https://docs.litellm.ai/docs/providers):
+Line uses [LiteLLM](https://github.com/BerriAI/litellm) to support 100+ LLM providers. Pass any LiteLLM-compatible model string to `LlmAgent`:
 
 | Provider | Model format |
 |----------|--------------|
 | **OpenAI** | `gpt-5-nano`, `gpt-5.2` |
 | **Anthropic** | `anthropic/claude-haiku-4-5-20251001`, `anthropic/claude-sonnet-4-5` |
 | **Google** | `gemini/gemini-2.5-flash-preview-09-2025`, `gemini/gemini-3.0-preview` |
-
 
 ## Agent Examples
 
@@ -305,7 +299,6 @@ async def get_agent(env, call_request):
 | [Exa Web Research](./example_integrations/exa) | Real-time web search |
 | [Browserbase](./example_integrations/browserbase) | Fill web forms via voice |
 
-
 ## Documentation
 
 - **[SDK Overview](https://docs.cartesia.ai/line/sdk/overview)** — Architecture and installation
@@ -318,3 +311,9 @@ async def get_agent(env, call_request):
 - [Full Documentation](https://docs.cartesia.ai/line/introduction)
 - [Discord Community](https://discord.gg/GExXcjM7)
 - [Email Support](mailto:support@cartesia.ai)
+
+## Acknowledgments
+
+Line is built on top of the fantastic work by the maintainers of [LiteLLM](https://github.com/BerriAI/litellm). Their open-source library provides the unified LLM interface that makes it possible to support 100+ providers out of the box. 
+
+LiteLLM is licensed under the [MIT License](https://github.com/BerriAI/litellm/blob/main/LICENSE).

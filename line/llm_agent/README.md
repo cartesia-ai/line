@@ -77,6 +77,7 @@ async def get_agent(env, call_request):
 ```
 
 **Priority chain** (highest to lowest):
+
 1. **CallRequest value** - If the API provides `system_prompt` or `introduction`
 2. **User fallback** - Your app's custom fallbacks via `fallback_system_prompt` / `fallback_introduction`
 3. **SDK default** - Built-in defaults (`FALLBACK_SYSTEM_PROMPT`, `FALLBACK_INTRODUCTION`)
@@ -92,6 +93,7 @@ config = LlmConfig.from_call_request(
 ```
 
 **Empty string handling**:
+
 - `system_prompt=""` is treated as None and falls back to defaults (a valid system prompt is always required)
 - `introduction=""` is preserved (agent waits for user to speak first rather than using a default)
 
@@ -229,6 +231,7 @@ async def transfer_to_billing(
 ```
 
 The `event` parameter is required for handoff tools:
+
 - **First call**: `event` is `AgentHandedOff` - use this to send initial transfer messages
 - **Subsequent calls**: `event` is the actual input event (e.g., `UserTextSent`) - route to target agent
 
@@ -287,6 +290,7 @@ Background tools continue running even if the user interrupts. The result will b
 ## Events
 
 **Input Events** (agent receives):
+
 - `CallStarted` - Call initiated
 - `UserTextSent` - User speech transcribed
 - `UserTurnEnded` - User finished speaking
@@ -294,6 +298,7 @@ Background tools continue running even if the user interrupts. The result will b
 - `AgentHandedOff` - Passed to handoff tools on initial handoff
 
 **Output Events** (agent yields):
+
 - `AgentSendText` - Send text to user
 - `AgentEndCall` - End the call
 - `AgentTransferCall` - Transfer call
@@ -317,35 +322,37 @@ from line.events import AgentSendText, InputEvent, OutputEvent, UserTurnEnded
 from line.llm_agent import LlmAgent, LlmConfig, end_call
 
 
-class BirdAgent:
-    """Custom agent that adds special handling for bird-related messages."""
+class GuardrailsAgent:
+    """Custom agent that filters blocked topics before processing."""
 
     def __init__(self):
         self._llm_agent = LlmAgent(
-            model="gemini/gemini-2.0-flash",
+            model="gemini/gemini-2.5-flash",
             tools=[end_call],
             config=LlmConfig(
                 system_prompt="You are a helpful assistant.",
                 introduction="Hello! How can I help you today?",
             ),
         )
+        self._blocked_words = ["competitor", "confidential"]
 
     async def process(self, env: TurnEnv, event: InputEvent) -> AsyncIterable[OutputEvent]:
-        # Add custom preprocessing
+        # Pre-process: check for blocked content
         if isinstance(event, UserTurnEnded):
             user_text = " ".join(
                 item.content for item in event.content if hasattr(item, "content")
             )
-            if "bird" in user_text.lower():
-                yield AgentSendText(text="Did you mention birds? I love birds!")
+            if any(word in user_text.lower() for word in self._blocked_words):
+                yield AgentSendText(text="I'm not able to discuss that topic.")
+                return
 
         # Delegate to the inner LLM agent
         async for output in self._llm_agent.process(env, event):
             yield output
 
     async def cleanup(self) -> None:
-        """Clean up resources."""
+        """Clean up resources. Called by VoiceAgentApp when the call ends."""
         await self._llm_agent.cleanup()
 ```
 
-See the [guardrails_wrapper example](https://github.com/cartesia-ai/line/tree/main/v02/examples/guardrails_wrapper) for a complete implementation with content filtering.
+See the [guardrails_wrapper example](https://github.com/cartesia-ai/line/tree/main/line/v02/examples/guardrails_wrapper) for a complete implementation with content filtering.
