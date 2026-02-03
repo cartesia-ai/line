@@ -47,7 +47,15 @@ CEREBRAS_API_KEY=your-cerebras-key
 
 2) Run the agent locally:
 ```bash
+# uv (recommended)
+uv run python main.py
+# or python
 python main.py
+```
+
+3) Open a new terminal window and chat with your agent in text-only mode:
+```
+cartesia chat 8000
 ```
 
 ## File Structure
@@ -131,7 +139,12 @@ class BackgroundJudge:
 cartesia env set CEREBRAS_API_KEY your-cerebras-key
 ```
 
-2) Deploy the agent:
+2) Init your agent:
+```bash
+cartesia init
+```
+
+3) Deploy the agent:
 
 ```
 cartesia deploy

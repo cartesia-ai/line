@@ -81,4 +81,3 @@ class InterviewAgent(AgentClass):
         # Delegate to LlmAgent for conversation
         async for output in self._agent.process(env, event):
             yield output
-
