@@ -1,0 +1,11 @@
+[project]
+name = "chat-supervisor"
+version = "0.1.0"
+description = "Chat/Supervisor example: A fast Haiku agent that consults Opus for complex questions"
+requires-python = ">=3.10"
+dependencies = [
+    "cartesia-line==0.2.0.dev0",
+]
+
+[tool.setuptools]
+py-modules = ["main"]
