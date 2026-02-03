@@ -234,6 +234,7 @@ class VoiceAgentApp:
         env = AgentEnv(loop)
         try:
             agent_spec = await self.get_agent(env, call_request)
+            runner = ConversationRunner(websocket, agent_spec, env)
         except Exception:
             error_msg = traceback.format_exc()
             error_string = f"Error in get_agent for {call_request.call_id}: {error_msg}"
@@ -243,7 +244,6 @@ class VoiceAgentApp:
             return
 
         # Create and run the conversation runner
-        runner = ConversationRunner(websocket, agent_spec, env)
         await runner.run()
         logger.info("Websocket session ended")
 
