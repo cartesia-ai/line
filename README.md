@@ -1,4 +1,4 @@
-# Line SDK
+# Cartesia Line SDK
 
 Build intelligent, low-latency voice agents with Line.
 
