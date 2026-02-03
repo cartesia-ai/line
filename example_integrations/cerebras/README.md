@@ -23,26 +23,29 @@ The background judges run in parallel on each user turn (after the interview sta
 - A [Cerebras API Key](https://cloud.cerebras.ai/)
 - A [Cartesia](https://play.cartesia.ai/agents) account and API key
 
-### Installation
+1) Install the Cartesia CLI tool:
 
 ```bash
-pip install -e .
-# or with uv
-uv pip install -e .
+curl -fsSL https://cartesia.sh | sh
 ```
 
-### Configuration
+2) Install python dependencies:
 
-Add your API keys to a `.env` file:
+```bash
+# uv (recommended)
+uv sync
+# or with pip
+pip install -e .
+```
+
+### Running Locally
+1) Add your API keys to a `.env` file:
 
 ```
 CEREBRAS_API_KEY=your-cerebras-key
 ```
 
-Or add them to the API keys section in your Cartesia account.
-
-### Running Locally
-
+2) Run the agent locally:
 ```bash
 python main.py
 ```
@@ -122,4 +125,14 @@ class BackgroundJudge:
 
 ## Deploying to Cartesia
 
-Add the `cartesia.toml` file to your [agents dashboard](https://play.cartesia.ai/agents) along with your API keys.
+1) Upload API keys to Cartesia:
+
+```bash
+cartesia env set CEREBRAS_API_KEY your-cerebras-key
+```
+
+2) Deploy the agent:
+
+```
+cartesia deploy
+```
