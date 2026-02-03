@@ -22,7 +22,7 @@ from line.events import AgentSendText, CallEnded, InputEvent, OutputEvent, UserT
 from line.llm_agent import LlmAgent, LlmConfig, ToolEnv, end_call, loopback_tool, web_search
 from line.voice_agent_app import AgentEnv, CallRequest, VoiceAgentApp
 
-MODEL = "anthropic/claude-haiku-4-5"
+MODEL = "anthropic/claude-haiku-4-5-20251001"
 
 
 @dataclass

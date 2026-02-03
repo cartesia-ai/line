@@ -16,7 +16,7 @@ ANTHROPIC_API_KEY=your-key uv run python main.py
 │                                                                              │
 │  ┌─────────────────┐      ┌──────────────────────────────────────┐          │
 │  │   LeadsState    │      │         Chat Agent                   │          │
-│  │   (dataclass)   │      │      (claude-haiku-4-5)              │          │
+│  │   (dataclass)   │      │      (claude-haiku-4-5-20251001)              │          │
 │  │                 │      │                                      │          │
 │  │  - name         │      │  Tools:                              │          │
 │  │  - company      │      │  ├── extract_leads ──────────────────┼─────┐    │
@@ -27,7 +27,7 @@ ANTHROPIC_API_KEY=your-key uv run python main.py
 │  │  - budget       │◀─────────────────────────────────────────────────┘│    │
 │  │  - next_steps   │      ┌──────────────────────────────────────┐     │    │
 │  │  - notes        │      │    Leads Extractor Agent             │     │    │
-│  └─────────────────┘      │      (claude-haiku-4-5)              │◀────┘    │
+│  └─────────────────┘      │      (claude-haiku-4-5-20251001)              │◀────┘    │
 │                           │                                      │          │
 │  ┌─────────────────┐      │  Extracts structured lead info       │          │
 │  │  Company Cache  │      │  and returns JSON                    │          │
@@ -35,7 +35,7 @@ ANTHROPIC_API_KEY=your-key uv run python main.py
 │  │ {company: info} │                                                        │
 │  └─────────────────┘      ┌──────────────────────────────────────┐          │
 │           ▲               │       Researcher Agent               │◀─────────┘
-│           │               │      (claude-haiku-4-5)              │
+│           │               │      (claude-haiku-4-5-20251001)              │
 │           └───────────────│                                      │
 │                           │  Tools: [web_search]                 │
 │                           └──────────────────────────────────────┘
@@ -69,20 +69,20 @@ class SalesWithLeadsAgent(AgentClass):
     def __init__(self):
         # Leads extraction agent
         self._leads_extractor = LlmAgent(
-            model="anthropic/claude-haiku-4-5",
+            model="anthropic/claude-haiku-4-5-20251001",
             config=LlmConfig(system_prompt=LEADS_EXTRACTION_PROMPT),
         )
 
         # Research agent (like _supervisor in chat_supervisor)
         self._researcher = LlmAgent(
-            model="anthropic/claude-opus-4-5",
+            model="anthropic/cclaude-haiku-4-5-20251001",
             tools=[web_search],
             config=LlmConfig(system_prompt=RESEARCH_PROMPT),
         )
 
         # Main chat agent
         self._chatter = LlmAgent(
-            model="anthropic/claude-haiku-4-5",
+            model="anthropic/claude-haiku-4-5-20251001",
             tools=[self.extract_leads, self.research_company, end_call],
             config=LlmConfig(system_prompt=SALES_SYSTEM_PROMPT),
         )
