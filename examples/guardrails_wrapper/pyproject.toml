@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Guardrails wrapper example - LLM agent with preprocessing/postprocessing for content filtering"
 requires-python = ">=3.10"
 dependencies = [
-   "cartesia-line==0.2.0.dev0",
+   "cartesia-line==0.2.0",
 ]
 
 [tool.setuptools]
