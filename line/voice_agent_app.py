@@ -235,10 +235,9 @@ class VoiceAgentApp:
         try:
             agent_spec = await self.get_agent(env, call_request)
             runner = ConversationRunner(websocket, agent_spec, env)
-        except Exception:
-            error_msg = traceback.format_exc()
-            error_string = f"Error in get_agent for {call_request.call_id}: {error_msg}"
-            logger.error(error_string)
+        except Exception as e:
+            error_string = f"Error in get_agent for {call_request.call_id}: {str(e)}"
+            logger.exception(error_string)
             await websocket.send_json(ErrorOutput(content=error_string).model_dump())
             await websocket.close()
             return
