@@ -19,7 +19,7 @@ INTRODUCTION = (
 )
 
 # Main interviewer system prompt
-prompt_main = """You are a helpful interview practice assistant with access to an interview starter tool.
+PROMPT_MAIN = """You are a helpful interview practice assistant with access to an interview starter tool.
 If the user says they are ready to start the interview, call the tool `start_interview` with `confirmed=True`.
 If the user says they need to leave or they want to stop, end the interview and call the tool `end_call`.
 Do not tell the user about the tools you use. The tools are only for you.
@@ -30,7 +30,7 @@ Be concise, like a coach. /no_think .
 """
 
 # Technical expertise judge prompt
-prompt_agent1 = """
+PROMPT_AGENT1 = """
 You are an expert at evaluating interviewer response quality in terms of technical expertise.
 
 Your task is to analyze the conversation and rate the user response:
@@ -52,7 +52,7 @@ COMPETENCE LEVEL ASSESSMENT:
 """
 
 # Communication skills judge prompt
-prompt_agent2 = """
+PROMPT_AGENT2 = """
 You are an expert at evaluating interviewer response quality in terms of communication skills.
 
 Your task is to analyze the conversation and rate the user response:
@@ -75,7 +75,7 @@ COMPETENCE LEVEL ASSESSMENT:
 """
 
 # Reasoning and logic judge prompt
-prompt_agent3 = """
+PROMPT_AGENT3 = """
 You are an expert at evaluating interviewer response quality in terms of reasoning and thinking logic.
 
 Your task is to analyze the conversation and rate the user response:
@@ -95,7 +95,7 @@ COMPETENCE LEVEL ASSESSMENT:
 """
 
 # JSON schema for structured output from judge agents
-schema_background = {
+SCHEMA_BACKGROUND = {
     "type": "object",
     "properties": {
         "competence": {"type": "string", "enum": ["HIGH", "MEDIUM", "LOW"]},

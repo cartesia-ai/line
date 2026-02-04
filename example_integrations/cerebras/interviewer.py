@@ -9,7 +9,7 @@ import asyncio
 import os
 from typing import Annotated, AsyncIterable
 
-from config import INTRODUCTION, MAX_OUTPUT_TOKENS, MODEL_ID, TEMPERATURE, prompt_main
+from config import INTRODUCTION, MAX_OUTPUT_TOKENS, MODEL_ID, PROMPT_MAIN, TEMPERATURE
 from judges import create_judges, run_all_judges
 from loguru import logger
 
@@ -39,7 +39,7 @@ class InterviewAgent(AgentClass):
             api_key=os.getenv("CEREBRAS_API_KEY"),
             tools=[end_call, self.start_interview],
             config=LlmConfig(
-                system_prompt=prompt_main,
+                system_prompt=PROMPT_MAIN,
                 introduction=INTRODUCTION,
                 temperature=TEMPERATURE,
                 max_tokens=MAX_OUTPUT_TOKENS,

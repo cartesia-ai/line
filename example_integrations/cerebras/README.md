@@ -133,19 +133,19 @@ class BackgroundJudge:
 
 ## Deploying to Cartesia
 
-1) Upload API keys to Cartesia:
-
-```bash
-cartesia env set CEREBRAS_API_KEY=your-cerebras-key
-```
-
-2) Init your agent:
+1) Init your agent:
 ```bash
 cartesia init
 ```
 
-3) Deploy the agent:
+2) Deploy the agent:
 
 ```
 cartesia deploy
+```
+
+3) Upload API keys to Cartesia:
+
+```bash
+cartesia env set CEREBRAS_API_KEY=your-cerebras-key
 ```

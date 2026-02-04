@@ -14,11 +14,11 @@ from typing import List, Optional
 
 from config import (
     MODEL_ID_BACK,
+    PROMPT_AGENT1,
+    PROMPT_AGENT2,
+    PROMPT_AGENT3,
+    SCHEMA_BACKGROUND,
     TEMPERATURE,
-    prompt_agent1,
-    prompt_agent2,
-    prompt_agent3,
-    schema_background,
 )
 from loguru import logger
 from pydantic import BaseModel, Field
@@ -63,7 +63,7 @@ class BackgroundJudge:
                         "json_schema": {
                             "name": "analysis_schema",
                             "strict": True,
-                            "schema": schema_background,
+                            "schema": SCHEMA_BACKGROUND,
                         },
                     }
                 },
@@ -132,9 +132,9 @@ def create_judges() -> tuple["BackgroundJudge", "BackgroundJudge", "BackgroundJu
     concurrent interviews (LlmAgent maintains per-conversation state).
     """
     return (
-        BackgroundJudge(prompt_agent1, "Technical Report"),
-        BackgroundJudge(prompt_agent2, "Communication Report"),
-        BackgroundJudge(prompt_agent3, "Reasoning Report"),
+        BackgroundJudge(PROMPT_AGENT1, "Technical Report"),
+        BackgroundJudge(PROMPT_AGENT2, "Communication Report"),
+        BackgroundJudge(PROMPT_AGENT3, "Reasoning Report"),
     )
 
 
