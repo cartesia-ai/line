@@ -201,6 +201,9 @@ class LlmAgent:
         self._background_event_queue: asyncio.Queue[tuple[AgentToolCalled, AgentToolReturned]] = (
             asyncio.Queue()
         )
+        # Cache for thought signatures (Gemini 3+ models)
+        # Maps tool_call_id -> thought_signature
+        self._tool_signatures: Dict[str, str] = {}
 
         logger.info(f"LlmAgent initialized with model={self._model}, tools={[t.name for t in self._tools]}")
 
@@ -313,6 +316,11 @@ class LlmAgent:
             # ==== END GENERATION CALL ==== #
 
             # ==== TOOL CALLS ==== #
+            # Store thought signatures for Gemini 3+ models before processing
+            for tc in tool_calls_dict.values():
+                if tc.thought_signature:
+                    self._tool_signatures[tc.id] = tc.thought_signature
+
             ctx = ToolEnv(turn_env=env)
             for tc in tool_calls_dict.values():
                 if not tc.is_complete:
@@ -469,6 +477,14 @@ class LlmAgent:
             elif isinstance(event, AgentSendText):
                 messages.append(Message(role="assistant", content=event.text))
             elif isinstance(event, AgentToolCalled):
+                # Look up thought_signature from cache (for Gemini 3+ models)
+                # The tool_call_id may have a suffix like "-0", "-1" for streaming tools
+                # Try exact match first, then try base ID without suffix
+                thought_sig = self._tool_signatures.get(event.tool_call_id)
+                if not thought_sig and "-" in event.tool_call_id:
+                    base_id = event.tool_call_id.rsplit("-", 1)[0]
+                    thought_sig = self._tool_signatures.get(base_id)
+
                 messages.append(
                     Message(
                         role="assistant",
@@ -478,6 +494,7 @@ class LlmAgent:
                                 id=event.tool_call_id,
                                 name=event.tool_name,
                                 arguments=json.dumps(event.tool_args),
+                                thought_signature=thought_sig,
                             )
                         ],
                     )
