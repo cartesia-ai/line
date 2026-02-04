@@ -511,3 +511,10 @@ class TestParseCommitted:
             f"Expected remaining to be 'c', got '{remaining}'. "
             "Non-latin partial commit should preserve remaining text."
         )
+
+    def test_emojis_spliced_back_like_whitespace(self):
+        """Emojis stripped by API harness are restored like whitespace."""
+        # API harness strips emojis from AgentTextSent, just like whitespace
+        committed, _, remaining = _parse_committed("Hello world", "Hello 👋 world")
+        assert committed == "Hello 👋 world"
+        assert remaining == ""
