@@ -49,7 +49,7 @@ from line.events import (
     UserTurnEnded,
     UserTurnStarted,
 )
-from line.harness_types import (
+from line._harness_types import (
     AgentSpeechInput,
     AgentStateInput,
     ConfigOutput,
