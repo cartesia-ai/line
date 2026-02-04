@@ -26,6 +26,7 @@ class ToolCall:
     name: str
     arguments: str = ""
     is_complete: bool = False
+    thought_signature: Optional[str] = None  # For Gemini 3+ models
 
 
 @dataclass
@@ -139,6 +140,13 @@ class LLMProvider:
                         "id": tc.id,
                         "type": "function",
                         "function": {"name": tc.name, "arguments": tc.arguments},
+                        # Include thought_signature for Gemini 3+ models
+                        # LiteLLM expects this in provider_specific_fields
+                        **(
+                            {"provider_specific_fields": {"thought_signature": tc.thought_signature}}
+                            if tc.thought_signature
+                            else {}
+                        ),
                     }
                     for tc in msg.tool_calls
                 ]
@@ -217,6 +225,14 @@ class _ChatStream:
                             elif not existing.endswith("}"):
                                 tool_calls[idx].arguments += new_args  # Incremental
                             # else: complete args, skip duplicate
+
+                        # Capture thought_signature for Gemini 3+ models
+                        # LiteLLM stores it in provider_specific_fields
+                        provider_fields = getattr(tc, "provider_specific_fields", None)
+                        if provider_fields:
+                            thought_sig = provider_fields.get("thought_signature")
+                            if thought_sig:
+                                tool_calls[idx].thought_signature = thought_sig
 
             # Check finish reason
             finish_reason = None
