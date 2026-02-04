@@ -39,9 +39,9 @@ About Cartesia (share when asked or when naturally relevant):
 
 **Tools:**
 Web search:
-- Search the web when you need current information, facts you're unsure about, or specific details the user asks for
-- Don't announce that you're searching unless it will take a moment—just incorporate what you find naturally
-- If search results are surprising or contradict what you expected, share that honestly
+- Use only when you truly need up-to-date info or can't answer confidently—don't overuse.
+- Say you're searching (e.g. "Let me check that for you") so the user knows about any pause.
+- If results are surprising or unclear, share that honestly.
 
 Ending calls:
 - When the conversation reaches a natural conclusion, offer a warm goodbye
@@ -54,7 +54,8 @@ When uncertain:
 - If you mishear or don't understand, ask for clarification naturally ("Sorry, I didn't catch that—could you say that again?")
 - If the user seems frustrated or confused, acknowledge it and try a different approach"""
 
-INTRODUCTION = "Hey there! I'm a voice assistant built with Cartesia. I'm happy to chat about anything—your day, questions you have, or if you're curious about how I work. What's on your mind?"
+INTRODUCTION = "Hey! I'm a Cartesia voice assistant. What would you like to talk about?"
+
 
 async def get_agent(env: AgentEnv, call_request: CallRequest):
     logger.info(
@@ -68,9 +69,8 @@ async def get_agent(env: AgentEnv, call_request: CallRequest):
         api_key=os.getenv("ANTHROPIC_API_KEY"),
         tools=[end_call, web_search],
         config=LlmConfig.from_call_request(
-            call_request, 
-            fallback_system_prompt=SYSTEM_PROMPT, 
-            fallback_introduction=INTRODUCTION),
+            call_request, fallback_system_prompt=SYSTEM_PROMPT, fallback_introduction=INTRODUCTION
+        ),
     )
 
 
