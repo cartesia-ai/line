@@ -30,6 +30,7 @@ from line.events import (
     LogMessage,
     LogMetric,
     OutputEvent,
+    UpdateCall,
     UserDtmfSent,
     UserTextSent,
     UserTurnEnded,
@@ -40,6 +41,7 @@ from line.events import (
 from line.harness_types import (
     AgentSpeechInput,
     AgentStateInput,
+    ConfigOutput,
     DTMFInput,
     DTMFOutput,
     EndCallOutput,
@@ -52,6 +54,7 @@ from line.harness_types import (
     ToolCallOutput,
     TranscriptionInput,
     TransferOutput,
+    TTSConfig,
     UserStateInput,
 )
 from line.voice_agent_app import (
@@ -87,6 +90,7 @@ __all__ = [
     "AgentToolReturned",
     "LogMetric",
     "LogMessage",
+    "UpdateCall",
     "OutputEvent",
     # Input events
     "CallStarted",
@@ -117,4 +121,6 @@ __all__ = [
     "EndCallOutput",
     "LogEventOutput",
     "LogMetricOutput",
+    "ConfigOutput",
+    "TTSConfig",
 ]
