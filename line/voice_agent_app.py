@@ -57,13 +57,13 @@ from line.events import (
     AgentTransferCall,
     AgentTurnEnded,
     AgentTurnStarted,
+    AgentUpdateCall,
     CallEnded,
     CallStarted,
     InputEvent,
     LogMessage,
     LogMetric,
     OutputEvent,
-    UpdateCall,
     UserDtmfSent,
     UserTextSent,
     UserTurnEnded,
@@ -569,7 +569,7 @@ class ConversationRunner:
             logger.info(f"<- 🔧 Tool returned: {event.tool_name}({event.tool_args}) -> {event.result}")
             result_str = str(event.result) if event.result is not None else None
             return ToolCallOutput(name=event.tool_name, arguments=event.tool_args, result=result_str)
-        if isinstance(event, UpdateCall):
+        if isinstance(event, AgentUpdateCall):
             logger.info(
                 f"<- ⚙️ Update call: voice_id={event.voice_id}, "
                 f"language={event.language}, pronunciation_dict_id={event.pronunciation_dict_id}"

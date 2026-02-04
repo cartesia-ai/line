@@ -23,6 +23,7 @@ from line.events import (
     AgentTransferCall,
     AgentTurnEnded,
     AgentTurnStarted,
+    AgentUpdateCall,
     CallEnded,
     # Input events
     CallStarted,
@@ -30,7 +31,6 @@ from line.events import (
     LogMessage,
     LogMetric,
     OutputEvent,
-    UpdateCall,
     UserDtmfSent,
     UserTextSent,
     UserTurnEnded,
@@ -69,7 +69,7 @@ __all__ = [
     "AgentToolReturned",
     "LogMetric",
     "LogMessage",
-    "UpdateCall",
+    "AgentUpdateCall",
     "OutputEvent",
     # Input events
     "CallStarted",
