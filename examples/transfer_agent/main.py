@@ -5,7 +5,7 @@ from loguru import logger
 from line.llm_agent import LlmAgent, LlmConfig, agent_as_handoff, end_call
 from line.voice_agent_app import AgentEnv, CallRequest, VoiceAgentApp
 
-#  OPENAI_API_KEY=your-key GEMINI_API_KEY=your-key uv run python main.py
+#  ANTHROPIC_API_KEY=your-key uv run python main.py
 
 
 async def get_agent(env: AgentEnv, call_request: CallRequest):
@@ -13,8 +13,8 @@ async def get_agent(env: AgentEnv, call_request: CallRequest):
 
     # Create the Spanish-speaking agent
     spanish_agent = LlmAgent(
-        model="gpt-4o",
-        api_key=os.getenv("OPENAI_API_KEY"),
+        model="anthropic/claude-haiku-4-5-20251001",
+        api_key=os.getenv("ANTHROPIC_API_KEY"),
         tools=[end_call],
         config=LlmConfig(
             system_prompt=(
@@ -27,8 +27,8 @@ async def get_agent(env: AgentEnv, call_request: CallRequest):
     )
 
     return LlmAgent(
-        model="gemini/gemini-2.5-flash-preview-09-2025",
-        api_key=os.getenv("GEMINI_API_KEY"),
+        model="anthropic/claude-haiku-4-5-20251001",
+        api_key=os.getenv("ANTHROPIC_API_KEY"),
         tools=[
             end_call,
             agent_as_handoff(
