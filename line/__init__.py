@@ -36,7 +36,6 @@ from line.events import (
     UserTurnEnded,
     UserTurnStarted,
 )
-
 from line.voice_agent_app import (
     AgentConfig,
     AgentEnv,

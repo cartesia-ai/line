@@ -25,6 +25,26 @@ from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 import uvicorn
 
+from line._harness_types import (
+    AgentSpeechInput,
+    AgentStateInput,
+    ConfigOutput,
+    DTMFInput,
+    DTMFOutput,
+    EndCallOutput,
+    ErrorOutput,
+    InputMessage,
+    LogEventOutput,
+    LogMetricOutput,
+    MessageOutput,
+    OutputMessage,
+    STTConfig,
+    ToolCallOutput,
+    TranscriptionInput,
+    TransferOutput,
+    TTSConfig,
+    UserStateInput,
+)
 from line.agent import Agent, AgentSpec, EventFilter, TurnEnv
 from line.events import (
     AgentDtmfSent,
@@ -48,25 +68,6 @@ from line.events import (
     UserTextSent,
     UserTurnEnded,
     UserTurnStarted,
-)
-from line._harness_types import (
-    AgentSpeechInput,
-    AgentStateInput,
-    ConfigOutput,
-    DTMFInput,
-    DTMFOutput,
-    EndCallOutput,
-    ErrorOutput,
-    InputMessage,
-    LogEventOutput,
-    LogMetricOutput,
-    MessageOutput,
-    OutputMessage,
-    ToolCallOutput,
-    TranscriptionInput,
-    TransferOutput,
-    TTSConfig,
-    UserStateInput,
 )
 
 
@@ -578,7 +579,9 @@ class ConversationRunner:
                     voice_id=event.voice_id,
                     language=event.language,
                     pronunciation_dict_id=event.pronunciation_dict_id,
-                )
+                ),
+                # Set STT language when language is specified
+                stt=STTConfig(language=event.language) if event.language else None,
             )
 
         return ErrorOutput(content=f"Unhandled output event type: {type(event).__name__}")
