@@ -361,9 +361,7 @@ class LlmAgent:
                             n += 1
                     except Exception as e:
                         # Use negative limit to show last 10 frames (most relevant)
-                        logger.error(
-                            f"Error in Tool Call to \"{tc.name}\":\n{traceback.format_exc(limit=-10)}"
-                        )
+                        logger.error(f'Error in Tool Call to "{tc.name}":\n{traceback.format_exc(limit=-10)}')
                         tool_called_output, tool_returned_output = _construct_tool_events(
                             f"{tc.id}-{n}", tc.name, tool_args, f"error: {e}"
                         )
@@ -397,9 +395,7 @@ class LlmAgent:
                         yield tool_returned_output
                     except Exception as e:
                         # Use negative limit to show last 10 frames (most relevant)
-                        logger.error(
-                            f"Error in Tool Call to \"{tc.name}\":\n{traceback.format_exc(limit=-10)}"
-                        )
+                        logger.error(f'Error in Tool Call to "{tc.name}":\n{traceback.format_exc(limit=-10)}')
                         # Emit AgentToolReturned with error
                         tool_returned_output = AgentToolReturned(
                             tool_call_id=tc.id,
@@ -455,9 +451,7 @@ class LlmAgent:
                         self._handoff_target = handoff_target
                     except Exception as e:
                         # Use negative limit to show last 10 frames (most relevant)
-                        logger.error(
-                            f"Error in Tool Call to \"{tc.name}\":\n{traceback.format_exc(limit=-10)}"
-                        )
+                        logger.error(f'Error in Tool Call to "{tc.name}":\n{traceback.format_exc(limit=-10)}')
                         # Emit AgentToolReturned with error
                         tool_returned_output = AgentToolReturned(
                             tool_call_id=tc.id,
@@ -467,7 +461,6 @@ class LlmAgent:
                         )
                         self._append_to_local_history(tool_returned_output)
                         yield tool_returned_output
-
 
             # ==== END TOOL CALLS ==== #
 
@@ -599,9 +592,7 @@ class LlmAgent:
                     n += 1
             except Exception as e:
                 # Use negative limit to show last 10 frames (most relevant)
-                logger.error(
-                    f"Error in Tool Call {tc_name}: {e}\n{traceback.format_exc(limit=-10)}"
-                )
+                logger.error(f"Error in Tool Call {tc_name}: {e}\n{traceback.format_exc(limit=-10)}")
                 called, returned = _construct_tool_events(f"{tc_id}-{n}", tc_name, tool_args, f"error: {e}")
                 # Add to local history with the triggering event_id
                 self._local_history.append((triggering_event_id, called))

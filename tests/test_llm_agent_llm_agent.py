@@ -1678,7 +1678,9 @@ class TestBuildMessagesPendingToolResults:
         local_history = self._annotate(
             [
                 AgentToolCalled(tool_call_id="call_1", tool_name="get_weather", tool_args={}),
-                AgentToolReturned(tool_call_id="call_1", tool_name="get_weather", tool_args={}, result="sunny"),
+                AgentToolReturned(
+                    tool_call_id="call_1", tool_name="get_weather", tool_args={}, result="sunny"
+                ),
                 AgentToolCalled(tool_call_id="call_2", tool_name="get_time", tool_args={}),
                 # No AgentToolReturned for call_2!
             ],
@@ -1750,7 +1752,9 @@ class TestBuildMessagesPendingToolResults:
             [
                 AgentToolCalled(tool_call_id="call_1", tool_name="get_weather", tool_args={}),
                 AgentToolCalled(tool_call_id="call_2", tool_name="other_tool", tool_args={}),
-                AgentToolReturned(tool_call_id="call_1", tool_name="get_weather", tool_args={}, result="sunny"),
+                AgentToolReturned(
+                    tool_call_id="call_1", tool_name="get_weather", tool_args={}, result="sunny"
+                ),
                 # call_2 has no result - should be pending
             ],
             event_id=user0.event_id,
