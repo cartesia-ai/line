@@ -38,7 +38,6 @@ from line._harness_types import (
     LogMetricOutput,
     MessageOutput,
     OutputMessage,
-    STTConfig,
     ToolCallOutput,
     TranscriptionInput,
     TransferOutput,
@@ -572,16 +571,13 @@ class ConversationRunner:
         if isinstance(event, AgentUpdateCall):
             logger.info(
                 f"<- ⚙️ Update call: voice_id={event.voice_id}, "
-                f"language={event.language}, pronunciation_dict_id={event.pronunciation_dict_id}"
+                f"pronunciation_dict_id={event.pronunciation_dict_id}"
             )
             return ConfigOutput(
                 tts=TTSConfig(
                     voice_id=event.voice_id,
-                    language=event.language,
                     pronunciation_dict_id=event.pronunciation_dict_id,
                 ),
-                # Set STT language when language is specified
-                stt=STTConfig(language=event.language) if event.language else None,
             )
 
         return ErrorOutput(content=f"Unhandled output event type: {type(event).__name__}")

@@ -69,7 +69,6 @@ class LogMessage(BaseModel):
 class AgentUpdateCall(BaseModel):
     type: Literal["update_call"] = "update_call"
     voice_id: Optional[str] = None
-    language: Optional[str] = None
     pronunciation_dict_id: Optional[str] = None
 
 
