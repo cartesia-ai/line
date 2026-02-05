@@ -7,6 +7,7 @@ See README.md for examples and documentation.
 import asyncio
 import inspect
 import json
+import traceback
 from typing import (
     Any,
     AsyncIterable,
@@ -343,86 +344,102 @@ class LlmAgent:
                     self._execute_backgroundable_tool(normalized_func, ctx, tool_args, tc.id, tc.name)
                     continue
 
-                try:
-                    if tool.tool_type == ToolType.LOOPBACK:
-                        should_loopback = True
-                        # Regular loopback tool: collect results to send back to LLM
-                        n = 0
-                        try:
-                            async for value in normalized_func(ctx, **tool_args):
-                                call_id = f"{tc.id}-{n}"
-                                tool_called_output, tool_returned_output = _construct_tool_events(
-                                    call_id, tc.name, tool_args, value
-                                )
-                                self._append_to_local_history(tool_called_output)
-                                self._append_to_local_history(tool_returned_output)
-                                yield tool_called_output
-                                yield tool_returned_output
-                                n += 1
-                        except Exception as e:
-                            logger.error(f"Loopback tool execution error: {e}")
+                if tool.tool_type == ToolType.LOOPBACK:
+                    should_loopback = True
+                    # Regular loopback tool: collect results to send back to LLM
+                    n = 0
+                    try:
+                        async for value in normalized_func(ctx, **tool_args):
+                            call_id = f"{tc.id}-{n}"
                             tool_called_output, tool_returned_output = _construct_tool_events(
-                                f"{tc.id}-{n}", tc.name, tool_args, f"error: {e}"
+                                call_id, tc.name, tool_args, value
                             )
                             self._append_to_local_history(tool_called_output)
                             self._append_to_local_history(tool_returned_output)
                             yield tool_called_output
                             yield tool_returned_output
-
-                    elif tool.tool_type == ToolType.PASSTHROUGH:
-                        # Emit AgentToolCalled before executing
-                        # This is a hack to deal with the fact that most LLMs
-                        # expect a tool call/tool call response pair
-                        # to come back to back
-                        # for better error management, we should wait till the passthrough
-                        # completes before emitting the returned event
-                        # and include the error in it if any:
-                        # https://linear.app/cartesia/issue/PRO-1669/fix-error-management-for-tool-calls
+                            n += 1
+                    except Exception as e:
+                        # Use negative limit to show last 10 frames (most relevant)
+                        logger.error(
+                            f"Error in Tool Call to \"{tc.name}\":\n{traceback.format_exc(limit=-10)}"
+                        )
                         tool_called_output, tool_returned_output = _construct_tool_events(
-                            tc.id, tc.name, tool_args, "success"
+                            f"{tc.id}-{n}", tc.name, tool_args, f"error: {e}"
                         )
                         self._append_to_local_history(tool_called_output)
                         self._append_to_local_history(tool_returned_output)
                         yield tool_called_output
                         yield tool_returned_output
 
-                        try:
-                            async for evt in normalized_func(ctx, **tool_args):
-                                self._append_to_local_history(evt)
-                                yield evt
-                        except Exception as e:
-                            logger.error(f"Passthrough tool execution error: {e}")
+                elif tool.tool_type == ToolType.PASSTHROUGH:
+                    # Emit AgentToolCalled before executing
+                    tool_called_output = AgentToolCalled(
+                        tool_call_id=tc.id,
+                        tool_name=tc.name,
+                        tool_args=tool_args,
+                    )
+                    self._append_to_local_history(tool_called_output)
+                    yield tool_called_output
 
-                    elif tool.tool_type == ToolType.HANDOFF:
-                        # Emit AgentToolCalled before executing
-                        # This is a hack to deal with the fact that most LLMs
-                        # expect a tool call/tool call response pair
-                        # to come back to back
-                        # for better error management, we should wait till the handoff generation
-                        # completes before emitting the returned event
-                        # and include the error in it if any:
-                        # https://linear.app/cartesia/issue/PRO-1669/fix-error-management-for-tool-calls
-                        tool_called_output, tool_returned_output = _construct_tool_events(
-                            tc.id, tc.name, tool_args, "success"
+                    try:
+                        async for evt in normalized_func(ctx, **tool_args):
+                            self._append_to_local_history(evt)
+                            yield evt
+                        # Emit AgentToolReturned after successful completion
+                        tool_returned_output = AgentToolReturned(
+                            tool_call_id=tc.id,
+                            tool_name=tc.name,
+                            tool_args=tool_args,
+                            result="success",
                         )
-                        self._append_to_local_history(tool_called_output)
                         self._append_to_local_history(tool_returned_output)
-                        yield tool_called_output
+                        yield tool_returned_output
+                    except Exception as e:
+                        # Use negative limit to show last 10 frames (most relevant)
+                        logger.error(
+                            f"Error in Tool Call to \"{tc.name}\":\n{traceback.format_exc(limit=-10)}"
+                        )
+                        # Emit AgentToolReturned with error
+                        tool_returned_output = AgentToolReturned(
+                            tool_call_id=tc.id,
+                            tool_name=tc.name,
+                            tool_args=tool_args,
+                            result=f"error: {e}",
+                        )
+                        self._append_to_local_history(tool_returned_output)
                         yield tool_returned_output
 
-                        # AgentHandedOff input event is passed to the handoff target to execute the tool
-                        handed_off_event = AgentHandedOff()
-                        event = AgentHandedOff(
-                            history=event.history + [handed_off_event],
-                            **{k: v for k, v in handed_off_event.model_dump().items() if k != "history"},
+                elif tool.tool_type == ToolType.HANDOFF:
+                    # Emit AgentToolCalled before executing
+                    tool_called_output = AgentToolCalled(
+                        tool_call_id=tc.id,
+                        tool_name=tc.name,
+                        tool_args=tool_args,
+                    )
+                    self._append_to_local_history(tool_called_output)
+                    yield tool_called_output
+
+                    # AgentHandedOff input event is passed to the handoff target to execute the tool
+                    handed_off_event = AgentHandedOff()
+                    event = AgentHandedOff(
+                        history=event.history + [handed_off_event],
+                        **{k: v for k, v in handed_off_event.model_dump().items() if k != "history"},
+                    )
+                    self._append_to_local_history(event)
+                    try:
+                        async for item in normalized_func(ctx, **tool_args, event=event):
+                            self._append_to_local_history(item)
+                            yield item
+                        # Emit AgentToolReturned after successful completion
+                        tool_returned_output = AgentToolReturned(
+                            tool_call_id=tc.id,
+                            tool_name=tc.name,
+                            tool_args=tool_args,
+                            result="success",
                         )
-                        self._append_to_local_history(event)
-                        try:
-                            async for item in normalized_func(ctx, **tool_args, event=event):
-                                self._append_to_local_history(item)
-                                yield item
-                        except Exception as e:
-                            logger.error(f"Handoff tool execution error: {e}")
+                        self._append_to_local_history(tool_returned_output)
+                        yield tool_returned_output
 
                         # Format the handoff target to be called on all future events
                         # Use default args to bind loop variables
@@ -436,9 +453,22 @@ class LlmAgent:
                             return _normalized_func(tool_env, **_tool_args.copy(), event=event)
 
                         self._handoff_target = handoff_target
+                    except Exception as e:
+                        # Use negative limit to show last 10 frames (most relevant)
+                        logger.error(
+                            f"Error in Tool Call to \"{tc.name}\":\n{traceback.format_exc(limit=-10)}"
+                        )
+                        # Emit AgentToolReturned with error
+                        tool_returned_output = AgentToolReturned(
+                            tool_call_id=tc.id,
+                            tool_name=tc.name,
+                            tool_args=tool_args,
+                            result=f"error: {e}",
+                        )
+                        self._append_to_local_history(tool_returned_output)
+                        yield tool_returned_output
 
-                except Exception as e:
-                    logger.error(f"Tool execution error: {e}")
+
             # ==== END TOOL CALLS ==== #
 
             has_background_events = not self._background_event_queue.empty()
@@ -459,12 +489,19 @@ class LlmAgent:
         2. Local history events are interpolated based on which input event triggered them
         3. Observable events are matched between local and input history
         4. Unobservable events (tool calls) are interpolated relative to observables
+        5. Tool calls without matching results get a "pending" result
 
         The full_history contains:
         - InputEvent (with history=None) for events from input_history
         - OutputEvent for unobservable/current events from local_history
         """
         full_history = _build_full_history(input_history, local_history, current_event_id)
+
+        # First pass: collect all tool_call_ids that have matching AgentToolReturned
+        returned_tool_call_ids: set[str] = set()
+        for event in full_history:
+            if isinstance(event, AgentToolReturned):
+                returned_tool_call_ids.add(event.tool_call_id)
 
         messages = []
         for event in full_history:
@@ -499,6 +536,17 @@ class LlmAgent:
                         ],
                     )
                 )
+
+                # If this tool call doesn't have a matching result, add a pending result
+                if event.tool_call_id not in returned_tool_call_ids:
+                    messages.append(
+                        Message(
+                            role="tool",
+                            content="pending",
+                            tool_call_id=event.tool_call_id,
+                            name=event.tool_name,
+                        )
+                    )
             elif isinstance(event, AgentToolReturned):
                 messages.append(
                     Message(
@@ -550,7 +598,10 @@ class LlmAgent:
                     await self._background_event_queue.put((called, returned))
                     n += 1
             except Exception as e:
-                logger.error(f"Background tool execution error: {e}")
+                # Use negative limit to show last 10 frames (most relevant)
+                logger.error(
+                    f"Error in Tool Call {tc_name}: {e}\n{traceback.format_exc(limit=-10)}"
+                )
                 called, returned = _construct_tool_events(f"{tc_id}-{n}", tc_name, tool_args, f"error: {e}")
                 # Add to local history with the triggering event_id
                 self._local_history.append((triggering_event_id, called))
