@@ -23,6 +23,7 @@ from line.llm_agent import LlmAgent, LlmConfig, ToolEnv, end_call, loopback_tool
 from line.voice_agent_app import AgentEnv, CallRequest, VoiceAgentApp
 
 MODEL = "anthropic/claude-haiku-4-5-20251001"
+RESEARCH_MODEL = "anthropic/claude-opus-4-20250514"
 
 
 @dataclass
@@ -143,7 +144,7 @@ class SalesWithLeadsAgent(AgentClass):
 
         # Research agent for company research
         self._researcher = LlmAgent(
-            model=MODEL,
+            model=RESEARCH_MODEL,
             api_key=self._api_key,
             tools=[web_search],
             config=LlmConfig(

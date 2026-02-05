@@ -27,7 +27,7 @@ ANTHROPIC_API_KEY=your-key uv run python main.py
 │  │  - budget       │◀─────────────────────────────────────────────────┘│    │
 │  │  - next_steps   │      ┌──────────────────────────────────────┐     │    │
 │  │  - notes        │      │    Leads Extractor Agent             │     │    │
-│  └─────────────────┘      │      (claude-haiku-4-5-20251001)              │◀────┘    │
+│  └─────────────────┘      │      (claude-haiku-4-5-20251001)     │◀────┘    │
 │                           │                                      │          │
 │  ┌─────────────────┐      │  Extracts structured lead info       │          │
 │  │  Company Cache  │      │  and returns JSON                    │          │
@@ -35,7 +35,7 @@ ANTHROPIC_API_KEY=your-key uv run python main.py
 │  │ {company: info} │                                                        │
 │  └─────────────────┘      ┌──────────────────────────────────────┐          │
 │           ▲               │       Researcher Agent               │◀─────────┘
-│           │               │      (claude-haiku-4-5-20251001)              │
+│           │               │      (claude-opus-4-20250514)        │
 │           └───────────────│                                      │
 │                           │  Tools: [web_search]                 │
 │                           └──────────────────────────────────────┘
@@ -75,7 +75,7 @@ class SalesWithLeadsAgent(AgentClass):
 
         # Research agent (like _supervisor in chat_supervisor)
         self._researcher = LlmAgent(
-            model="anthropic/cclaude-haiku-4-5-20251001",
+            model="anthropic/claude-opus-4-20250514",
             tools=[web_search],
             config=LlmConfig(system_prompt=RESEARCH_PROMPT),
         )
