@@ -12,7 +12,7 @@ This is the simplest Line SDK agent - a basic conversational chatbot. Use it as 
 from line.llm_agent import LlmAgent, LlmConfig
 
 agent = LlmAgent(
-    model="gpt-5-nano-2025-08-07",  # LiteLLM format - use fast model for main loop
+    model="gpt-5-nano-2025-08-07",  # LiteLLM format
     api_key=None,  # Falls back to env vars (ANTHROPIC_API_KEY, etc.)
     tools=[...],
     config=LlmConfig(...),
