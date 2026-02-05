@@ -1,126 +1,139 @@
 # Sales with Leads Extraction and Research
 
-This template creates a potential Sales Representative agent with a few background tasks :
+A sales representative voice agent with stateful leads extraction and company research. Uses a three-agent architecture similar to `chat_supervisor`.
 
-- The `ChatNode` is responsible for maintaining a good smooth low latency conversation with the user.
-- The `LeadsExtractionNode` is responsible for identifying JSON object based on the conversation with the user. This JSON will define a `Leads` object, that contains their name, phone, email, company, etc if we manage to identify that in a conversation.
-- The `ResearchNode` that is responsible for running a quick research on the company if identified by the `LeadsExtractionNode` and providing it to the `ChatNode`.
+## Quick Start
 
-## Key Advanced Features
-
-This example demonstrates three core capabilities on the SDK :
-
-### 🎯 Feature 1: Custom Event Generation with LeadsExtractionNode
-
-**What it does**: Automatically extracts contact information, company details, and sales insights from natural conversations and publishes them as structured events.
-
-The `LeadsExtractionNode` is a specialized `ReasoningNode` that triggers on every `UserStoppedSpeaking` event to analyze the conversation and extract lead information:
-
-**Extraction**
-
-```python
-class LeadsAnalysis(BaseModel):
-    """Leads analysis results from conversation."""
-
-    leads_info: dict
-    confidence: str = "medium"
-    timestamp: str
-
-class LeadsExtractionNode(ReasoningNode):
-    async def _process_context(self, context: ConversationContext) -> AsyncGenerator[LeadsAnalysis, None]:
-        # Convert conversation context using same pattern as ChatNode
-        messages = convert_messages_to_gemini(context.events)
-
-        # Stream Gemini response for leads extraction
-        stream = await self.client.aio.models.generate_content_stream(
-            model=self.model_id,
-            contents=messages,
-            config=self.generation_config,
-        )
-
-        # Process and validate extracted leads information
-        leads_info = LeadsInfo.model_validate(leads_data)
-
-        # Yield structured LeadsAnalysis event
-        yield LeadsAnalysis(
-            leads_info=leads_info.model_dump(),
-            confidence="high",
-            timestamp=datetime.now(timezone.utc).isoformat(),
-        )
+```bash
+ANTHROPIC_API_KEY=your-key uv run python main.py
 ```
 
-**Bridge Configuration**
+## Architecture
 
-```python
-# Leads extraction triggers on user speech completion
-leads_node = LeadsExtractionNode(gemini_client=leads_client)
-leads_bridge = Bridge(leads_node)
-leads_bridge.on(UserTranscriptionReceived).map(leads_node.add_event)
-leads_bridge.on(UserStoppedSpeaking).stream(leads_node.generate).broadcast()
+```
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                          SalesWithLeadsAgent                                 │
+│                                                                              │
+│  ┌─────────────────┐      ┌──────────────────────────────────────┐          │
+│  │   LeadsState    │      │         Chat Agent                   │          │
+│  │   (dataclass)   │      │      (claude-haiku-4-5-20251001)              │          │
+│  │                 │      │                                      │          │
+│  │  - name         │      │  Tools:                              │          │
+│  │  - company      │      │  ├── extract_leads ──────────────────┼─────┐    │
+│  │  - phone        │      │  ├── research_company ───────────────┼────┐│    │
+│  │  - email        │      │  └── end_call                        │    ││    │
+│  │  - interest     │      └──────────────────────────────────────┘    ││    │
+│  │  - pain_points  │                                                  ││    │
+│  │  - budget       │◀─────────────────────────────────────────────────┘│    │
+│  │  - next_steps   │      ┌──────────────────────────────────────┐     │    │
+│  │  - notes        │      │    Leads Extractor Agent             │     │    │
+│  └─────────────────┘      │      (claude-haiku-4-5-20251001)     │◀────┘    │
+│                           │                                      │          │
+│  ┌─────────────────┐      │  Extracts structured lead info       │          │
+│  │  Company Cache  │      │  and returns JSON                    │          │
+│  │                 │      └──────────────────────────────────────┘          │
+│  │ {company: info} │                                                        │
+│  └─────────────────┘      ┌──────────────────────────────────────┐          │
+│           ▲               │       Researcher Agent               │◀─────────┘
+│           │               │      (claude-opus-4-20250514)        │
+│           └───────────────│                                      │
+│                           │  Tools: [web_search]                 │
+│                           └──────────────────────────────────────┘
+└──────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 🔗 Feature 2: Event Handlers for Context Integration
+## How It Works
 
-Extracting the leads is not usually enough, it may be helpful to append these back to the
-`ChatNode` conversation context. The SDK allows converting new `Events` into conversation context.
+This agent has three LLM agents:
 
-The `EVENT_HANDLERS` example below shows how to transform custom events into formatted conversation context that the LLM can understand and reference.
+1. **Chat Agent** (`_chatter`) - Handles the sales conversation (Haiku)
+2. **Leads Extractor** (`_leads_extractor`) - Extracts structured lead info (Haiku)
+3. **Researcher Agent** (`_researcher`) - Researches companies via web_search (Opus)
 
+### Tools
+
+- **extract_leads**: Delegates to `_leads_extractor` agent
+  - Extracts lead info from conversation summary
+  - Merges into `LeadsState` (accumulates, doesn't overwrite)
+  - Returns current state + missing required fields
+
+- **research_company**: Delegates to `_researcher` agent
+  - Uses web_search to find company info, pain points, key people
+  - Caches results to avoid duplicate research
+  - Returns structured JSON + research summary
+
+## Key Pattern
 
 ```python
-def leads_analysis_handler(event: LeadsAnalysis) -> types.UserContent:
-    """Convert LeadsAnalysis event to Gemini UserContent format."""
-    leads_json = json.dumps(event.leads_info, indent=2)
-    leads_message = f"[LEADS_ANALYSIS] {leads_json} [/LEADS_ANALYSIS]"
-    return types.UserContent(parts=[types.Part.from_text(text=leads_message)])
+class SalesWithLeadsAgent(AgentClass):
+    def __init__(self):
+        # Leads extraction agent
+        self._leads_extractor = LlmAgent(
+            model="anthropic/claude-haiku-4-5-20251001",
+            config=LlmConfig(system_prompt=LEADS_EXTRACTION_PROMPT),
+        )
 
-# Register handlers for automatic processing
-EVENT_HANDLERS = {
-    LeadsAnalysis: leads_analysis_handler,
+        # Research agent (like _supervisor in chat_supervisor)
+        self._researcher = LlmAgent(
+            model="anthropic/claude-opus-4-20250514",
+            tools=[web_search],
+            config=LlmConfig(system_prompt=RESEARCH_PROMPT),
+        )
+
+        # Main chat agent
+        self._chatter = LlmAgent(
+            model="anthropic/claude-haiku-4-5-20251001",
+            tools=[self.extract_leads, self.research_company, end_call],
+            config=LlmConfig(system_prompt=SALES_SYSTEM_PROMPT),
+        )
+
+    @loopback_tool
+    async def extract_leads(self, ctx, conversation_summary):
+        """Delegates to _leads_extractor agent."""
+        async for output in self._leads_extractor.process(ctx.turn_env, request):
+            ...
+
+    @loopback_tool(is_background=True)
+    async def research_company(self, ctx, company_name, contact_name=None):
+        """Delegates to _researcher agent."""
+        async for output in self._researcher.process(ctx.turn_env, request):
+            ...
+```
+
+## Stateful Leads Accumulation
+
+```python
+@dataclass
+class LeadsState:
+    name: str = ""
+    company: str = ""
+    phone: str = ""
+    email: str = ""
+    interest_level: str = "unknown"
+    pain_points: list[str] = field(default_factory=list)
+    budget_mentioned: bool = False
+    next_steps: str = ""
+    notes: str = ""
+
+    def merge(self, extracted: dict) -> list[str]:
+        """Merge new data, accumulate pain_points and notes."""
+```
+
+## Research Output
+
+The `research_company` tool returns structured JSON:
+
+```json
+{
+  "company_overview": "1-2 sentence company description",
+  "pain_points": ["Challenge 1", "Challenge 2"],
+  "key_people": ["CEO Name", "CTO Name"],
+  "sales_opportunities": ["Voice AI opportunity 1", "Opportunity 2"]
 }
 ```
 
-```python
-# Automatically process all events including custom LeadsAnalysis
-messages = convert_messages_to_gemini(context.events, handlers=EVENT_HANDLERS)
-```
+## Environment Variables
 
-
-```python
-# ChatNode automatically receives and processes custom events
-conversation_bridge.on(LeadsAnalysis).map(chat_node.add_event)
-```
-
-### 🔬 Feature 3: Concurrent Research with Background Processing
-
-You may have operations that are even more intensive, that take much longer to perform. You can push those actions to the background, and flexibly manage context for such cases. Eg: Run a web search analysis using Google on the person and their company as you're talking to them.
-
-The `ResearchNode` uses Gemini Live API with integrated Google Search to automatically research companies mentioned in leads, providing rich context for sales conversations:
-
-
-**Google Search Integration** (`research_node.py:205-235`):
-```python
-async def _perform_research(self, leads_info: dict) -> tuple[dict, str]:
-    """Perform Google Search research using Gemini Live API."""
-    async with self.live_client.aio.live.connect(
-        model=self.model_id, config=self.live_config
-    ) as stream:
-        # Send research prompt
-        search_content = types.Content(role="user", parts=[types.Part(text=search_prompt)])
-        await stream.send_client_content(turns=[search_content], turn_complete=True)
-
-        # Collect research response and search metadata
-        async for msg in stream.receive():
-            if msg.text:
-                research_summary += msg.text
-            search_queries.update(self._parse_search_queries(msg))
-            search_pages.update(self._parse_search_pages(msg))
-```
-
-**Concurrent Pipeline Configuration** (`main.py:55-57`):
-```python
-# Research runs in parallel, triggered by LeadsAnalysis events
-research_node = ResearchNode(gemini_client=research_client)
-research_bridge = Bridge(research_node)
-research_bridge.on(LeadsAnalysis).map(research_node.add_event).stream(research_node.generate).broadcast()
-```
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `ANTHROPIC_API_KEY` | Yes | Anthropic API key |
