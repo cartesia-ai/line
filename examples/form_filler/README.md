@@ -15,7 +15,7 @@ This example creates a voice agent that:
 
 ```bash
 cd examples/form_filler
-GEMINI_API_KEY=your-key uv run python main.py
+ANTHROPIC_API_KEY=your-key uv run python main.py
 ```
 
 ## How It Works

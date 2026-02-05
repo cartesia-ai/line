@@ -200,7 +200,7 @@ You are conducting a questionnaire to collect information from the user.
 - Current question to ask: {self.get_current_question_text() or "Form complete"}"""
 
         if self.system_prompt:
-            return f"{self.system_prompt}\n\n{form_prompt}"
+            return f"{self.system_prompt} Further instructions:\n\n{form_prompt}"
         return form_prompt
 
     def _get_remaining_questions(self) -> list[str]:
