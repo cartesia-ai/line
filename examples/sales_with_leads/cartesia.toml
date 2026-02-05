@@ -1,7 +1,7 @@
 [cartesia]
 name = "Sales with Leads"
 description = "Sales agent with stateful leads extraction and company research"
-version = "1.0.0"
+version = "2.0.0"
 
 [cartesia.server]
 port = 8000

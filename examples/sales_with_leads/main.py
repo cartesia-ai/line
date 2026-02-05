@@ -543,18 +543,15 @@ Use web_search with focused queries combining: company name + "overview" or "bus
 4. Recent news or developments
 
 ### Output Requirements:
-- Keep total response under 150 words
-- Focus on sales-relevant insights only
-- Prioritize actionable information over general details
-- Focus on official sources and recent information
-
-CRITICAL: End your response with a concise JSON summary (max 2-3 items per field):
+CRITICAL: You MUST respond with ONLY valid JSON. Your entire response must be a JSON object with the following structure (max 2-3 items per array field):
 {
-    "company_overview": "1-2 sentence company description",
+    "company_overview": "1-2 sentence company description with key details about size, industry, and business model",
     "pain_points": ["Top 2 potential challenges voice AI could solve"],
     "key_people": ["Top 2 key executives if found"],
     "sales_opportunities": ["Top 2 voice AI opportunities for this company"]
 }
+
+Focus on sales-relevant insights only. Prioritize actionable information over general details.
 """
 
 
