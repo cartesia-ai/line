@@ -66,6 +66,12 @@ class LogMessage(BaseModel):
     metadata: Optional[Dict[str, Any]] = None
 
 
+class AgentUpdateCall(BaseModel):
+    type: Literal["update_call"] = "update_call"
+    voice_id: Optional[str] = None
+    pronunciation_dict_id: Optional[str] = None
+
+
 OutputEvent = Union[
     AgentSendText,
     AgentSendDtmf,
@@ -75,6 +81,7 @@ OutputEvent = Union[
     AgentToolReturned,
     LogMetric,
     LogMessage,
+    AgentUpdateCall,
 ]
 
 
@@ -190,6 +197,7 @@ __all__ = [
     "AgentHandedOff",
     "LogMetric",
     "LogMessage",
+    "AgentUpdateCall",
     "OutputEvent",
     # Input
     "CallStarted",

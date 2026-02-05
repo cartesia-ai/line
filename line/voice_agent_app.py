@@ -25,32 +25,10 @@ from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 import uvicorn
 
-from line.agent import Agent, AgentSpec, EventFilter, TurnEnv
-from line.events import (
-    AgentDtmfSent,
-    AgentEndCall,
-    AgentSendDtmf,
-    AgentSendText,
-    AgentTextSent,
-    AgentToolCalled,
-    AgentToolReturned,
-    AgentTransferCall,
-    AgentTurnEnded,
-    AgentTurnStarted,
-    CallEnded,
-    CallStarted,
-    InputEvent,
-    LogMessage,
-    LogMetric,
-    OutputEvent,
-    UserDtmfSent,
-    UserTextSent,
-    UserTurnEnded,
-    UserTurnStarted,
-)
-from line.harness_types import (
+from line._harness_types import (
     AgentSpeechInput,
     AgentStateInput,
+    ConfigOutput,
     DTMFInput,
     DTMFOutput,
     EndCallOutput,
@@ -63,7 +41,32 @@ from line.harness_types import (
     ToolCallOutput,
     TranscriptionInput,
     TransferOutput,
+    TTSConfig,
     UserStateInput,
+)
+from line.agent import Agent, AgentSpec, EventFilter, TurnEnv
+from line.events import (
+    AgentDtmfSent,
+    AgentEndCall,
+    AgentSendDtmf,
+    AgentSendText,
+    AgentTextSent,
+    AgentToolCalled,
+    AgentToolReturned,
+    AgentTransferCall,
+    AgentTurnEnded,
+    AgentTurnStarted,
+    AgentUpdateCall,
+    CallEnded,
+    CallStarted,
+    InputEvent,
+    LogMessage,
+    LogMetric,
+    OutputEvent,
+    UserDtmfSent,
+    UserTextSent,
+    UserTurnEnded,
+    UserTurnStarted,
 )
 
 
@@ -565,6 +568,17 @@ class ConversationRunner:
             logger.info(f"<- 🔧 Tool returned: {event.tool_name}({event.tool_args}) -> {event.result}")
             result_str = str(event.result) if event.result is not None else None
             return ToolCallOutput(name=event.tool_name, arguments=event.tool_args, result=result_str)
+        if isinstance(event, AgentUpdateCall):
+            logger.info(
+                f"<- ⚙️ Update call: voice_id={event.voice_id}, "
+                f"pronunciation_dict_id={event.pronunciation_dict_id}"
+            )
+            return ConfigOutput(
+                tts=TTSConfig(
+                    voice_id=event.voice_id,
+                    pronunciation_dict_id=event.pronunciation_dict_id,
+                ),
+            )
 
         return ErrorOutput(content=f"Unhandled output event type: {type(event).__name__}")
 

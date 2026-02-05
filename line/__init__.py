@@ -23,6 +23,7 @@ from line.events import (
     AgentTransferCall,
     AgentTurnEnded,
     AgentTurnStarted,
+    AgentUpdateCall,
     CallEnded,
     # Input events
     CallStarted,
@@ -34,25 +35,6 @@ from line.events import (
     UserTextSent,
     UserTurnEnded,
     UserTurnStarted,
-)
-
-# Harness types (websocket message types)
-from line.harness_types import (
-    AgentSpeechInput,
-    AgentStateInput,
-    DTMFInput,
-    DTMFOutput,
-    EndCallOutput,
-    ErrorOutput,
-    InputMessage,
-    LogEventOutput,
-    LogMetricOutput,
-    MessageOutput,
-    OutputMessage,
-    ToolCallOutput,
-    TranscriptionInput,
-    TransferOutput,
-    UserStateInput,
 )
 from line.voice_agent_app import (
     AgentConfig,
@@ -87,6 +69,7 @@ __all__ = [
     "AgentToolReturned",
     "LogMetric",
     "LogMessage",
+    "AgentUpdateCall",
     "OutputEvent",
     # Input events
     "CallStarted",
@@ -101,20 +84,4 @@ __all__ = [
     "AgentTurnEnded",
     "AgentHandedOff",
     "InputEvent",
-    # Harness types
-    "InputMessage",
-    "OutputMessage",
-    "TranscriptionInput",
-    "DTMFInput",
-    "UserStateInput",
-    "AgentStateInput",
-    "AgentSpeechInput",
-    "ErrorOutput",
-    "DTMFOutput",
-    "MessageOutput",
-    "ToolCallOutput",
-    "TransferOutput",
-    "EndCallOutput",
-    "LogEventOutput",
-    "LogMetricOutput",
 ]
