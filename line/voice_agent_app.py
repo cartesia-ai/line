@@ -600,6 +600,7 @@ EMOJI_REGEX = re.compile(
     r"\U0000FE00-\U0000FE0F"  # Variation Selectors
     r"\U0001F000-\U0001F02F"  # Mahjong Tiles
     r"\U0001F0A0-\U0001F0FF"  # Playing Cards
+    r"\U0000200D"  # Zero Width Joiner (for compound emoji sequences)
     r"]+$"
 )
 
