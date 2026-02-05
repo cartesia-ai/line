@@ -636,6 +636,14 @@ def _get_processed_history(pending_text: str, history: List[InputEvent]) -> List
             )
             if committed_text:
                 processed_events.append(AgentTextSent(content=committed_text))
+            if isinstance(event, AgentTurnEnded) and committed_text_buffer:
+                # this is a hack to basically "throw up our hands" when we see the end of an agent turn"
+                # we commit all buffered text immediately, even if it doesn't match perfectly with
+                # pending_text. Since we can't _exactly_ know what text was dropped by Sonic's wordstamps
+                # (and therefore what text `AgentTextSent` events contain) we will inevitably have mismatches
+                # between our pending text and the committed text we get from `AgentTextSent` events.
+                processed_events.append(AgentTextSent(content=committed_text_buffer))
+                committed_text_buffer = ""
             processed_events.append(event)
 
     committed_text, _, _ = _parse_committed(committed_text_buffer, pending_text)
