@@ -331,7 +331,7 @@ Focus on official sources and recent information. End with a brief structured JS
                 "status": "success",
                 "company": company_name,
                 "company_info": company_info,
-                "research_summary": research_text[:500] if len(research_text) > 500 else research_text,
+                "research_summary": research_text[:500],
             }
         )
 
