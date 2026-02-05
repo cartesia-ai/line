@@ -377,9 +377,9 @@ async def test_passthrough_tool_bypasses_llm(turn_env):
     # Expected outputs:
     # 1. AgentSendText "Goodbye! "
     # 2. AgentToolCalled
-    # 3. AgentToolReturned
-    # 4. AgentSendText "Have a great day!" (from passthrough)
-    # 5. AgentEndCall (from passthrough)
+    # 3. AgentSendText "Have a great day!" (from passthrough)
+    # 4. AgentEndCall (from passthrough)
+    # 5. AgentToolReturned (emitted at the end of tool execution)
 
     assert len(outputs) == 5
 
@@ -389,12 +389,13 @@ async def test_passthrough_tool_bypasses_llm(turn_env):
     assert isinstance(outputs[1], AgentToolCalled)
     assert outputs[1].tool_name == "end_call"
 
-    assert isinstance(outputs[2], AgentToolReturned)
+    assert isinstance(outputs[2], AgentSendText)
+    assert outputs[2].text == "Have a great day!"
 
-    assert isinstance(outputs[3], AgentSendText)
-    assert outputs[3].text == "Have a great day!"
+    assert isinstance(outputs[3], AgentEndCall)
 
-    assert isinstance(outputs[4], AgentEndCall)
+    assert isinstance(outputs[4], AgentToolReturned)
+    assert outputs[4].result == "success"
 
     # LLM should only be called ONCE - passthrough doesn't loop back
     assert mock_llm._call_count == 1
@@ -1596,3 +1597,244 @@ class TestBuildFullHistory:
         assert isinstance(result[2], AgentTextSent)
         assert isinstance(result[3], AgentToolReturned)
         assert isinstance(result[4], UserTextSent)
+
+
+# =============================================================================
+# Tests: _build_messages - Pending Tool Results
+# =============================================================================
+
+
+class TestBuildMessagesPendingToolResults:
+    """Tests for _build_messages handling of tool calls without matching results.
+
+    When an AgentToolCalled event doesn't have a matching AgentToolReturned event,
+    _build_messages should automatically add a pending result message with content="pending".
+    """
+
+    @staticmethod
+    def _annotate(events: list, event_id: str) -> list[tuple[str, "OutputEvent"]]:
+        """Annotate events with a triggering event_id."""
+        return [(event_id, e) for e in events]
+
+    async def test_tool_call_with_result_no_pending(self):
+        """Tool call with matching result should NOT get a pending message."""
+        agent, _ = create_agent_with_mock([])
+
+        user0 = UserTextSent(content="Question")
+        input_history = [user0]
+        local_history = self._annotate(
+            [
+                AgentToolCalled(tool_call_id="call_1", tool_name="get_weather", tool_args={"city": "NYC"}),
+                AgentToolReturned(
+                    tool_call_id="call_1", tool_name="get_weather", tool_args={"city": "NYC"}, result="sunny"
+                ),
+            ],
+            event_id=user0.event_id,
+        )
+
+        messages = agent._build_messages(input_history, local_history, current_event_id="current")
+
+        # Should have: user message, assistant with tool call, tool result
+        assert len(messages) == 3
+        assert messages[0].role == "user"
+        assert messages[1].role == "assistant"
+        assert messages[1].tool_calls is not None
+        assert messages[2].role == "tool"
+        assert messages[2].content == "sunny"
+        assert messages[2].tool_call_id == "call_1"
+
+    async def test_tool_call_without_result_gets_pending(self):
+        """Tool call without matching result should get a pending message."""
+        agent, _ = create_agent_with_mock([])
+
+        user0 = UserTextSent(content="Question")
+        input_history = [user0]
+        local_history = self._annotate(
+            [
+                AgentToolCalled(tool_call_id="call_1", tool_name="get_weather", tool_args={"city": "NYC"}),
+                # No AgentToolReturned!
+            ],
+            event_id=user0.event_id,
+        )
+
+        messages = agent._build_messages(input_history, local_history, current_event_id="current")
+
+        # Should have: user message, assistant with tool call, pending tool result
+        assert len(messages) == 3
+        assert messages[0].role == "user"
+        assert messages[1].role == "assistant"
+        assert messages[1].tool_calls is not None
+        assert messages[2].role == "tool"
+        assert messages[2].content == "pending"
+        assert messages[2].tool_call_id == "call_1"
+        assert messages[2].name == "get_weather"
+
+    async def test_multiple_tool_calls_one_pending(self):
+        """Multiple tool calls where one has result and one is pending."""
+        agent, _ = create_agent_with_mock([])
+
+        user0 = UserTextSent(content="Question")
+        input_history = [user0]
+        local_history = self._annotate(
+            [
+                AgentToolCalled(tool_call_id="call_1", tool_name="get_weather", tool_args={}),
+                AgentToolReturned(
+                    tool_call_id="call_1", tool_name="get_weather", tool_args={}, result="sunny"
+                ),
+                AgentToolCalled(tool_call_id="call_2", tool_name="get_time", tool_args={}),
+                # No AgentToolReturned for call_2!
+            ],
+            event_id=user0.event_id,
+        )
+
+        messages = agent._build_messages(input_history, local_history, current_event_id="current")
+
+        # Should have: user, tool_call_1, result_1, tool_call_2, pending_2
+        assert len(messages) == 5
+        assert messages[0].role == "user"
+
+        # First tool call and result
+        assert messages[1].role == "assistant"
+        assert messages[1].tool_calls[0].id == "call_1"
+        assert messages[2].role == "tool"
+        assert messages[2].content == "sunny"
+        assert messages[2].tool_call_id == "call_1"
+
+        # Second tool call and pending result
+        assert messages[3].role == "assistant"
+        assert messages[3].tool_calls[0].id == "call_2"
+        assert messages[4].role == "tool"
+        assert messages[4].content == "pending"
+        assert messages[4].tool_call_id == "call_2"
+        assert messages[4].name == "get_time"
+
+    async def test_multiple_tool_calls_all_pending(self):
+        """Multiple tool calls all without results should all get pending."""
+        agent, _ = create_agent_with_mock([])
+
+        user0 = UserTextSent(content="Question")
+        input_history = [user0]
+        local_history = self._annotate(
+            [
+                AgentToolCalled(tool_call_id="call_1", tool_name="tool_a", tool_args={}),
+                AgentToolCalled(tool_call_id="call_2", tool_name="tool_b", tool_args={}),
+                # No AgentToolReturned for either!
+            ],
+            event_id=user0.event_id,
+        )
+
+        messages = agent._build_messages(input_history, local_history, current_event_id="current")
+
+        # Should have: user, tool_call_1, pending_1, tool_call_2, pending_2
+        assert len(messages) == 5
+        assert messages[0].role == "user"
+
+        assert messages[1].role == "assistant"
+        assert messages[1].tool_calls[0].id == "call_1"
+        assert messages[2].role == "tool"
+        assert messages[2].content == "pending"
+        assert messages[2].tool_call_id == "call_1"
+
+        assert messages[3].role == "assistant"
+        assert messages[3].tool_calls[0].id == "call_2"
+        assert messages[4].role == "tool"
+        assert messages[4].content == "pending"
+        assert messages[4].tool_call_id == "call_2"
+
+    async def test_tool_call_result_out_of_order_still_matches(self):
+        """Tool result appearing after other events still matches its call."""
+        agent, _ = create_agent_with_mock([])
+
+        user0 = UserTextSent(content="Question")
+        input_history = [user0]
+        # Use AgentToolCalled (unobservable) between call and result
+        local_history = self._annotate(
+            [
+                AgentToolCalled(tool_call_id="call_1", tool_name="get_weather", tool_args={}),
+                AgentToolCalled(tool_call_id="call_2", tool_name="other_tool", tool_args={}),
+                AgentToolReturned(
+                    tool_call_id="call_1", tool_name="get_weather", tool_args={}, result="sunny"
+                ),
+                # call_2 has no result - should be pending
+            ],
+            event_id=user0.event_id,
+        )
+
+        messages = agent._build_messages(input_history, local_history, current_event_id="current")
+
+        # Should have: user, tool_call_1, tool_call_2, pending_2, result_1
+        # (pending is inserted immediately after call_2 since it has no result)
+        assert len(messages) == 5
+        assert messages[0].role == "user"
+
+        # First tool call
+        assert messages[1].role == "assistant"
+        assert messages[1].tool_calls[0].id == "call_1"
+
+        # Second tool call (no result yet)
+        assert messages[2].role == "assistant"
+        assert messages[2].tool_calls[0].id == "call_2"
+
+        # Pending for call_2
+        assert messages[3].role == "tool"
+        assert messages[3].content == "pending"
+        assert messages[3].tool_call_id == "call_2"
+
+        # Result for call_1
+        assert messages[4].role == "tool"
+        assert messages[4].content == "sunny"
+        assert messages[4].tool_call_id == "call_1"
+
+    async def test_pending_result_preserves_tool_name(self):
+        """Pending result message should have correct tool name."""
+        agent, _ = create_agent_with_mock([])
+
+        user0 = UserTextSent(content="Question")
+        input_history = [user0]
+        local_history = self._annotate(
+            [
+                AgentToolCalled(
+                    tool_call_id="call_xyz",
+                    tool_name="my_special_tool",
+                    tool_args={"arg1": "value1"},
+                ),
+            ],
+            event_id=user0.event_id,
+        )
+
+        messages = agent._build_messages(input_history, local_history, current_event_id="current")
+
+        pending_msg = messages[-1]
+        assert pending_msg.role == "tool"
+        assert pending_msg.content == "pending"
+        assert pending_msg.tool_call_id == "call_xyz"
+        assert pending_msg.name == "my_special_tool"
+
+    async def test_current_events_tool_call_without_result_gets_pending(self):
+        """Current (not yet observed) tool calls without results get pending."""
+        agent, _ = create_agent_with_mock([])
+
+        user0 = UserTextSent(content="Question")
+        input_history = [user0]
+        # Event is annotated with "current" event_id
+        local_history = self._annotate(
+            [
+                AgentToolCalled(tool_call_id="call_1", tool_name="async_tool", tool_args={}),
+            ],
+            event_id="current",
+        )
+
+        messages = agent._build_messages(input_history, local_history, current_event_id="current")
+
+        # Should have: user, tool_call, pending
+        assert len(messages) == 3
+        assert messages[2].role == "tool"
+        assert messages[2].content == "pending"
+
+    async def test_empty_history_no_pending(self):
+        """Empty history should produce no messages."""
+        agent, _ = create_agent_with_mock([])
+
+        messages = agent._build_messages([], [], current_event_id="current")
+
+        assert len(messages) == 0
