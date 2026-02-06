@@ -11,13 +11,13 @@ Model naming:
 """
 
 from dataclasses import dataclass, field
-from loguru import logger
 from typing import Any, AsyncIterator, Dict, List, Optional
+
+from litellm import acompletion, get_supported_openai_params
 
 from line.llm_agent.config import LlmConfig
 from line.llm_agent.schema_converter import function_tools_to_openai
 from line.llm_agent.tools.utils import FunctionTool
-from litellm import acompletion, get_supported_openai_params
 
 
 @dataclass
@@ -75,7 +75,7 @@ class LLMProvider:
         self._timeout = timeout
 
         supported = get_supported_openai_params(model=model) or []
-        self._supports_reasoning_effort ="reasoning_effort" in supported
+        self._supports_reasoning_effort = "reasoning_effort" in supported
 
     def chat(
         self,

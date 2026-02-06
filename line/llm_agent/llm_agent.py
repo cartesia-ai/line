@@ -20,6 +20,7 @@ from typing import (
     Union,
 )
 
+from litellm import get_supported_openai_params
 from loguru import logger
 
 from line.agent import AgentCallable, TurnEnv
@@ -43,7 +44,6 @@ from line.llm_agent.provider import LLMProvider, Message, ToolCall
 from line.llm_agent.tools.decorators import loopback_tool
 from line.llm_agent.tools.system import WebSearchTool
 from line.llm_agent.tools.utils import FunctionTool, ToolEnv, ToolType, construct_function_tool
-from litellm import get_supported_openai_params
 
 T = TypeVar("T")
 
@@ -148,15 +148,17 @@ class LlmAgent:
     def __init__(
         self,
         model: str,
-        api_key: Optional[str] = None,
+        api_key: str,
         tools: Optional[List[ToolSpec]] = None,
         config: Optional[LlmConfig] = None,
         max_tool_iterations: int = 10,
     ):
-        if api_key is None:
-            raise ValueError("API key is required to use LlmAgent. Please provide an api_key argument.")
+        if not api_key:
+            raise ValueError("Missing API key in LLmAgent initialization")
         if get_supported_openai_params(model=model) is None:
-            raise ValueError(f"Model {model} is not supported. See https://models.litellm.ai/ for supported models.")
+            raise ValueError(
+                f"Model {model} is not supported. See https://models.litellm.ai/ for supported models."
+            )
 
         self._model = model
         self._api_key = api_key
