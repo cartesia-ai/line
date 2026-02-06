@@ -161,23 +161,34 @@ class LlmAgent:
         self._web_search_options: Optional[Dict[str, Any]] = None
         self._tools: List[FunctionTool] = []
 
+        # First pass: separate WebSearchTool from regular tools
+        web_search_tool: Optional[WebSearchTool] = None
         for tool in tools or []:
             if isinstance(tool, WebSearchTool):
-                # Check if model supports native web search
-                if _check_web_search_support(model):
-                    # Use native web search via web_search_options
-                    self._web_search_options = tool.get_web_search_options()
-                    logger.info(f"Model {model} supports native web search, using web_search_options")
-                else:
-                    # Fall back to tool-based web search
-                    fallback_tool = _web_search_tool_to_function_tool(tool)
-                    self._tools.append(fallback_tool)
-                    logger.info(f"Model {model} doesn't support native web search, using fallback tool")
+                web_search_tool = tool
             elif isinstance(tool, FunctionTool):
                 self._tools.append(tool)
             else:
                 # Plain callable - wrap as loopback tool
                 self._tools.append(loopback_tool(tool))
+
+        # Decide how to handle web search: use native web search only if the model
+        # supports it AND there are no other function tools (some models like Gemini 3
+        # don't support combining native web search with function calling tools).
+        if web_search_tool is not None:
+            if _check_web_search_support(model) and not self._tools:
+                self._web_search_options = web_search_tool.get_web_search_options()
+                logger.info(f"Model {model} supports native web search, using web_search_options")
+            else:
+                fallback_tool = _web_search_tool_to_function_tool(web_search_tool)
+                self._tools.append(fallback_tool)
+                if self._tools:
+                    logger.info(
+                        f"Model {model} has function tools alongside web search, "
+                        "using fallback tool-based web search to avoid conflicts"
+                    )
+                else:
+                    logger.info(f"Model {model} doesn't support native web search, using fallback tool")
 
         self._tool_map: Dict[str, FunctionTool] = {t.name: t for t in self._tools}
         self._llm = LLMProvider(

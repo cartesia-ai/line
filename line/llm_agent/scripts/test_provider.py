@@ -34,6 +34,7 @@ from line.events import (
 from line.llm_agent import (
     LlmAgent,
     LlmConfig,
+    end_call,
     loopback_tool,
     web_search,
 )
@@ -236,6 +237,50 @@ async def test_web_search(model: str, search_context_size: str = "medium"):
     print("✓ Web search test completed")
 
 
+async def test_function_tools_with_web_search(model: str):
+    """Test combining function calling tools with web search.
+
+    This reproduces the scenario from examples/basic_chat/main.py where
+    both end_call (a function tool) and web_search are passed together.
+    Some models (e.g. Gemini 3) don't support combining native web search
+    with function calling tools in the same request.
+    """
+    print(f"\n{'=' * 60}")
+    print(f"Testing function tools + web search with {model}")
+    print("=" * 60)
+
+    agent = LlmAgent(
+        model=model,
+        tools=[end_call, web_search],
+        config=LlmConfig(
+            system_prompt="You are a helpful assistant. Use web search when needed. "
+            "Use end_call when the user says goodbye.",
+        ),
+    )
+
+    env = TurnEnv()
+    user_message = "Hi, how are you?"
+    event = UserTextSent(
+        content=user_message,
+        history=[UserTextSent(content=user_message)],
+    )
+
+    print(f"User: {user_message}")
+    print("\nAgent response:")
+
+    async for output in agent.process(env, event):
+        if isinstance(output, AgentSendText):
+            print(output.text, end="", flush=True)
+        elif isinstance(output, AgentToolCalled):
+            print(f"\n  [Tool call]: {output.tool_name}({output.tool_args})")
+        elif isinstance(output, AgentToolReturned):
+            result_preview = output.result[:200] + "..." if len(output.result) > 200 else output.result
+            print(f"  [Tool result]: {result_preview}")
+
+    print()
+    print("✓ Function tools + web search test passed")
+
+
 # =============================================================================
 # Main
 # =============================================================================
@@ -293,6 +338,7 @@ async def main():
             await test_tool_calling(model)
             await test_web_search(model)
             await test_web_search(model, search_context_size="high")
+            await test_function_tools_with_web_search(model)
         except Exception as e:
             print(f"\n✗ Error testing {model}: {e}")
             import traceback
