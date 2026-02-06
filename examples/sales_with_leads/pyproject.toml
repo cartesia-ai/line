@@ -1,10 +1,11 @@
 [project]
-name = "transfer-phone-call"
+name = "sales-with-leads"
 version = "0.1.0"
-description = "Phone transfer example using Line SDK"
+description = "Sales agent with stateful leads extraction and company research"
 requires-python = ">=3.10"
 dependencies = [
     "cartesia-line==0.2.1",
+    "loguru>=0.7.0",
 ]
 
 [tool.setuptools]

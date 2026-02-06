@@ -34,6 +34,7 @@ from line.events import (
 from line.llm_agent import (
     LlmAgent,
     LlmConfig,
+    end_call,
     loopback_tool,
     web_search,
 )
@@ -77,13 +78,13 @@ async def calculate(ctx, expression: Annotated[str, "Math expression to evaluate
 # =============================================================================
 
 
-async def test_api_key(model: str) -> bool:
+async def test_api_key(model: str, api_key: str) -> bool:
     """Test that API key is valid and has permissions."""
     print(f"\n{'=' * 60}")
     print(f"Testing API key for {model}")
     print("=" * 60)
 
-    provider = LLMProvider(model=model)
+    provider = LLMProvider(model=model, api_key=api_key)
 
     messages = [Message(role="user", content="Say 'ok'")]
 
@@ -100,13 +101,13 @@ async def test_api_key(model: str) -> bool:
         return False
 
 
-async def test_streaming_text(model: str):
+async def test_streaming_text(model: str, api_key: str):
     """Test basic streaming text response."""
     print(f"\n{'=' * 60}")
     print(f"Testing streaming text with {model}")
     print("=" * 60)
 
-    provider = LLMProvider(model=model)
+    provider = LLMProvider(model=model, api_key=api_key)
 
     messages = [Message(role="user", content="Say 'Hello, World!' and nothing else.")]
 
@@ -118,7 +119,7 @@ async def test_streaming_text(model: str):
     print("\n✓ Streaming text test passed")
 
 
-async def test_tool_calling(model: str):
+async def test_tool_calling(model: str, api_key: str):
     """Test tool calling with LlmAgent."""
     print(f"\n{'=' * 60}")
     print(f"Testing tool calling with {model}")
@@ -126,6 +127,7 @@ async def test_tool_calling(model: str):
 
     agent = LlmAgent(
         model=model,
+        api_key=api_key,
         tools=[get_weather, calculate],
         config=LlmConfig(
             system_prompt="You are a helpful assistant. Use tools when needed.",
@@ -160,7 +162,7 @@ async def test_tool_calling(model: str):
         print("⚠ No tools were called (model may have answered directly)")
 
 
-async def test_introduction(model: str):
+async def test_introduction(model: str, api_key: str):
     """Test introduction message on CallStarted."""
     print(f"\n{'=' * 60}")
     print(f"Testing introduction with {model}")
@@ -168,6 +170,7 @@ async def test_introduction(model: str):
 
     agent = LlmAgent(
         model=model,
+        api_key=api_key,
         config=LlmConfig(
             introduction="Hello! I'm your AI assistant. How can I help you today?",
         ),
@@ -186,7 +189,7 @@ async def test_introduction(model: str):
     print("✓ Introduction test passed")
 
 
-async def test_web_search(model: str, search_context_size: str = "medium"):
+async def test_web_search(model: str, api_key: str, search_context_size: str = "medium"):
     """Test web search tool integration."""
     print(f"\n{'=' * 60}")
     if search_context_size != "medium":
@@ -197,6 +200,7 @@ async def test_web_search(model: str, search_context_size: str = "medium"):
 
     agent = LlmAgent(
         model=model,
+        api_key=api_key,
         tools=[web_search(search_context_size=search_context_size)],
         config=LlmConfig(
             system_prompt="You are a helpful assistant with web search capabilities."
@@ -234,6 +238,51 @@ async def test_web_search(model: str, search_context_size: str = "medium"):
     else:
         print("⚠ Web search tool was not explicitly called (model may use native web search)")
     print("✓ Web search test completed")
+
+
+async def test_function_tools_with_web_search(model: str, api_key: str):
+    """Test combining function calling tools with web search.
+
+    This reproduces the scenario from examples/basic_chat/main.py where
+    both end_call (a function tool) and web_search are passed together.
+    Some models (e.g. Gemini 3) don't support combining native web search
+    with function calling tools in the same request.
+    """
+    print(f"\n{'=' * 60}")
+    print(f"Testing function tools + web search with {model}")
+    print("=" * 60)
+
+    agent = LlmAgent(
+        model=model,
+        api_key=api_key,
+        tools=[end_call, web_search],
+        config=LlmConfig(
+            system_prompt="You are a helpful assistant. Use web search when needed. "
+            "Use end_call when the user says goodbye.",
+        ),
+    )
+
+    env = TurnEnv()
+    user_message = "Hi, how are you?"
+    event = UserTextSent(
+        content=user_message,
+        history=[UserTextSent(content=user_message)],
+    )
+
+    print(f"User: {user_message}")
+    print("\nAgent response:")
+
+    async for output in agent.process(env, event):
+        if isinstance(output, AgentSendText):
+            print(output.text, end="", flush=True)
+        elif isinstance(output, AgentToolCalled):
+            print(f"\n  [Tool call]: {output.tool_name}({output.tool_args})")
+        elif isinstance(output, AgentToolReturned):
+            result_preview = output.result[:200] + "..." if len(output.result) > 200 else output.result
+            print(f"  [Tool result]: {result_preview}")
+
+    print()
+    print("✓ Function tools + web search test passed")
 
 
 # =============================================================================
@@ -274,7 +323,8 @@ async def main():
 
     valid_models = []
     for env_var, model in available:
-        if await test_api_key(model):
+        api_key = os.environ[env_var]
+        if await test_api_key(model, api_key):
             valid_models.append((env_var, model))
 
     if not valid_models:
@@ -286,13 +336,15 @@ async def main():
     print("PHASE 2: Running Full Tests")
     print("=" * 60)
 
-    for _env_var, model in valid_models:
+    for env_var, model in valid_models:
+        api_key = os.environ[env_var]
         try:
-            await test_streaming_text(model)
-            await test_introduction(model)
-            await test_tool_calling(model)
-            await test_web_search(model)
-            await test_web_search(model, search_context_size="high")
+            await test_streaming_text(model, api_key)
+            await test_introduction(model, api_key)
+            await test_tool_calling(model, api_key)
+            await test_web_search(model, api_key)
+            await test_web_search(model, api_key, search_context_size="high")
+            await test_function_tools_with_web_search(model, api_key)
         except Exception as e:
             print(f"\n✗ Error testing {model}: {e}")
             import traceback

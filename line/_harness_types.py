@@ -109,6 +109,16 @@ class LogMetricOutput(BaseModel):
     value: object
 
 
+class TTSConfig(BaseModel):
+    voice_id: Optional[str] = None
+    pronunciation_dict_id: Optional[str] = None
+
+
+class ConfigOutput(BaseModel):
+    type: Literal["config"] = "config"
+    tts: Optional[TTSConfig] = None
+
+
 OutputMessage = Union[
     ErrorOutput,
     DTMFOutput,
@@ -118,4 +128,5 @@ OutputMessage = Union[
     EndCallOutput,
     LogEventOutput,
     LogMetricOutput,
+    ConfigOutput,
 ]
