@@ -50,12 +50,14 @@ async def get_agent(env: AgentEnv, call_request: CallRequest):
 ```
 
 **How it works:**
+
 - Callers can pass `system_prompt` and `introduction` when initiating a call
 - Priority: Caller's value > your fallback > SDK default
 - For `system_prompt`: empty string is treated as unset (uses fallback)
 - For `introduction`: empty string IS preserved (agent waits for user to speak first)
 
 **Use cases:**
+
 - Multi-tenant apps: Different system prompts per customer
 - A/B testing: Test different agent personalities
 - Contextual customization: Pass user-specific context at call time
@@ -159,8 +161,6 @@ agent = LlmAgent(
 | `transfer_call` | passthrough | Transfer to E.164 number |
 | `web_search` | WebSearchTool | Real-time search (native or DuckDuckGo fallback) |
 | `agent_as_handoff` | helper | Create handoff tool from an Agent (pass to tools list) |
-
-## Common Mistakes
 
 ## Common Mistakes
 
