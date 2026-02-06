@@ -249,10 +249,10 @@ agent = LlmAgent(
 
 | Mistake | Fix |
 |---------|-----|
-| Missing `end_call` | Always include it |
-| Raising exceptions | Return error string |
+| Missing `end_call` | Include it so agent can end calls (otherwise waits for user hangup) |
+| Raising exceptions | Return error string. This will cause the agent to hang up the call. |
 | Missing `ctx: ToolEnv` | First param always |
-| No `Annotated` descriptions | Add for all params |
+| No `Annotated` descriptions | Add for all params. This is used to describe the parameters of the tool to the LLM. |
 | Slow model for main agent | Use fast model, offload to background |
 | Missing `event` in handoff | Required final param |
 | Blocking nested agent call | Use `is_background=True` |
