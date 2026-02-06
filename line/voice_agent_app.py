@@ -586,6 +586,29 @@ class ConversationRunner:
 # Regex to split text into words, whitespace, and punctuation
 NORMAL_CHARACTERS_REGEX = r"(\s+|[^\w\s]+)"
 
+# Regex to match strings consisting entirely of emoji characters
+EMOJI_REGEX = re.compile(
+    r"^["
+    r"\U0001F600-\U0001F64F"  # emoticons
+    r"\U0001F300-\U0001F5FF"  # symbols & pictographs
+    r"\U0001F680-\U0001F6FF"  # transport & map symbols
+    r"\U0001F1E0-\U0001F1FF"  # flags
+    r"\U0001F900-\U0001F9FF"  # Supplemental Symbols and Pictographs
+    r"\U0001FA00-\U0001FAFF"  # Symbols and Pictographs Extended-A
+    r"\U00002600-\U000026FF"  # Misc symbols
+    r"\U00002700-\U000027BF"  # Dingbats
+    r"\U0000FE00-\U0000FE0F"  # Variation Selectors
+    r"\U0001F000-\U0001F02F"  # Mahjong Tiles
+    r"\U0001F0A0-\U0001F0FF"  # Playing Cards
+    r"\U0000200D"  # Zero Width Joiner (for compound emoji sequences)
+    r"]+$"
+)
+
+
+def _is_stripped_by_harness(s: str) -> bool:
+    """Check if string consists entirely of whitespace or emoji characters."""
+    return s.isspace() or bool(EMOJI_REGEX.match(s))
+
 
 def _get_processed_history(pending_text: str, history: List[InputEvent]) -> List[InputEvent]:
     """
@@ -613,6 +636,14 @@ def _get_processed_history(pending_text: str, history: List[InputEvent]) -> List
             )
             if committed_text:
                 processed_events.append(AgentTextSent(content=committed_text))
+            if isinstance(event, AgentTurnEnded) and committed_text_buffer:
+                # this is a hack to basically "throw up our hands" when we see the end of an agent turn"
+                # we commit all buffered text immediately, even if it doesn't match perfectly with
+                # pending_text. Since we can't _exactly_ know what text was dropped by Sonic's wordstamps
+                # (and therefore what text `AgentTextSent` events contain) we will inevitably have mismatches
+                # between our pending text and the committed text we get from `AgentTextSent` events.
+                processed_events.append(AgentTextSent(content=committed_text_buffer))
+                committed_text_buffer = ""
             processed_events.append(event)
 
     committed_text, _, _ = _parse_committed(committed_text_buffer, pending_text)
@@ -642,7 +673,7 @@ def _parse_committed(committed_buffer_text: str, pending_text: str) -> tuple[str
     pending_parts = list(filter(lambda x: x != "", re.split(NORMAL_CHARACTERS_REGEX, pending_text)))
 
     # If the pending text has no spaces (ex. non-latin languages), commit the entire speech text.
-    if len([x for x in pending_parts if x.isspace()]) == 0:
+    if len([x for x in pending_parts if _is_stripped_by_harness(x)]) == 0:
         match_index = pending_text.find(committed_buffer_text)
         return committed_buffer_text, "", pending_text[match_index + len(committed_buffer_text) :]
 
@@ -659,8 +690,9 @@ def _parse_committed(committed_buffer_text: str, pending_text: str) -> tuple[str
             committed_parts.append(pending_part)
             if len(committed_buffer_parts[0]) == 0:
                 committed_buffer_parts.pop(0)
-        # If the part is purely whitespace, add it directly to committed_parts.
-        elif pending_part.isspace():
+        # If the part is purely whitespace or emoji, add it directly to committed_parts.
+        # (The API harness strips both whitespace and emojis from AgentTextSent events.)
+        elif _is_stripped_by_harness(pending_part):
             committed_parts.append(pending_part)
         # Otherwise, this part isn't aligned with the committed speech
         # (possibly an interruption or TTS mismatch); skip it.
