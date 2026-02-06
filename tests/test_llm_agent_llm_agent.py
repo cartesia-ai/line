@@ -122,6 +122,7 @@ def create_agent_with_mock(
 
     agent = LlmAgent(
         model="gpt-4o",  # Use real model name for provider detection
+        api_key="test-key",
         tools=tools or [],
         config=config or LlmConfig(),
         max_tool_iterations=max_tool_iterations,
@@ -836,7 +837,7 @@ async def test_plain_function_wrapped_as_loopback_tool():
         """Search for something."""
         return f"Results for: {query}"
 
-    agent = LlmAgent(model="test-model", tools=[my_tool])
+    agent = LlmAgent(model="gpt-4o", api_key="test-key", tools=[my_tool])
 
     # Verify the tool was wrapped
     assert len(agent.tools) == 1
@@ -929,7 +930,7 @@ async def test_mixed_decorated_and_plain_functions(turn_env):
         """A plain tool."""
         return "plain"
 
-    agent = LlmAgent(model="test-model", tools=[decorated_tool, plain_tool])
+    agent = LlmAgent(model="gpt-4o", api_key="test-key", tools=[decorated_tool, plain_tool])
 
     assert len(agent.tools) == 2
 

@@ -13,6 +13,8 @@ Model naming:
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Dict, List, Optional
 
+from litellm import acompletion, get_supported_openai_params
+
 from line.llm_agent.config import LlmConfig
 from line.llm_agent.schema_converter import function_tools_to_openai
 from line.llm_agent.tools.utils import FunctionTool
@@ -72,6 +74,9 @@ class LLMProvider:
         self._fallbacks = fallbacks
         self._timeout = timeout
 
+        supported = get_supported_openai_params(model=model) or []
+        self._supports_reasoning_effort = "reasoning_effort" in supported
+
     def chat(
         self,
         messages: List[Message],
@@ -110,6 +115,9 @@ class LLMProvider:
             llm_kwargs["presence_penalty"] = self._config.presence_penalty
         if self._config.frequency_penalty is not None:
             llm_kwargs["frequency_penalty"] = self._config.frequency_penalty
+        if self._supports_reasoning_effort:
+            llm_kwargs["reasoning_effort"] = self._config.reasoning_effort or "low"
+
         if self._config.extra:
             llm_kwargs.update(self._config.extra)
 
@@ -173,11 +181,6 @@ class _ChatStream:
         self._response = None
 
     async def __aenter__(self) -> "_ChatStream":
-        try:
-            from litellm import acompletion
-        except ImportError as e:
-            raise ImportError("litellm required. Install: pip install litellm") from e
-
         self._response = await acompletion(**self._kwargs)
         return self
 
