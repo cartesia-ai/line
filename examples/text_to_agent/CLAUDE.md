@@ -264,7 +264,7 @@ async def get_agent(env: AgentEnv, call_request: CallRequest):
 |----------|--------|
 | OpenAI | `gpt-5-nano-2025-08-07`, `gpt-4o` |
 | Anthropic | `anthropic/claude-sonnet-4-20250514`, `anthropic/claude-haiku-4-5-20251001` |
-| Gemini | `gemini/gemini-3-flash-preview` |
+| Gemini | `gemini/gemini-2.5-flash-preview-09-2025` |
 
 Full list of supported models: <https://models.litellm.ai/>
 

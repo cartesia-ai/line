@@ -244,7 +244,7 @@ MODELS = [
     ("OPENAI_API_KEY", "gpt-4o-mini"),
     ("ANTHROPIC_API_KEY", "anthropic/claude-sonnet-4-20250514"),
     ("GEMINI_API_KEY", "gemini/gemini-2.5-flash-preview-09-2025"),
-    ("GEMINI_API_KEY", "gemini/gemini-3-flash-preview"),
+    ("GEMINI_API_KEY", "gemini/gemini-2.5-flash-preview-09-2025"),
 ]
 
 

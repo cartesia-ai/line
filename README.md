@@ -280,7 +280,7 @@ Line leverages [LiteLLM](https://github.com/BerriAI/litellm) to support 100+ LLM
 |----------|--------------|
 | **OpenAI** | `gpt-5-nano`, `gpt-5.2` |
 | **Anthropic** | `anthropic/claude-haiku-4-5-20251001`, `anthropic/claude-sonnet-4-5` |
-| **Google** | `gemini/gemini-2.5-flash-preview-09-2025`, `gemini/gemini-3.0-preview` |
+| **Google** | `gemini/gemini-2.5-flash-preview-09-2025` |
 
 ## Agent Examples
 

@@ -28,7 +28,7 @@ app.run()
 |----------|--------------|
 | **OpenAI** | `gpt-5-nano`, `gpt-5.2` |
 | **Anthropic** | `anthropic/claude-haiku-4-5-20251001`, `anthropic/claude-sonnet-4-5` |
-| **Google** | `gemini/gemini-2.5-flash-preview-09-2025`, `gemini/gemini-3.0-preview` |
+| **Google** | `gemini/gemini-2.5-flash-preview-09-2025` |
 
 See [LiteLLM docs](https://docs.litellm.ai/docs/providers) for 100+ more providers.
 
@@ -326,7 +326,7 @@ class GuardrailsAgent:
 
     def __init__(self):
         self._llm_agent = LlmAgent(
-            model="gemini/gemini-2.5-flash",
+            model="gemini/gemini-2.5-flash-preview-09-2025",
             tools=[end_call],
             config=LlmConfig(
                 system_prompt="You are a helpful assistant.",
