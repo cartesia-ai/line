@@ -116,7 +116,7 @@ class LLMProvider:
         if self._config.frequency_penalty is not None:
             llm_kwargs["frequency_penalty"] = self._config.frequency_penalty
         if self._supports_reasoning_effort:
-            llm_kwargs.setdefault("reasoning_effort", "low")
+            llm_kwargs["reasoning_effort"] = self._config.reasoning_effort or "low"
 
         if self._config.extra:
             llm_kwargs.update(self._config.extra)

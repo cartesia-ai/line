@@ -155,14 +155,22 @@ class LlmAgent:
     ):
         if not api_key:
             raise ValueError("Missing API key in LLmAgent initialization")
-        if get_supported_openai_params(model=model) is None:
+        supported_params = get_supported_openai_params(model=model)
+        if supported_params is None:
             raise ValueError(
                 f"Model {model} is not supported. See https://models.litellm.ai/ for supported models."
             )
 
+        effective_config = config or LlmConfig()
+        if effective_config.reasoning_effort is not None and "reasoning_effort" not in supported_params:
+            raise ValueError(
+                f"Model {model} does not support reasoning_effort. "
+                "Remove reasoning_effort from your LlmConfig or use a model that supports it."
+            )
+
         self._model = model
         self._api_key = api_key
-        self._config = config or LlmConfig()
+        self._config = effective_config
         self._max_tool_iterations = max_tool_iterations
 
         # Process tools: separate WebSearchTool from regular FunctionTools

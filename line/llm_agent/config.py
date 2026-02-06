@@ -1,7 +1,7 @@
 """LLM configuration. See README.md for examples."""
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from line.voice_agent_app import CallRequest
 
@@ -30,6 +30,7 @@ class LlmConfig:
     top_p: Optional[float] = None
     stop: Optional[List[str]] = None
     seed: Optional[int] = None
+    reasoning_effort: Optional[Literal["low", "medium", "high"]] = None
 
     # Penalties
     presence_penalty: Optional[float] = None
