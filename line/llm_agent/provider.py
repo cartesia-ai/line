@@ -77,8 +77,6 @@ class LLMProvider:
         supported = get_supported_openai_params(model=model) or []
         self._supports_reasoning_effort ="reasoning_effort" in supported
 
-        logger.info(f"Initialized LLMProvider with model={model}, supported={supported}")
-
     def chat(
         self,
         messages: List[Message],
@@ -117,9 +115,8 @@ class LLMProvider:
             llm_kwargs["presence_penalty"] = self._config.presence_penalty
         if self._config.frequency_penalty is not None:
             llm_kwargs["frequency_penalty"] = self._config.frequency_penalty
-
-        # if self._supports_reasoning_effort:
-        #    llm_kwargs.setdefault("reasoning_effort", "low")
+        if self._supports_reasoning_effort:
+            llm_kwargs.setdefault("reasoning_effort", "low")
 
         if self._config.extra:
             llm_kwargs.update(self._config.extra)

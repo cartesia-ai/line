@@ -43,6 +43,7 @@ from line.llm_agent.provider import LLMProvider, Message, ToolCall
 from line.llm_agent.tools.decorators import loopback_tool
 from line.llm_agent.tools.system import WebSearchTool
 from line.llm_agent.tools.utils import FunctionTool, ToolEnv, ToolType, construct_function_tool
+from litellm import get_supported_openai_params
 
 T = TypeVar("T")
 
@@ -152,6 +153,11 @@ class LlmAgent:
         config: Optional[LlmConfig] = None,
         max_tool_iterations: int = 10,
     ):
+        if api_key is None:
+            raise ValueError("API key is required to use LlmAgent. Please provide an api_key argument.")
+        if get_supported_openai_params(model=model) is None:
+            raise ValueError(f"Model {model} is not supported. See https://models.litellm.ai/ for supported models.")
+
         self._model = model
         self._api_key = api_key
         self._config = config or LlmConfig()
