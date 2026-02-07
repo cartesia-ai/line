@@ -33,13 +33,22 @@ from line.events import (
     AgentTextSent,
     AgentToolCalled,
     AgentToolReturned,
+    AgentTurnEnded,
+    AgentTurnStarted,
+    AgentTransferCall,
+    AgentUpdateCall,
     CallEnded,
     CallStarted,
     CustomHistoryEntry,
     HistoryEvent,
     InputEvent,
+    LogMessage,
+    LogMetric,
     OutputEvent,
+    UserDtmfSent,
     UserTextSent,
+    UserTurnEnded,
+    UserTurnStarted,
 )
 from line.llm_agent.config import LlmConfig
 from line.llm_agent.provider import LLMProvider, Message, ToolCall
@@ -55,6 +64,10 @@ ToolSpec = Union[FunctionTool, WebSearchTool, Callable]
 
 # Type for events stored in local history (OutputEvent or CustomHistoryEntry)
 _LocalEvent = Union[OutputEvent, CustomHistoryEntry]
+
+# Sentinel event_id used before the first process() call.
+# _build_full_history prepends entries tagged with this ID at the start of the history.
+_INIT_EVENT_ID = "__init__"
 
 
 def _check_web_search_support(model: str) -> bool:
@@ -226,7 +239,7 @@ class LlmAgent:
         # The event_id is the stable UUID of the triggering input event
         self._local_history: List[tuple[str, _LocalEvent]] = []
         # Event ID of the current triggering input event (set on each process() call)
-        self._current_event_id: str = ""
+        self._current_event_id: str = _INIT_EVENT_ID
         self._handoff_target: Optional[AgentCallable] = None  # Normalized process function
         # Background task for backgrounded tools - None means no pending work
         self._background_task: Optional[asyncio.Task[None]] = None
@@ -542,7 +555,8 @@ class LlmAgent:
         5. Tool calls without matching results get a "pending" result
 
         The full_history contains HistoryEvent items:
-        - InputEvent for events from input_history (observable OutputEvents converted to InputEvent counterparts)
+        - InputEvent for events from input_history (observable OutputEvents converted to InputEvent
+          counterparts)
         - AgentToolCalled/AgentToolReturned for tool interactions from local_history
         - CustomHistoryEntry for injected history entries from local_history
         """
@@ -773,8 +787,13 @@ def _build_full_history(
     # Build a set of event_ids that have responsive local events
     trigger_event_ids = set(local_by_event_id.keys())
 
+    # Prepend init entries (added before the first process() call)
+    # These don't correspond to any input event, so handle them separately.
+    init_events = local_by_event_id.pop(_INIT_EVENT_ID, [])
+    trigger_event_ids.discard(_INIT_EVENT_ID)
+
     # Process input in slices
-    result: list = []
+    result: List[Union[InputEvent, _LocalEvent]] = list(init_events)
     i = 0
 
     while i < len(input_history):
@@ -819,20 +838,39 @@ def _to_history_event(event: Any) -> Optional[HistoryEvent]:
     All other events (InputEvent, AgentToolCalled, AgentToolReturned, CustomHistoryEntry)
     pass through unchanged.
     """
+    # Observable OutputEvents → convert to InputEvent counterparts
     if isinstance(event, AgentSendText):
         return AgentTextSent(content=event.text)
     elif isinstance(event, AgentSendDtmf):
         return AgentDtmfSent(button=event.button)
     elif isinstance(event, AgentEndCall):
         return CallEnded()
+    # HistoryEvent pass-through (tool events, custom entries)
     elif isinstance(event, (AgentToolCalled, AgentToolReturned, CustomHistoryEntry)):
         return event
-    elif hasattr(event, "event_id"):
-        # InputEvent types all have event_id
+    # InputEvent types pass through
+    elif isinstance(
+        event,
+        (
+            CallStarted,
+            CallEnded,
+            AgentHandedOff,
+            UserTurnStarted,
+            UserDtmfSent,
+            UserTextSent,
+            UserTurnEnded,
+            AgentTurnStarted,
+            AgentTextSent,
+            AgentDtmfSent,
+            AgentTurnEnded,
+        ),
+    ):
         return event  # type: ignore[return-value]
-    else:
-        # Non-HistoryEvent OutputEvent (LogMetric, LogMessage, etc.)
+    # Non-history OutputEvents are filtered out
+    elif isinstance(event, (AgentTransferCall, LogMetric, LogMessage, AgentUpdateCall)):
         return None
+    else:
+        raise ValueError(f"Unknown event type in history: {type(event).__name__}")
 
 
 def _concat_contiguous_agent_send_text(local_history: List[_LocalEvent]) -> List[_LocalEvent]:

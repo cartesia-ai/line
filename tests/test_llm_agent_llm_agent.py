@@ -27,7 +27,7 @@ from line.events import (
     UserTextSent,
 )
 from line.llm_agent.config import LlmConfig
-from line.llm_agent.llm_agent import LlmAgent, _build_full_history
+from line.llm_agent.llm_agent import _INIT_EVENT_ID, LlmAgent, _build_full_history
 from line.llm_agent.provider import Message, StreamChunk, ToolCall
 from line.llm_agent.tools.decorators import handoff_tool, loopback_tool, passthrough_tool
 from line.llm_agent.tools.utils import FunctionTool
@@ -1869,6 +1869,41 @@ class TestAddHistoryEntry:
         assert isinstance(event, CustomHistoryEntry)
         assert event.content == "injected context"
 
+    async def test_add_history_entry_before_first_process(self):
+        """add_history_entry called before process() uses _INIT_EVENT_ID and appears in messages."""
+        agent, _ = create_agent_with_mock([])
+
+        # Called before any process() — _current_event_id is still the init sentinel
+        agent.add_history_entry("pre-process context")
+
+        assert agent._local_history[0][0] == _INIT_EVENT_ID
+
+        user0 = UserTextSent(content="Hello")
+        input_history = [user0]
+
+        messages = await agent._build_messages(
+            input_history, agent._local_history, current_event_id=user0.event_id
+        )
+
+        # Init entry should appear before the user message
+        assert len(messages) == 2
+        assert messages[0].role == "user"
+        assert messages[0].content == "pre-process context"
+        assert messages[1].role == "user"
+        assert messages[1].content == "Hello"
+
+    async def test_add_history_entry_before_first_process_no_input_history(self):
+        """add_history_entry before process() works even with empty input history."""
+        agent, _ = create_agent_with_mock([])
+
+        agent.add_history_entry("early context")
+
+        messages = await agent._build_messages([], agent._local_history, current_event_id="current")
+
+        assert len(messages) == 1
+        assert messages[0].role == "user"
+        assert messages[0].content == "early context"
+
     async def test_responsive_to_current_event_id(self):
         """Each call tags the entry with the current event_id."""
         agent, _ = create_agent_with_mock([])
@@ -1968,7 +2003,12 @@ class TestAddHistoryEntry:
             [
                 StreamChunk(
                     tool_calls=[
-                        ToolCall(id="c1", name="inject_context", arguments='{"info": "important data"}', is_complete=True)
+                        ToolCall(
+                            id="c1",
+                            name="inject_context",
+                            arguments='{"info": "important data"}',
+                            is_complete=True,
+                        )
                     ]
                 ),
                 StreamChunk(is_final=True),
@@ -2055,12 +2095,14 @@ class TestProcessHistory:
 
     async def test_transform_end_to_end(self, turn_env):
         """process_history transform affects what the LLM sees."""
-        agent, mock_llm = create_agent_with_mock([
+        agent, mock_llm = create_agent_with_mock(
             [
-                StreamChunk(text="Response"),
-                StreamChunk(is_final=True),
-            ],
-        ])
+                [
+                    StreamChunk(text="Response"),
+                    StreamChunk(is_final=True),
+                ],
+            ]
+        )
 
         def add_reminder(history: list[HistoryEvent]) -> list[HistoryEvent]:
             return list(history) + [CustomHistoryEntry(content="Remember: be concise")]

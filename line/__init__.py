@@ -25,10 +25,10 @@ from line.events import (
     AgentTurnStarted,
     AgentUpdateCall,
     CallEnded,
-    # Custom events
-    CustomHistoryEntry,
     # Input events
     CallStarted,
+    # Custom events
+    CustomHistoryEntry,
     HistoryEvent,
     InputEvent,
     LogMessage,
