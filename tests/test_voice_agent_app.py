@@ -518,3 +518,46 @@ class TestParseCommitted:
         committed, _, remaining = _parse_committed("Hello world", "Hello 👋 world")
         assert committed == "Hello 👋 world"
         assert remaining == ""
+
+    def test_tts_inserted_full_stop_is_skipped(self):
+        """TTS-inserted full stop absent from pending is ignored."""
+        # TTS adds a period after "Hello" that wasn't in the original text
+        committed, remaining_committed, remaining = _parse_committed("Hello.World", "Hello World")
+        assert committed == "Hello World"
+        assert remaining_committed == ""
+        assert remaining == ""
+
+    def test_tts_inserted_devanagari_danda_is_skipped(self):
+        """TTS-inserted Devanagari danda (।) absent from pending is ignored."""
+        committed, remaining_committed, remaining = _parse_committed("नमस्ते।दुनिया", "नमस्ते दुनिया")
+        assert committed == "नमस्ते दुनिया"
+        assert remaining_committed == ""
+        assert remaining == ""
+
+    def test_tts_inserted_cjk_full_stop_is_skipped(self):
+        """TTS-inserted ideographic full stop (。) absent from pending is ignored."""
+        committed, remaining_committed, remaining = _parse_committed("你好。世界", "你好世界")
+        assert committed == "你好世界"
+        assert remaining_committed == ""
+        assert remaining == ""
+
+    def test_full_stop_present_in_both_is_preserved(self):
+        """A full stop that exists in both committed and pending is kept."""
+        committed, remaining_committed, remaining = _parse_committed("Hello.World", "Hello. World")
+        assert committed == "Hello. World"
+        assert remaining_committed == ""
+        assert remaining == ""
+
+    def test_trailing_tts_full_stop_is_skipped(self):
+        """A TTS-inserted full stop at the end of committed is cleaned up."""
+        committed, remaining_committed, remaining = _parse_committed("Hello.", "Hello World")
+        assert committed == "Hello"
+        assert remaining_committed == ""
+        assert remaining == " World"
+
+    def test_empty_pending_with_committed_returns_committed(self):
+        """When pending_text is empty but committed has content, return committed as-is."""
+        committed, remaining_committed, remaining = _parse_committed("Hello world", "")
+        assert committed == "Hello world"
+        assert remaining_committed == ""
+        assert remaining == ""
