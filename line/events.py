@@ -86,6 +86,22 @@ OutputEvent = Union[
 
 
 # -------------------------
+# Custom Events (agent-internal)
+# -------------------------
+
+
+class CustomHistoryEntry(BaseModel):
+    """Custom text entry injected into history via add_history_entry.
+
+    Not an InputEvent or OutputEvent — exists only in the agent's internal history
+    and appears as a user message in the LLM conversation.
+    """
+
+    type: Literal["custom_history_entry"] = "custom_history_entry"
+    content: str
+
+
+# -------------------------
 # Input Events (harness -> agent)
 # -------------------------
 # Each event has a stable event_id (UUID) for tracking which events trigger responses.
@@ -186,6 +202,18 @@ InputEvent = Union[
 ]
 
 
+# -------------------------
+# History Events (used in LLM message building)
+# -------------------------
+
+HistoryEvent = Union[
+    InputEvent,
+    AgentToolCalled,
+    AgentToolReturned,
+    CustomHistoryEntry,
+]
+
+
 __all__ = [
     # Output
     "AgentSendText",
@@ -199,6 +227,8 @@ __all__ = [
     "LogMessage",
     "AgentUpdateCall",
     "OutputEvent",
+    # Custom
+    "CustomHistoryEntry",
     # Input
     "CallStarted",
     "CallEnded",
@@ -211,4 +241,6 @@ __all__ = [
     "AgentDtmfSent",
     "AgentTurnEnded",
     "InputEvent",
+    # History
+    "HistoryEvent",
 ]

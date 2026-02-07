@@ -35,6 +35,8 @@ from line.events import (
     AgentToolReturned,
     CallEnded,
     CallStarted,
+    CustomHistoryEntry,
+    HistoryEvent,
     InputEvent,
     OutputEvent,
     UserTextSent,
@@ -50,6 +52,9 @@ T = TypeVar("T")
 # Type alias for tools that can be passed to LlmAgent
 # Plain callables are automatically wrapped as loopback tools
 ToolSpec = Union[FunctionTool, WebSearchTool, Callable]
+
+# Type for events stored in local history (OutputEvent or CustomHistoryEntry)
+_LocalEvent = Union[OutputEvent, CustomHistoryEntry]
 
 
 def _check_web_search_support(model: str) -> bool:
@@ -219,7 +224,7 @@ class LlmAgent:
         self._introduction_sent = False
         # Local history annotated with (triggering_event_id, event)
         # The event_id is the stable UUID of the triggering input event
-        self._local_history: List[tuple[str, OutputEvent]] = []
+        self._local_history: List[tuple[str, _LocalEvent]] = []
         # Event ID of the current triggering input event (set on each process() call)
         self._current_event_id: str = ""
         self._handoff_target: Optional[AgentCallable] = None  # Normalized process function
@@ -232,6 +237,10 @@ class LlmAgent:
         # Cache for thought signatures (Gemini 3+ models)
         # Maps tool_call_id -> thought_signature
         self._tool_signatures: Dict[str, str] = {}
+        # Registered history transform (called in _build_messages after _build_full_history)
+        self._process_history_fn: Optional[
+            Callable[[List[HistoryEvent]], Union[List[HistoryEvent], Awaitable[List[HistoryEvent]]]]
+        ] = None
 
         logger.info(f"LlmAgent initialized with model={self._model}, tools={[t.name for t in self._tools]}")
 
@@ -251,6 +260,27 @@ class LlmAgent:
     def handoff_target(self) -> Optional[AgentCallable]:
         """The normalized process function we've handed off to, if any."""
         return self._handoff_target
+
+    def process_history(
+        self,
+        fn: Callable[[List[HistoryEvent]], Union[List[HistoryEvent], Awaitable[List[HistoryEvent]]]],
+    ) -> None:
+        """Register a transform that processes the history before message building.
+
+        The transform is called in _build_messages after _build_full_history.
+        It receives the merged history and can filter, reorder, or inject events.
+        Both sync and async callables are supported.
+        """
+        self._process_history_fn = fn
+
+    def add_history_entry(self, content: str) -> None:
+        """Insert a CustomHistoryEntry event into local history.
+
+        The entry appears as a user message in the LLM conversation and is
+        considered responsive to the most recent input event.
+        """
+        event = CustomHistoryEntry(content=content)
+        self._append_to_local_history(event)
 
     async def process(self, env: TurnEnv, event: InputEvent) -> AsyncIterable[OutputEvent]:
         """Process an input event and yield output events."""
@@ -313,7 +343,7 @@ class LlmAgent:
             # ==== END LOOPBACK MANAGMENT ==== #
 
             # ==== GENERATION CALL ==== #
-            messages = self._build_messages(event.history, self._local_history, self._current_event_id)
+            messages = await self._build_messages(event.history, self._local_history, self._current_event_id)
             tool_calls_dict: Dict[str, ToolCall] = {}
 
             # Build kwargs for LLM chat, including web_search_options if available
@@ -496,10 +526,10 @@ class LlmAgent:
             if not (should_loopback or has_background_events or has_background_tasks):
                 break
 
-    def _build_messages(
+    async def _build_messages(
         self,
         input_history: List[InputEvent],
-        local_history: List[tuple[str, OutputEvent]],
+        local_history: List[tuple[str, _LocalEvent]],
         current_event_id: str,
     ) -> List[Message]:
         """Build LLM messages from conversation history.
@@ -508,14 +538,23 @@ class LlmAgent:
         1. Input history is the source of truth for all events
         2. Local history events are interpolated based on which input event triggered them
         3. Observable events are matched between local and input history
-        4. Unobservable events (tool calls) are interpolated relative to observables
+        4. Unobservable events (tool calls, custom text) are interpolated relative to observables
         5. Tool calls without matching results get a "pending" result
 
-        The full_history contains:
-        - InputEvent (with history=None) for events from input_history
-        - OutputEvent for unobservable/current events from local_history
+        The full_history contains HistoryEvent items:
+        - InputEvent for events from input_history (observable OutputEvents converted to InputEvent counterparts)
+        - AgentToolCalled/AgentToolReturned for tool interactions from local_history
+        - CustomHistoryEntry for injected history entries from local_history
         """
         full_history = _build_full_history(input_history, local_history, current_event_id)
+
+        # Apply registered history transform
+        if self._process_history_fn is not None:
+            result = self._process_history_fn(full_history)
+            if inspect.isawaitable(result):
+                full_history = await result
+            else:
+                full_history = result  # type: ignore[assignment]
 
         # First pass: collect all tool_call_ids that have matching AgentToolReturned
         returned_tool_call_ids: set[str] = set()
@@ -525,14 +564,15 @@ class LlmAgent:
 
         messages = []
         for event in full_history:
-            # Handle InputEvent types (from input_history)
+            # Handle InputEvent types
             if isinstance(event, UserTextSent):
                 messages.append(Message(role="user", content=event.content))
             elif isinstance(event, AgentTextSent):
                 messages.append(Message(role="assistant", content=event.content))
-            # Handle OutputEvent types (unobservable events from local_history)
-            elif isinstance(event, AgentSendText):
-                messages.append(Message(role="assistant", content=event.text))
+            # Handle CustomHistoryEntry (injected history entries → user message)
+            elif isinstance(event, CustomHistoryEntry):
+                messages.append(Message(role="user", content=event.content))
+            # Handle tool events from local_history
             elif isinstance(event, AgentToolCalled):
                 # Look up thought_signature from cache (for Gemini 3+ models)
                 # The tool_call_id may have a suffix like "-0", "-1" for streaming tools
@@ -639,8 +679,8 @@ class LlmAgent:
 
         self._background_task = asyncio.ensure_future(_new_background_task())
 
-    def _append_to_local_history(self, event: OutputEvent) -> None:
-        """Append an output event to local history, annotated with the triggering event_id."""
+    def _append_to_local_history(self, event: _LocalEvent) -> None:
+        """Append an event to local history, annotated with the triggering event_id."""
         self._local_history.append((self._current_event_id, event))
 
     async def _maybe_await_background_event(self) -> Union[None, tuple[AgentToolCalled, AgentToolReturned]]:
@@ -688,9 +728,9 @@ class LlmAgent:
 
 def _build_full_history(
     input_history: List[InputEvent],
-    local_history: List[tuple[str, OutputEvent]],
+    local_history: List[tuple[str, _LocalEvent]],
     current_event_id: str,
-) -> List[Union[InputEvent, OutputEvent]]:
+) -> List[HistoryEvent]:
     """
     Build full history by merging input_history (canonical) with local_history.
 
@@ -699,6 +739,11 @@ def _build_full_history(
         local_history: Local events annotated with (triggering_event_id, event)
         current_event_id: Event ID of the current input event being processed
 
+    Returns:
+        List of HistoryEvent items (InputEvent | AgentToolCalled | AgentToolReturned | CustomHistoryEntry).
+        Observable OutputEvents from local_history are converted to their InputEvent
+        counterparts (e.g. AgentSendText -> AgentTextSent).
+
     Algorithm:
     1. Split local history into prior (already observed) and current (not yet observed)
     2. Build a map from event_id to list of responsive local events
@@ -706,12 +751,12 @@ def _build_full_history(
        - If the event has responsive local events, process a "slice" of input
          from this event to the next triggering event using interpolation logic
        - If no responsive local events, output the event as-is
-    4. Append current local events at the end
+    4. Append current local events at the end (converting observables to InputEvent counterparts)
 
     Rules:
     - Input history is the source of truth for all observable events
     - Observable events: AgentSendText, AgentSendDtmf, AgentEndCall (and their input counterparts)
-    - Unobservable events (tool calls) are interpolated relative to observables
+    - Unobservable events (tool calls, custom text) are interpolated relative to observables
     - Prefix matching: if input text is prefix of local text, match and carry forward suffix
     """
     from collections import defaultdict
@@ -721,7 +766,7 @@ def _build_full_history(
     current_local = [e for eid, e in local_history if eid == current_event_id]
 
     # Build map from event_id to list of responsive local events
-    local_by_event_id: dict[str, List[OutputEvent]] = defaultdict(list)
+    local_by_event_id: dict[str, List[_LocalEvent]] = defaultdict(list)
     for eid, event in prior_local:
         local_by_event_id[eid].append(event)
 
@@ -729,7 +774,7 @@ def _build_full_history(
     trigger_event_ids = set(local_by_event_id.keys())
 
     # Process input in slices
-    result: List[Union[InputEvent, OutputEvent]] = []
+    result: list = []
     i = 0
 
     while i < len(input_history):
@@ -762,13 +807,38 @@ def _build_full_history(
     # Append current local events (not yet observed, use local version)
     result.extend(current_local)
 
-    return result
+    # Convert observable OutputEvents to InputEvent counterparts
+    return [h for e in result if (h := _to_history_event(e)) is not None]
 
 
-def _concat_contiguous_agent_send_text(local_history: List[OutputEvent]) -> List[OutputEvent]:
+def _to_history_event(event: Any) -> Optional[HistoryEvent]:
+    """Convert an event to a HistoryEvent.
+
+    Observable OutputEvents are converted to their InputEvent counterparts.
+    Non-history OutputEvents (LogMetric, etc.) are filtered out (returns None).
+    All other events (InputEvent, AgentToolCalled, AgentToolReturned, CustomHistoryEntry)
+    pass through unchanged.
+    """
+    if isinstance(event, AgentSendText):
+        return AgentTextSent(content=event.text)
+    elif isinstance(event, AgentSendDtmf):
+        return AgentDtmfSent(button=event.button)
+    elif isinstance(event, AgentEndCall):
+        return CallEnded()
+    elif isinstance(event, (AgentToolCalled, AgentToolReturned, CustomHistoryEntry)):
+        return event
+    elif hasattr(event, "event_id"):
+        # InputEvent types all have event_id
+        return event  # type: ignore[return-value]
+    else:
+        # Non-HistoryEvent OutputEvent (LogMetric, LogMessage, etc.)
+        return None
+
+
+def _concat_contiguous_agent_send_text(local_history: List[_LocalEvent]) -> List[_LocalEvent]:
     """Concatenate contiguous AgentSendText events in local history."""
 
-    def reduce_texts(a: OutputEvent, b: OutputEvent) -> List[OutputEvent]:
+    def reduce_texts(a: _LocalEvent, b: _LocalEvent) -> List[_LocalEvent]:
         if isinstance(a, AgentSendText) and isinstance(b, AgentSendText):
             return [AgentSendText(text=a.text + b.text)]
         return [a, b]
@@ -778,8 +848,8 @@ def _concat_contiguous_agent_send_text(local_history: List[OutputEvent]) -> List
 
 def _build_history_rec(
     input_history: List[InputEvent],
-    local_history: List[OutputEvent],
-) -> List[Union[InputEvent, OutputEvent]]:
+    local_history: List[_LocalEvent],
+) -> List[Union[InputEvent, _LocalEvent]]:
     """
     Recursive implementation of history merging.
 
@@ -837,8 +907,8 @@ def _build_history_rec(
 
 
 def _drain_leading_unobservables(
-    local_history: List[OutputEvent],
-) -> tuple[List[OutputEvent], List[OutputEvent]]:
+    local_history: List[_LocalEvent],
+) -> tuple[List[_LocalEvent], List[_LocalEvent]]:
     """Drain leading non-observable events from local_history.
 
     Only drains AgentToolReturned events (not AgentToolCalled). This is because
@@ -850,7 +920,7 @@ def _drain_leading_unobservables(
     Returns:
         (drained_events, remaining_events)
     """
-    drained: List[OutputEvent] = []
+    drained: List[_LocalEvent] = []
     remaining = list(local_history)
     while remaining:
         head = remaining[0]
@@ -871,8 +941,8 @@ OBSERVABLE_OUTPUT_EVENT_TYPES = (
 )
 
 
-def _is_local_observable(event: OutputEvent) -> bool:
-    """Check if an OutputEvent is observable (can be matched to input history)."""
+def _is_local_observable(event: _LocalEvent) -> bool:
+    """Check if a local event is observable (can be matched to input history)."""
     return isinstance(event, OBSERVABLE_OUTPUT_EVENT_TYPES)
 
 
@@ -889,8 +959,8 @@ def _is_input_observable(event: InputEvent) -> bool:
 
 
 def _try_match_events(
-    local: OutputEvent, input_evt: InputEvent
-) -> Optional[tuple[InputEvent, Optional[OutputEvent]]]:
+    local: _LocalEvent, input_evt: InputEvent
+) -> Optional[tuple[InputEvent, Optional[_LocalEvent]]]:
     """Try to match a local observable event to an input observable event.
 
     Returns:
