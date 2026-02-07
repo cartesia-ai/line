@@ -70,89 +70,6 @@ _LocalEvent = Union[OutputEvent, CustomHistoryEntry]
 _INIT_EVENT_ID = "__init__"
 
 
-def _check_web_search_support(model: str) -> bool:
-    """Check if a model supports native web search via litellm.
-
-    Returns True if the model supports web_search_options, False otherwise.
-    """
-    try:
-        import litellm
-
-        return litellm.supports_web_search(model=model)
-    except (ImportError, AttributeError, Exception):
-        # If litellm doesn't have supports_web_search or any error occurs,
-        # fall back to the tool-based approach
-        return False
-
-
-def _web_search_tool_to_function_tool(web_search_tool: WebSearchTool) -> FunctionTool:
-    """Convert a WebSearchTool to a FunctionTool for use as a fallback.
-
-    When the LLM doesn't support native web search, we use the WebSearchTool's
-    search method as a regular loopback tool.
-    """
-    return construct_function_tool(
-        func=web_search_tool.search,
-        name="web_search",
-        description="Search the web for real-time information."
-        + " Use this when you need current information that may not be in your training data.",
-        tool_type=ToolType.LOOPBACK,
-    )
-
-
-async def _normalize_result(
-    result: Union[AsyncIterable[T], Awaitable[T], T],
-) -> AsyncIterable[T]:
-    """Normalize any result type to an async iterable.
-
-    Converts: AsyncIterable[T] | Awaitable[T] | T => AsyncIterable[T]
-    """
-    if inspect.iscoroutine(result) or inspect.isawaitable(result):
-        yield await result  # type: ignore[misc]
-    elif hasattr(result, "__aiter__"):
-        async for item in result:  # type: ignore[union-attr]
-            yield item
-    else:
-        yield result  # type: ignore[misc]
-
-
-def _normalize_to_async_gen(
-    func: Callable[..., Union[AsyncIterable[T], Awaitable[T], T]],
-) -> Callable[..., AsyncIterable[T]]:
-    """Wrap a function to always return an async generator.
-
-    Converts: Callable[..., AsyncIterable[T] | Awaitable[T] | T] => Callable[..., AsyncIterable[T]]
-    """
-
-    async def wrapper(*args: Any, **kwargs: Any) -> AsyncIterable[T]:
-        result = func(*args, **kwargs)
-        async for item in _normalize_result(result):
-            yield item
-
-    return wrapper
-
-
-def _construct_tool_events(
-    tool_call_id: str,
-    tool_name: str,
-    tool_args: Dict[str, Any],
-    result: Any,
-) -> tuple[AgentToolCalled, AgentToolReturned]:
-    """Construct a pair of AgentToolCalled and AgentToolReturned events."""
-    called = AgentToolCalled(
-        tool_call_id=tool_call_id,
-        tool_name=tool_name,
-        tool_args=tool_args,
-    )
-    returned = AgentToolReturned(
-        tool_call_id=tool_call_id,
-        tool_name=tool_name,
-        tool_args=tool_args,
-        result=result,
-    )
-    return called, returned
-
-
 class LlmAgent:
     """
     Agent wrapping LLM providers via LiteLLM with tool calling support.
@@ -274,25 +191,24 @@ class LlmAgent:
         """The normalized process function we've handed off to, if any."""
         return self._handoff_target
 
-    def process_history(
+    def set_history_processor(
         self,
         fn: Callable[[List[HistoryEvent]], Union[List[HistoryEvent], Awaitable[List[HistoryEvent]]]],
     ) -> None:
         """Register a transform that processes the history before message building.
 
-        The transform is called in _build_messages after _build_full_history.
-        It receives the merged history and can filter, reorder, or inject events.
-        Both sync and async callables are supported.
+        The transform is called on the history before its passed to the LLM
+        It receives the original history and can filter, reorder, or inject events.
         """
         self._process_history_fn = fn
 
-    def add_history_entry(self, content: str) -> None:
+    def add_history_entry(self, content: str, role: str = "system") -> None:
         """Insert a CustomHistoryEntry event into local history.
 
-        The entry appears as a user message in the LLM conversation and is
-        considered responsive to the most recent input event.
+        The entry appears as a message with the given role ("system" by default) in the
+        LLM conversation
         """
-        event = CustomHistoryEntry(content=content)
+        event = CustomHistoryEntry(content=content, role=role)  # type: ignore[arg-type]
         self._append_to_local_history(event)
 
     async def process(self, env: TurnEnv, event: InputEvent) -> AsyncIterable[OutputEvent]:
@@ -564,10 +480,16 @@ class LlmAgent:
 
         # Apply registered history transform
         if self._process_history_fn is not None:
-            result = self._process_history_fn(full_history)
-            if inspect.isawaitable(result):
-                result = await result
-            full_history = _validate_processed_history(result)
+            try:
+                result = self._process_history_fn(full_history)
+                if inspect.isawaitable(result):
+                    result = await result
+                full_history = _validate_processed_history(result)
+            except Exception:
+                logger.error(
+                    f"History processor failed, using unprocessed history:\n{traceback.format_exc(limit=-10)}"
+                )
+                # full_history is unchanged — fall back to unprocessed version
 
         # First pass: collect all tool_call_ids that have matching AgentToolReturned
         returned_tool_call_ids: set[str] = set()
@@ -582,9 +504,9 @@ class LlmAgent:
                 messages.append(Message(role="user", content=event.content))
             elif isinstance(event, AgentTextSent):
                 messages.append(Message(role="assistant", content=event.content))
-            # Handle CustomHistoryEntry (injected history entries → user message)
+            # Handle CustomHistoryEntry (injected history entries)
             elif isinstance(event, CustomHistoryEntry):
-                messages.append(Message(role="user", content=event.content))
+                messages.append(Message(role=event.role, content=event.content))
             # Handle tool events from local_history
             elif isinstance(event, AgentToolCalled):
                 # Look up thought_signature from cache (for Gemini 3+ models)
@@ -739,6 +661,89 @@ class LlmAgent:
         await self._llm.aclose()
 
 
+def _check_web_search_support(model: str) -> bool:
+    """Check if a model supports native web search via litellm.
+
+    Returns True if the model supports web_search_options, False otherwise.
+    """
+    try:
+        import litellm
+
+        return litellm.supports_web_search(model=model)
+    except (ImportError, AttributeError, Exception):
+        # If litellm doesn't have supports_web_search or any error occurs,
+        # fall back to the tool-based approach
+        return False
+
+
+def _web_search_tool_to_function_tool(web_search_tool: WebSearchTool) -> FunctionTool:
+    """Convert a WebSearchTool to a FunctionTool for use as a fallback.
+
+    When the LLM doesn't support native web search, we use the WebSearchTool's
+    search method as a regular loopback tool.
+    """
+    return construct_function_tool(
+        func=web_search_tool.search,
+        name="web_search",
+        description="Search the web for real-time information."
+        + " Use this when you need current information that may not be in your training data.",
+        tool_type=ToolType.LOOPBACK,
+    )
+
+
+async def _normalize_result(
+    result: Union[AsyncIterable[T], Awaitable[T], T],
+) -> AsyncIterable[T]:
+    """Normalize any result type to an async iterable.
+
+    Converts: AsyncIterable[T] | Awaitable[T] | T => AsyncIterable[T]
+    """
+    if inspect.iscoroutine(result) or inspect.isawaitable(result):
+        yield await result  # type: ignore[misc]
+    elif hasattr(result, "__aiter__"):
+        async for item in result:  # type: ignore[union-attr]
+            yield item
+    else:
+        yield result  # type: ignore[misc]
+
+
+def _normalize_to_async_gen(
+    func: Callable[..., Union[AsyncIterable[T], Awaitable[T], T]],
+) -> Callable[..., AsyncIterable[T]]:
+    """Wrap a function to always return an async generator.
+
+    Converts: Callable[..., AsyncIterable[T] | Awaitable[T] | T] => Callable[..., AsyncIterable[T]]
+    """
+
+    async def wrapper(*args: Any, **kwargs: Any) -> AsyncIterable[T]:
+        result = func(*args, **kwargs)
+        async for item in _normalize_result(result):
+            yield item
+
+    return wrapper
+
+
+def _construct_tool_events(
+    tool_call_id: str,
+    tool_name: str,
+    tool_args: Dict[str, Any],
+    result: Any,
+) -> tuple[AgentToolCalled, AgentToolReturned]:
+    """Construct a pair of AgentToolCalled and AgentToolReturned events."""
+    called = AgentToolCalled(
+        tool_call_id=tool_call_id,
+        tool_name=tool_name,
+        tool_args=tool_args,
+    )
+    returned = AgentToolReturned(
+        tool_call_id=tool_call_id,
+        tool_name=tool_name,
+        tool_args=tool_args,
+        result=result,
+    )
+    return called, returned
+
+
 def _build_full_history(
     input_history: List[InputEvent],
     local_history: List[tuple[str, _LocalEvent]],
@@ -851,16 +856,18 @@ _HISTORY_EVENT_TYPES = (
 
 
 def _validate_processed_history(history: Any) -> List[HistoryEvent]:
-    """Validate that process_history returned a List[HistoryEvent].
+    """Validate that set_history_processor returned a List[HistoryEvent].
 
     Raises TypeError if the return value is not a list or contains non-HistoryEvent items.
     """
     if not isinstance(history, list):
-        raise TypeError(f"process_history must return List[HistoryEvent], got {type(history).__name__}")
+        raise TypeError(
+            f"set_history_processor callback must return List[HistoryEvent], got {type(history).__name__}"
+        )
     for i, event in enumerate(history):
         if not isinstance(event, _HISTORY_EVENT_TYPES):
             raise TypeError(
-                f"process_history returned invalid event at index {i}: "
+                f"set_history_processor callback returned invalid event at index {i}: "
                 f"expected HistoryEvent, got {type(event).__name__}"
             )
     return history

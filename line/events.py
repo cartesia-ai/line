@@ -94,10 +94,11 @@ class CustomHistoryEntry(BaseModel):
     """Custom text entry injected into history via add_history_entry.
 
     Not an InputEvent or OutputEvent — exists only in the agent's internal history
-    and appears as a user message in the LLM conversation.
+    and appears as a message in the LLM conversation with the specified role.
     """
 
     type: Literal["custom_history_entry"] = "custom_history_entry"
+    role: Literal["system", "user"] = "system"
     content: str
 
 

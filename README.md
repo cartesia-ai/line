@@ -233,6 +233,73 @@ async def search_database(ctx, query: Annotated[str, "Search query"]) -> str:
 
 ---
 
+## Context Management
+
+Control what the LLM sees in its conversation history using `add_history_entry` and `set_history_processor`.
+
+### Inject Context with `add_history_entry`
+
+Insert text into the LLM's conversation history. By default, entries appear as system messages. This is useful for injecting context for controlling exactly what the LLM sees from tool calls, or integrating information from external APIs.
+
+```python
+from line.llm_agent import LlmAgent, LlmConfig, loopback_tool
+
+agent = LlmAgent(
+    model="gemini/gemini-2.5-flash-preview-09-2025",
+    api_key=os.getenv("GEMINI_API_KEY"),
+    config=LlmConfig(system_prompt="You are a helpful assistant."),
+)
+
+# Inject context before the conversation starts
+agent.add_history_entry("The customer's name is Alice and she has a premium account.")
+
+# Or inject context from within a tool call
+@loopback_tool
+async def lookup_customer(ctx, customer_id: str) -> str:
+    """Look up customer details."""
+    customer = await db.get_customer(customer_id)
+    # Inject rich context that persists across turns
+    agent.add_history_entry(f"Customer profile: {customer.summary}")
+    return f"Found customer {customer.name}"
+```
+
+Each entry defaults to a system message (`role="system"`). Pass `role="user"` to inject as a user message instead.
+
+### Transform History with `set_history_processor`
+
+Register a function that transforms the full conversation history before it's passed to the LLM. This gives you control over filtering, reordering, or injecting events
+
+```python
+from line import HistoryEvent, CustomHistoryEntry, UserTextSent
+
+# Filter history to only keep user messages and custom entries
+def keep_relevant(history: list[HistoryEvent]) -> list[HistoryEvent]:
+    return [e for e in history if isinstance(e, (UserTextSent, CustomHistoryEntry))]
+
+agent.set_history_processor(keep_relevant)
+```
+
+```python
+# Append a reminder to every LLM call
+def add_reminder(history: list[HistoryEvent]) -> list[HistoryEvent]:
+    return list(history) + [CustomHistoryEntry(content="Remember: be concise and friendly.")]
+
+agent.set_history_processor(add_reminder)
+```
+
+```python
+# Async transforms work too — useful for fetching external context
+async def inject_live_context(history: list[HistoryEvent]) -> list[HistoryEvent]:
+    context = await fetch_latest_context()
+    return [CustomHistoryEntry(content=context)] + list(history)
+
+agent.set_history_processor(inject_live_context)
+```
+
+The transform receives the full history (input events + local events) as a list of `HistoryEvent` items and *must* return a list of `HistoryEvent` items.
+
+---
+
 ## Customize Your Agent's Implementation
 
 ### Wrap with Custom Logic
