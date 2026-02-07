@@ -499,6 +499,11 @@ class ConversationRunner:
         processed_event = processed_history[-1]
         # Extract base data excluding history (we'll set it explicitly)
         base_data = {k: v for k, v in processed_event.model_dump().items() if k != "history"}
+        if type(processed_event) is not type(raw_event):
+            logger.warning(
+                f"Processed event type {type(processed_event).__name__}"
+                f"differs from raw event type {type(raw_event).__name__}"
+            )
 
         event: InputEvent
         if isinstance(processed_event, CallStarted):
@@ -524,10 +529,13 @@ class ConversationRunner:
             logger.info("-> 🤖🔊 Agent started speaking")
         elif isinstance(processed_event, AgentTextSent):
             event = AgentTextSent(history=processed_history, **base_data)
-            # special case: log the raw event content (without whitespace restoration)
-            # otherwise we re-log the same text multiple times with the new stuff
-            # concatenated
-            logger.info(f'-> 🤖🗣️ Agent said: "{raw_event.content}"')
+            if type(event) is not type(raw_event):
+                logger.info(f'-> 🤖🗣️ Agent said: "{event.content}"')
+            else:
+                # special case: log the raw event content (without whitespace restoration)
+                # otherwise we re-log the same text multiple times with the new stuff
+                # concatenated
+                logger.info(f'-> 🤖🗣️ Agent said: "{raw_event.content}"')
         elif isinstance(processed_event, AgentDtmfSent):
             event = AgentDtmfSent(history=processed_history, **base_data)
         elif isinstance(processed_event, AgentTurnEnded):
@@ -583,33 +591,6 @@ class ConversationRunner:
         return ErrorOutput(content=f"Unhandled output event type: {type(event).__name__}")
 
 
-# Regex to split text into words, whitespace, and punctuation
-NORMAL_CHARACTERS_REGEX = r"(\s+|[^\w\s]+)"
-
-# Regex to match strings consisting entirely of emoji characters
-EMOJI_REGEX = re.compile(
-    r"^["
-    r"\U0001F600-\U0001F64F"  # emoticons
-    r"\U0001F300-\U0001F5FF"  # symbols & pictographs
-    r"\U0001F680-\U0001F6FF"  # transport & map symbols
-    r"\U0001F1E0-\U0001F1FF"  # flags
-    r"\U0001F900-\U0001F9FF"  # Supplemental Symbols and Pictographs
-    r"\U0001FA00-\U0001FAFF"  # Symbols and Pictographs Extended-A
-    r"\U00002600-\U000026FF"  # Misc symbols
-    r"\U00002700-\U000027BF"  # Dingbats
-    r"\U0000FE00-\U0000FE0F"  # Variation Selectors
-    r"\U0001F000-\U0001F02F"  # Mahjong Tiles
-    r"\U0001F0A0-\U0001F0FF"  # Playing Cards
-    r"\U0000200D"  # Zero Width Joiner (for compound emoji sequences)
-    r"]+$"
-)
-
-
-def _is_stripped_by_harness(s: str) -> bool:
-    """Check if string consists entirely of whitespace or emoji characters."""
-    return s.isspace() or bool(EMOJI_REGEX.match(s))
-
-
 def _get_processed_history(pending_text: str, history: List[InputEvent]) -> List[InputEvent]:
     """
     Process history to reinterpolate whitespace into AgentTextSent events.
@@ -636,7 +617,10 @@ def _get_processed_history(pending_text: str, history: List[InputEvent]) -> List
             )
             if committed_text:
                 processed_events.append(AgentTextSent(content=committed_text))
-            if isinstance(event, AgentTurnEnded) and committed_text_buffer:
+            if isinstance(event, (AgentTurnEnded, CallEnded)) and committed_text_buffer:
+                logger.warning(
+                    f"Unexpected committed text buffer at end of turn/call: '{committed_text_buffer}'"
+                )
                 # this is a hack to basically "throw up our hands" when we see the end of an agent turn"
                 # we commit all buffered text immediately, even if it doesn't match perfectly with
                 # pending_text. Since we can't _exactly_ know what text was dropped by Sonic's wordstamps
@@ -654,50 +638,104 @@ def _get_processed_history(pending_text: str, history: List[InputEvent]) -> List
 
 def _parse_committed(committed_buffer_text: str, pending_text: str) -> tuple[str, str, str]:
     """
-    Parse committed text by matching speech_text against pending_text to recover whitespace.
+    Parse committed text by aligning it character-by-character against pending_text
+    to recover whitespace and emoji formatting.
 
-    The TTS system strips whitespace when confirming speech. This method matches the
-    stripped speech_text against the original pending_text (with whitespace) to recover
-    the properly formatted committed text.
+    Uses a two-pointer approach with whitespace buffering:
+
+    - Characters that match in both strings are consumed and included in output.
+    - Whitespace/emoji characters in pending_text are buffered and only flushed
+      into the output on the next successful character match. This avoids
+      interpolating whitespace that surrounds skipped/dropped text.
+    - Full stop characters (e.g. '.', '।', '。') in committed_buffer_text that
+      don't match the current pending character are skipped, since TTS may insert
+      sentence-ending punctuation absent from the original text.
+    - Non-matching, non-whitespace/emoji characters in pending_text are skipped
+      (the TTS may have dropped a word), and any buffered whitespace around them
+      is discarded.
 
     Args:
-        committed_buffer_text: Confirmed speech from TTS (whitespace stripped)
+        committed_buffer_text: Confirmed speech from TTS (whitespace/emoji stripped)
         pending_text: Accumulated text from AgentSendText events (with whitespace)
 
     Returns:
-        Tuple of (committed_text_with_whitespace, remaining_pending_text)
+        Tuple of (committed_text_with_whitespace, remaining_committed, remaining_pending)
     """
-    committed_buffer_parts = list(
-        filter(lambda x: x != "", re.split(NORMAL_CHARACTERS_REGEX, committed_buffer_text))
-    )
-    pending_parts = list(filter(lambda x: x != "", re.split(NORMAL_CHARACTERS_REGEX, pending_text)))
+    if not committed_buffer_text:
+        return "", "", pending_text
 
-    # If the pending text has no spaces (ex. non-latin languages), commit the entire speech text.
-    if len([x for x in pending_parts if _is_stripped_by_harness(x)]) == 0:
-        match_index = pending_text.find(committed_buffer_text)
-        return committed_buffer_text, "", pending_text[match_index + len(committed_buffer_text) :]
+    i = 0  # pointer into committed_buffer_text
+    j = 0  # pointer into pending_text
+    result: list[str] = []
+    ws_buffer: list[str] = []  # buffered whitespace/emoji awaiting next match
+    started = False  # whether we've matched at least one character
 
-    committed_parts: list[str] = []
-    still_pending_parts: list[str] = []
-    for pending_part in pending_parts:
-        # If speech_text is empty, treat remaining pending parts as still pending.
-        if not committed_buffer_parts:
-            still_pending_parts.append(pending_part)
-        # If the next pending text matches the start of what's been marked committed (as sent by TTS),
-        # add it to committed and trim it from committed_buffer_parts.
-        elif committed_buffer_parts[0].startswith(pending_part):
-            committed_buffer_parts[0] = committed_buffer_parts[0][len(pending_part) :]
-            committed_parts.append(pending_part)
-            if len(committed_buffer_parts[0]) == 0:
-                committed_buffer_parts.pop(0)
-        # If the part is purely whitespace or emoji, add it directly to committed_parts.
-        # (The API harness strips both whitespace and emojis from AgentTextSent events.)
-        elif _is_stripped_by_harness(pending_part):
-            committed_parts.append(pending_part)
-        # Otherwise, this part isn't aligned with the committed speech
-        # (possibly an interruption or TTS mismatch); skip it.
+    while i < len(committed_buffer_text) and j < len(pending_text):
+        c = committed_buffer_text[i]
+        p = pending_text[j]
+
+        if c == p:
+            # Characters match: flush buffered whitespace/emoji and consume both
+            started = True
+            result.extend(ws_buffer)
+            ws_buffer = []
+            result.append(p)
+            i += 1
+            j += 1
+        elif _is_stripped_by_harness(p):
+            # Whitespace/emoji in pending: buffer it for potential inclusion
+            if started:
+                ws_buffer.append(p)
+            j += 1
+        elif c in FULL_STOP_CHARS:
+            # TTS-inserted full stop not present in pending: skip it
+            i += 1
         else:
-            pass
+            # Non-matching text in pending (TTS dropped this content):
+            # skip and discard any buffered whitespace around it
+            ws_buffer = []
+            j += 1
 
-    committed_str = "".join(committed_parts).strip()
-    return committed_str, "".join(committed_buffer_parts), "".join(still_pending_parts)
+    # Skip any trailing TTS-inserted full stops in remaining committed text
+    while i < len(committed_buffer_text) and committed_buffer_text[i] in FULL_STOP_CHARS:
+        i += 1
+
+    committed_str = "".join(result).strip()
+    remaining_committed = committed_buffer_text[i:]
+    # Any buffered whitespace/emoji that was never flushed (no subsequent match)
+    # must be returned to remaining_pending so it's available for future alignment.
+    remaining_pending = "".join(ws_buffer) + pending_text[j:]
+
+    return committed_str, remaining_committed, remaining_pending
+
+
+# Regex to match strings consisting entirely of emoji characters
+EMOJI_REGEX = re.compile(
+    r"^["
+    r"\U0001F600-\U0001F64F"  # emoticons
+    r"\U0001F300-\U0001F5FF"  # symbols & pictographs
+    r"\U0001F680-\U0001F6FF"  # transport & map symbols
+    r"\U0001F1E0-\U0001F1FF"  # flags
+    r"\U0001F900-\U0001F9FF"  # Supplemental Symbols and Pictographs
+    r"\U0001FA00-\U0001FAFF"  # Symbols and Pictographs Extended-A
+    r"\U00002600-\U000026FF"  # Misc symbols
+    r"\U00002700-\U000027BF"  # Dingbats
+    r"\U0000FE00-\U0000FE0F"  # Variation Selectors
+    r"\U0001F000-\U0001F02F"  # Mahjong Tiles
+    r"\U0001F0A0-\U0001F0FF"  # Playing Cards
+    r"\U0000200D"  # Zero Width Joiner (for compound emoji sequences)
+    r"]+$"
+)
+
+
+def _is_stripped_by_harness(s: str) -> bool:
+    """Check if string consists entirely of whitespace or emoji characters.
+
+    Works for both multi-character strings and single codepoints.
+    """
+    return s.isspace() or bool(EMOJI_REGEX.match(s))
+
+
+# Full stop characters that TTS may insert as sentence-ending punctuation
+# even when they're absent from the original agent-emitted text.
+FULL_STOP_CHARS = frozenset(".।。")
