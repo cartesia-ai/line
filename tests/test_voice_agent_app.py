@@ -554,3 +554,10 @@ class TestParseCommitted:
         assert committed == "Hello"
         assert remaining_committed == ""
         assert remaining == " World"
+
+    def test_empty_pending_with_committed_returns_committed(self):
+        """When pending_text is empty but committed has content, return committed as-is."""
+        committed, remaining_committed, remaining = _parse_committed("Hello world", "")
+        assert committed == "Hello world"
+        assert remaining_committed == ""
+        assert remaining == ""

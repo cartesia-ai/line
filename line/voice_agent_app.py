@@ -664,6 +664,16 @@ def _parse_committed(committed_buffer_text: str, pending_text: str) -> tuple[str
     if not committed_buffer_text:
         return "", "", pending_text
 
+    if not pending_text:
+        # This shouldn't be possible: pending_text accumulates from AgentSendText
+        # events, so it can't be empty when committed_buffer_text has content.
+        # Handle it gracefully just in case.
+        logger.warning(
+            f"pending_text is empty but committed_buffer_text has content: "
+            f"'{committed_buffer_text}'. Returning committed buffer as-is."
+        )
+        return committed_buffer_text, "", ""
+
     i = 0  # pointer into committed_buffer_text
     j = 0  # pointer into pending_text
     result: list[str] = []
