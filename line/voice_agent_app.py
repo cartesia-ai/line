@@ -501,7 +501,7 @@ class ConversationRunner:
         base_data = {k: v for k, v in processed_event.model_dump().items() if k != "history"}
         if type(processed_event) is not type(raw_event):
             logger.warning(
-                f"Processed event type {type(processed_event).__name__}"
+                f"Processed event type {type(processed_event).__name__} "
                 f"differs from raw event type {type(raw_event).__name__}"
             )
 
