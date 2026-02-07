@@ -33,9 +33,9 @@ from line.events import (
     AgentTextSent,
     AgentToolCalled,
     AgentToolReturned,
+    AgentTransferCall,
     AgentTurnEnded,
     AgentTurnStarted,
-    AgentTransferCall,
     AgentUpdateCall,
     CallEnded,
     CallStarted,
@@ -566,9 +566,8 @@ class LlmAgent:
         if self._process_history_fn is not None:
             result = self._process_history_fn(full_history)
             if inspect.isawaitable(result):
-                full_history = await result
-            else:
-                full_history = result  # type: ignore[assignment]
+                result = await result
+            full_history = _validate_processed_history(result)
 
         # First pass: collect all tool_call_ids that have matching AgentToolReturned
         returned_tool_call_ids: set[str] = set()
@@ -828,6 +827,43 @@ def _build_full_history(
 
     # Convert observable OutputEvents to InputEvent counterparts
     return [h for e in result if (h := _to_history_event(e)) is not None]
+
+
+_HISTORY_EVENT_TYPES = (
+    # InputEvent types
+    CallStarted,
+    CallEnded,
+    AgentHandedOff,
+    UserTurnStarted,
+    UserDtmfSent,
+    UserTextSent,
+    UserTurnEnded,
+    AgentTurnStarted,
+    AgentTextSent,
+    AgentDtmfSent,
+    AgentTurnEnded,
+    # Tool events
+    AgentToolCalled,
+    AgentToolReturned,
+    # Custom entries
+    CustomHistoryEntry,
+)
+
+
+def _validate_processed_history(history: Any) -> List[HistoryEvent]:
+    """Validate that process_history returned a List[HistoryEvent].
+
+    Raises TypeError if the return value is not a list or contains non-HistoryEvent items.
+    """
+    if not isinstance(history, list):
+        raise TypeError(f"process_history must return List[HistoryEvent], got {type(history).__name__}")
+    for i, event in enumerate(history):
+        if not isinstance(event, _HISTORY_EVENT_TYPES):
+            raise TypeError(
+                f"process_history returned invalid event at index {i}: "
+                f"expected HistoryEvent, got {type(event).__name__}"
+            )
+    return history
 
 
 def _to_history_event(event: Any) -> Optional[HistoryEvent]:
