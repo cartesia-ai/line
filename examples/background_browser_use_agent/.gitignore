@@ -1,5 +1,5 @@
 # Browser session data (can be 100MB+)
-browser_profile/
+# browser_profile/
 recordings/
 browser_bin/
 
