@@ -35,6 +35,8 @@ from line.voice_agent_app import AgentEnv, CallRequest, VoiceAgentApp
 # ---------------------------------------------------------------------------
 _MUSIC_SERVER_URL = os.getenv("MUSIC_MODEL_SERVER_URL", "http://localhost:8190")
 _SONG_OUTPUT_DIR = Path(__file__).resolve().parent / "song-generated"
+# ngrok free-tier serves an interstitial HTML page unless this header is set
+_MUSIC_HEADERS = {"ngrok-skip-browser-warning": "true"}
 
 # ---------------------------------------------------------------------------
 # browser_automation is imported lazily (on first tool call) to avoid
@@ -340,7 +342,7 @@ class BrowserSupervisorAgent(AgentClass):
 
         try:
             # Check server health first
-            async with httpx.AsyncClient(timeout=10.0) as client:
+            async with httpx.AsyncClient(timeout=10.0, headers=_MUSIC_HEADERS) as client:
                 try:
                     health = await client.get(f"{_MUSIC_SERVER_URL}/health")
                     health_data = health.json()
@@ -370,7 +372,7 @@ class BrowserSupervisorAgent(AgentClass):
                 payload["bpm"] = bpm
 
             # Make the generation request (long timeout — generation can take minutes)
-            async with httpx.AsyncClient(timeout=300.0) as client:
+            async with httpx.AsyncClient(timeout=300.0, headers=_MUSIC_HEADERS) as client:
                 response = await client.post(
                     f"{_MUSIC_SERVER_URL}/generate",
                     json=payload,
