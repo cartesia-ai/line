@@ -1165,7 +1165,8 @@ YOUR TASK:
 4. For each of the first {num_jobs} jobs (sorted by most recent):
    a. Click on the job listing to view details
    b. Read the job description briefly to understand requirements
-   c. Look for "Easy Apply" button - if available, click it. If not, do the conventional apply process. 
+   c. Look for "Easy Apply" button - if available, click it. If not, do the conventional apply process with external application links. 
+   c.1. Always prefer the "Easy Apply" over external application links. Do the external application links only if the "Easy Apply" button is not available.
    d. Fill out the application form using the candidate information above
    e. For "Why are you interested" or cover letter questions:
       - Adapt the cover letter template above to mention the specific company/role
