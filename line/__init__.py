@@ -27,6 +27,9 @@ from line.events import (
     CallEnded,
     # Input events
     CallStarted,
+    # Custom events
+    CustomHistoryEntry,
+    HistoryEvent,
     InputEvent,
     LogMessage,
     LogMetric,
@@ -84,4 +87,8 @@ __all__ = [
     "AgentTurnEnded",
     "AgentHandedOff",
     "InputEvent",
+    # Custom events
+    "CustomHistoryEntry",
+    # History
+    "HistoryEvent",
 ]

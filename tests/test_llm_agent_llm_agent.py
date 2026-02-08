@@ -21,11 +21,13 @@ from line.events import (
     AgentToolReturned,
     CallEnded,
     CallStarted,
+    CustomHistoryEntry,
+    HistoryEvent,
     OutputEvent,
     UserTextSent,
 )
 from line.llm_agent.config import LlmConfig
-from line.llm_agent.llm_agent import LlmAgent, _build_full_history
+from line.llm_agent.llm_agent import _INIT_EVENT_ID, LlmAgent, _build_full_history
 from line.llm_agent.provider import Message, StreamChunk, ToolCall
 from line.llm_agent.tools.decorators import handoff_tool, loopback_tool, passthrough_tool
 from line.llm_agent.tools.utils import FunctionTool
@@ -1633,7 +1635,7 @@ class TestBuildMessagesPendingToolResults:
             event_id=user0.event_id,
         )
 
-        messages = agent._build_messages(input_history, local_history, current_event_id="current")
+        messages = await agent._build_messages(input_history, local_history, current_event_id="current")
 
         # Should have: user message, assistant with tool call, tool result
         assert len(messages) == 3
@@ -1658,7 +1660,7 @@ class TestBuildMessagesPendingToolResults:
             event_id=user0.event_id,
         )
 
-        messages = agent._build_messages(input_history, local_history, current_event_id="current")
+        messages = await agent._build_messages(input_history, local_history, current_event_id="current")
 
         # Should have: user message, assistant with tool call, pending tool result
         assert len(messages) == 3
@@ -1688,7 +1690,7 @@ class TestBuildMessagesPendingToolResults:
             event_id=user0.event_id,
         )
 
-        messages = agent._build_messages(input_history, local_history, current_event_id="current")
+        messages = await agent._build_messages(input_history, local_history, current_event_id="current")
 
         # Should have: user, tool_call_1, result_1, tool_call_2, pending_2
         assert len(messages) == 5
@@ -1724,7 +1726,7 @@ class TestBuildMessagesPendingToolResults:
             event_id=user0.event_id,
         )
 
-        messages = agent._build_messages(input_history, local_history, current_event_id="current")
+        messages = await agent._build_messages(input_history, local_history, current_event_id="current")
 
         # Should have: user, tool_call_1, pending_1, tool_call_2, pending_2
         assert len(messages) == 5
@@ -1761,7 +1763,7 @@ class TestBuildMessagesPendingToolResults:
             event_id=user0.event_id,
         )
 
-        messages = agent._build_messages(input_history, local_history, current_event_id="current")
+        messages = await agent._build_messages(input_history, local_history, current_event_id="current")
 
         # Should have: user, tool_call_1, tool_call_2, pending_2, result_1
         # (pending is inserted immediately after call_2 since it has no result)
@@ -1803,7 +1805,7 @@ class TestBuildMessagesPendingToolResults:
             event_id=user0.event_id,
         )
 
-        messages = agent._build_messages(input_history, local_history, current_event_id="current")
+        messages = await agent._build_messages(input_history, local_history, current_event_id="current")
 
         pending_msg = messages[-1]
         assert pending_msg.role == "tool"
@@ -1825,7 +1827,7 @@ class TestBuildMessagesPendingToolResults:
             event_id="current",
         )
 
-        messages = agent._build_messages(input_history, local_history, current_event_id="current")
+        messages = await agent._build_messages(input_history, local_history, current_event_id="current")
 
         # Should have: user, tool_call, pending
         assert len(messages) == 3
@@ -1836,6 +1838,308 @@ class TestBuildMessagesPendingToolResults:
         """Empty history should produce no messages."""
         agent, _ = create_agent_with_mock([])
 
-        messages = agent._build_messages([], [], current_event_id="current")
+        messages = await agent._build_messages([], [], current_event_id="current")
 
         assert len(messages) == 0
+
+
+# =============================================================================
+# Tests: add_history_entry
+# =============================================================================
+
+
+class TestAddHistoryEntry:
+    """Tests for LlmAgent.add_history_entry."""
+
+    @staticmethod
+    def _annotate(events: list, event_id: str) -> list[tuple[str, "OutputEvent"]]:
+        """Annotate events with a triggering event_id."""
+        return [(event_id, e) for e in events]
+
+    async def test_adds_custom_history_entry_to_local_history(self):
+        """add_history_entry inserts a CustomHistoryEntry into _local_history."""
+        agent, _ = create_agent_with_mock([])
+        agent._current_event_id = "evt-1"
+
+        agent.add_history_entry("injected context")
+
+        assert len(agent._local_history) == 1
+        eid, event = agent._local_history[0]
+        assert eid == "evt-1"
+        assert isinstance(event, CustomHistoryEntry)
+        assert event.content == "injected context"
+
+    async def test_add_history_entry_before_first_process(self):
+        """add_history_entry called before process() uses _INIT_EVENT_ID and appears in messages."""
+        agent, _ = create_agent_with_mock([])
+
+        # Called before any process() — _current_event_id is still the init sentinel
+        agent.add_history_entry("pre-process context")
+
+        assert agent._local_history[0][0] == _INIT_EVENT_ID
+
+        user0 = UserTextSent(content="Hello")
+        input_history = [user0]
+
+        messages = await agent._build_messages(
+            input_history, agent._local_history, current_event_id=user0.event_id
+        )
+
+        # Init entry should appear before the user message
+        assert len(messages) == 2
+        assert messages[0].role == "system"
+        assert messages[0].content == "pre-process context"
+        assert messages[1].role == "user"
+        assert messages[1].content == "Hello"
+
+    async def test_add_history_entry_before_first_process_no_input_history(self):
+        """add_history_entry before process() works even with empty input history."""
+        agent, _ = create_agent_with_mock([])
+
+        agent.add_history_entry("early context")
+
+        messages = await agent._build_messages([], agent._local_history, current_event_id="current")
+
+        assert len(messages) == 1
+        assert messages[0].role == "system"
+        assert messages[0].content == "early context"
+
+    async def test_responsive_to_current_event_id(self):
+        """Each call tags the entry with the current event_id."""
+        agent, _ = create_agent_with_mock([])
+
+        agent._current_event_id = "evt-a"
+        agent.add_history_entry("first")
+
+        agent._current_event_id = "evt-b"
+        agent.add_history_entry("second")
+
+        assert agent._local_history[0][0] == "evt-a"
+        assert agent._local_history[1][0] == "evt-b"
+
+    async def test_custom_entry_defaults_to_system_message(self):
+        """CustomHistoryEntry in local_history defaults to a system message."""
+        agent, _ = create_agent_with_mock([])
+
+        user0 = UserTextSent(content="Hello")
+        input_history = [user0]
+        local_history = self._annotate(
+            [CustomHistoryEntry(content="extra context")],
+            event_id=user0.event_id,
+        )
+
+        messages = await agent._build_messages(input_history, local_history, current_event_id="current")
+
+        # Should have: user message from input, then custom entry as system message
+        assert len(messages) == 2
+        assert messages[0].role == "user"
+        assert messages[0].content == "Hello"
+        assert messages[1].role == "system"
+        assert messages[1].content == "extra context"
+
+    async def test_custom_entry_with_user_role(self):
+        """CustomHistoryEntry with role='user' produces a user message."""
+        agent, _ = create_agent_with_mock([])
+
+        user0 = UserTextSent(content="Hello")
+        input_history = [user0]
+        local_history = self._annotate(
+            [CustomHistoryEntry(content="user context", role="user")],
+            event_id=user0.event_id,
+        )
+
+        messages = await agent._build_messages(input_history, local_history, current_event_id="current")
+
+        assert len(messages) == 2
+        assert messages[0].role == "user"
+        assert messages[0].content == "Hello"
+        assert messages[1].role == "user"
+        assert messages[1].content == "user context"
+
+    async def test_custom_entry_in_current_local(self):
+        """CustomHistoryEntry in current_local events uses its role."""
+        agent, _ = create_agent_with_mock([])
+
+        user0 = UserTextSent(content="Hello")
+        input_history = [user0]
+        local_history = self._annotate(
+            [CustomHistoryEntry(content="current context")],
+            event_id="current",
+        )
+
+        messages = await agent._build_messages(input_history, local_history, current_event_id="current")
+
+        assert len(messages) == 2
+        assert messages[0].role == "user"
+        assert messages[0].content == "Hello"
+        assert messages[1].role == "system"
+        assert messages[1].content == "current context"
+
+    async def test_custom_entry_interleaved_with_tool_calls(self):
+        """CustomHistoryEntry preserves position relative to tool calls."""
+        agent, _ = create_agent_with_mock([])
+
+        user0 = UserTextSent(content="Start")
+        input_history = [user0]
+        local_history = self._annotate(
+            [
+                AgentToolCalled(tool_call_id="c1", tool_name="lookup", tool_args={}),
+                AgentToolReturned(tool_call_id="c1", tool_name="lookup", tool_args={}, result="data"),
+                CustomHistoryEntry(content="injected after tool"),
+            ],
+            event_id=user0.event_id,
+        )
+
+        messages = await agent._build_messages(input_history, local_history, current_event_id="current")
+
+        # user, assistant(tool_call), tool(result), system(custom)
+        assert len(messages) == 4
+        assert messages[0].role == "user"
+        assert messages[0].content == "Start"
+        assert messages[1].role == "assistant"
+        assert messages[2].role == "tool"
+        assert messages[2].content == "data"
+        assert messages[3].role == "system"
+        assert messages[3].content == "injected after tool"
+
+    async def test_add_history_entry_end_to_end(self, turn_env):
+        """add_history_entry during a tool call is visible to the LLM on loopback."""
+        # The tool calls add_history_entry on the agent, then the LLM sees it
+        agent, mock_llm = create_agent_with_mock([])
+
+        @loopback_tool
+        def inject_context(ctx, info: str):
+            """Inject context."""
+            agent.add_history_entry(f"Context: {info}")
+            return "done"
+
+        agent._tools = [inject_context]
+        agent._tool_map = {inject_context.name: inject_context}
+
+        # First LLM call: calls the tool
+        # Second LLM call: responds with final text after seeing the injected context
+        mock_llm._responses = [
+            [
+                StreamChunk(
+                    tool_calls=[
+                        ToolCall(
+                            id="c1",
+                            name="inject_context",
+                            arguments='{"info": "important data"}',
+                            is_complete=True,
+                        )
+                    ]
+                ),
+                StreamChunk(is_final=True),
+            ],
+            [
+                StreamChunk(text="Got it!"),
+                StreamChunk(is_final=True),
+            ],
+        ]
+
+        outputs = await collect_outputs(
+            agent,
+            turn_env,
+            UserTextSent(content="Do something", history=[UserTextSent(content="Do something")]),
+        )
+
+        # Should have: AgentToolCalled, AgentToolReturned, AgentSendText
+        tool_called = [o for o in outputs if isinstance(o, AgentToolCalled)]
+        tool_returned = [o for o in outputs if isinstance(o, AgentToolReturned)]
+        text_outputs = [o for o in outputs if isinstance(o, AgentSendText)]
+
+        assert len(tool_called) == 1
+        assert len(tool_returned) == 1
+        assert len(text_outputs) == 1
+        assert text_outputs[0].text == "Got it!"
+
+        # Verify the injected context was visible to the LLM on the second call
+        second_call_messages = mock_llm._recorded_messages[1]
+        system_messages = [m for m in second_call_messages if m.role == "system"]
+        system_contents = [m.content for m in system_messages]
+        assert "Context: important data" in system_contents
+
+
+# =============================================================================
+# Tests: set_history_processor
+# =============================================================================
+
+
+class TestSetHistoryProcessor:
+    """Tests for LlmAgent.set_history_processor."""
+
+    @staticmethod
+    def _annotate(events: list, event_id: str) -> list[tuple[str, "OutputEvent"]]:
+        """Annotate events with a triggering event_id."""
+        return [(event_id, e) for e in events]
+
+    async def test_sync_transform_applied(self):
+        """A sync set_history_processor transform is applied to the history."""
+        agent, _ = create_agent_with_mock([])
+
+        def keep_user_text_only(history: list[HistoryEvent]) -> list[HistoryEvent]:
+            return [e for e in history if isinstance(e, UserTextSent)]
+
+        agent.set_history_processor(keep_user_text_only)
+
+        user0 = UserTextSent(content="Hello")
+        input_history = [user0, AgentTextSent(content="Hi there")]
+        messages = await agent._build_messages(input_history, [], current_event_id="current")
+
+        # Transform filtered out AgentTextSent, only UserTextSent remains
+        assert len(messages) == 1
+        assert messages[0].role == "user"
+        assert messages[0].content == "Hello"
+
+    async def test_async_transform_applied(self):
+        """An async set_history_processor transform is applied to the history."""
+        agent, _ = create_agent_with_mock([])
+
+        async def prepend_system_context(history: list[HistoryEvent]) -> list[HistoryEvent]:
+            return [CustomHistoryEntry(content="System injected")] + list(history)
+
+        agent.set_history_processor(prepend_system_context)
+
+        user0 = UserTextSent(content="Hello")
+        input_history = [user0]
+        messages = await agent._build_messages(input_history, [], current_event_id="current")
+
+        # Transform prepended a CustomHistoryEntry (default role is "system")
+        assert len(messages) == 2
+        assert messages[0].role == "system"
+        assert messages[0].content == "System injected"
+        assert messages[1].role == "user"
+        assert messages[1].content == "Hello"
+
+    async def test_transform_end_to_end(self, turn_env):
+        """set_history_processor transform affects what the LLM sees."""
+        agent, mock_llm = create_agent_with_mock(
+            [
+                [
+                    StreamChunk(text="Response"),
+                    StreamChunk(is_final=True),
+                ],
+            ]
+        )
+
+        def add_reminder(history: list[HistoryEvent]) -> list[HistoryEvent]:
+            return list(history) + [CustomHistoryEntry(content="Remember: be concise")]
+
+        agent.set_history_processor(add_reminder)
+
+        outputs = await collect_outputs(
+            agent,
+            turn_env,
+            UserTextSent(content="Hi", history=[UserTextSent(content="Hi")]),
+        )
+
+        assert len(outputs) == 1
+        assert isinstance(outputs[0], AgentSendText)
+        assert outputs[0].text == "Response"
+
+        # Verify the LLM saw the injected reminder (default role is "system")
+        llm_messages = mock_llm._recorded_messages[0]
+        system_messages = [m for m in llm_messages if m.role == "system"]
+        system_contents = [m.content for m in system_messages]
+        assert "Remember: be concise" in system_contents
