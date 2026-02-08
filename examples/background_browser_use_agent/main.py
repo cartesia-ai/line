@@ -17,6 +17,9 @@ import time
 from pathlib import Path
 from typing import Annotated, AsyncIterable, Optional
 
+from dotenv import load_dotenv
+load_dotenv()  # load .env before any other imports that may need API keys
+
 import httpx
 
 from line.agent import AgentClass, TurnEnv
