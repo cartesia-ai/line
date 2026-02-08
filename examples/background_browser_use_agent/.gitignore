@@ -1,0 +1,22 @@
+# Browser session data (can be 100MB+)
+browser_profile/
+recordings/
+browser_bin/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Secrets
+.env
+
+# Cartesia
+.cartesia/
+
+# Output
+output_music/
+
+# Misc
+*.pdf
+*.log
