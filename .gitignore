@@ -212,3 +212,18 @@ __marimo__/
 uv.lock
 
 */*.tar
+
+# Browser automation
+browser_profile/
+browser_bin/
+.cartesia/
+*.pdf
+recordings/
+
+# Python
+__pycache__/
+
+# Output
+output_music/
+.env
+.venv/

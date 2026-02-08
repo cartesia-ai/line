@@ -116,3 +116,15 @@ The entire browser session runs in the background — the user can keep chatting
 - **Opus** is only invoked for genuinely complex reasoning.
 - **Browser-use** (Sonnet) is invoked only for live web tasks. Each browser session involves multiple Sonnet API calls as it navigates pages, so costs can add up for complex browsing tasks.
 - Concurrent browser sessions are blocked (one at a time) to control costs and resource usage.
+
+## Cartesia Agent Commands
+
+- **Installation** - curl -fsSL https://cartesia.sh | sh 
+- source ~/.bashrc
+- cd submodules/line/examples/background_browser_use_agent
+- cartesia init
+- cartesia deploy
+- pip install cartesia-line
+- python main.py
+- cartesia chat 8000
+

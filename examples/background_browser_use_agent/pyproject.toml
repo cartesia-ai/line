@@ -2,7 +2,7 @@
 name = "background-browser-use-agent"
 version = "0.1.0"
 description = "Voice agent with background web browsing via browser-use, supervisor reasoning via Claude Opus, and fast chat via Claude Haiku"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
     "cartesia-line==0.2.2",
     "browser-use",
@@ -10,4 +10,4 @@ dependencies = [
 ]
 
 [tool.setuptools]
-py-modules = ["main"]
+py-modules = ["main", "browser_automation"]

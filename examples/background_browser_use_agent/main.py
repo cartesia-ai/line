@@ -1,14 +1,15 @@
 """
-Background Browser-Use Agent
-=============================
+Background Browser-Use Agent — LinkedIn Job Application
+=========================================================
 
 A voice agent with three capabilities:
 1. Direct conversation via a fast chat model (Claude Haiku)
 2. Deep reasoning via a supervisor model (Claude Opus)
-3. Real-time web browsing via a browser-use agent (runs headless Chrome)
+3. Automated LinkedIn job search & application via browser-use
 
-The browser-use tool runs in the background — the agent keeps chatting while
-the browser autonomously navigates web pages and returns results.
+The LinkedIn tool runs in the background — the agent keeps chatting while
+the browser autonomously searches LinkedIn, optimises the resume for ATS
+keywords, and applies to jobs.
 """
 
 import os
@@ -25,17 +26,18 @@ from line.events import (
 from line.llm_agent import LlmAgent, LlmConfig, ToolEnv, end_call, loopback_tool
 from line.voice_agent_app import AgentEnv, CallRequest, VoiceAgentApp
 
-# Try to import browser-use components for web browsing tool
+# ---------------------------------------------------------------------------
+# Import browser_automation (co-located in this directory)
+# ---------------------------------------------------------------------------
 try:
-    from browser_use import Agent as BrowserAgent, Browser
-    from browser_use import ChatAnthropic as BrowserChatAnthropic
+    from browser_automation import search_and_apply_linkedin_jobs
 
-    BROWSER_USE_AVAILABLE = True
-except ImportError:
-    BROWSER_USE_AVAILABLE = False
+    BROWSER_AUTOMATION_AVAILABLE = True
+except ImportError as exc:
+    BROWSER_AUTOMATION_AVAILABLE = False
     print(
-        "WARNING: browser-use not installed. "
-        "Install with: pip install browser-use anthropic"
+        f"WARNING: Could not import browser_automation: {exc}\n"
+        "Make sure browser-use, anthropic, and playwright are installed."
     )
 
 
@@ -50,11 +52,9 @@ class BrowserSupervisorAgent(AgentClass):
 
     * **Chat** (Claude Haiku) — handles routine conversation with low latency.
     * **Supervisor** (Claude Opus) — consulted for complex reasoning tasks.
-    * **Browser** (browser-use + Claude Sonnet) — navigates real web pages in the
-      background to look up live information, fill forms, search, etc.
-
-    Both the supervisor and browser tools run as *background* loopback tools,
-    so the chat model can continue talking while they work.
+    * **LinkedIn Applicant** (browser_automation) — searches LinkedIn for jobs,
+      optimises the resume for ATS keywords, generates a cover letter, and
+      submits applications — all in the background.
     """
 
     def __init__(self, api_key: Optional[str] = None):
@@ -74,7 +74,7 @@ class BrowserSupervisorAgent(AgentClass):
             api_key=self._api_key,
             tools=[
                 self.ask_supervisor,
-                self.browse_web,
+                self.apply_linkedin_jobs,
                 end_call,
             ],
             config=LlmConfig(
@@ -84,7 +84,7 @@ class BrowserSupervisorAgent(AgentClass):
         )
 
         self._answering_question = False
-        self._browsing = False
+        self._applying = False
 
     # ------------------------------------------------------------------
     # Event processing
@@ -144,68 +144,100 @@ class BrowserSupervisorAgent(AgentClass):
         yield full_response
 
     # ------------------------------------------------------------------
-    # Tool: browse_web (background)
+    # Tool: apply_linkedin_jobs (background)
     # ------------------------------------------------------------------
 
     @loopback_tool(is_background=True)
-    async def browse_web(
+    async def apply_linkedin_jobs(
         self,
         ctx: ToolEnv,
-        task: Annotated[
+        query: Annotated[
             str,
-            "A detailed description of what to do in the web browser, "
-            "e.g. 'Search Google for the latest NVIDIA stock price' or "
-            "'Go to weather.com and find the forecast for San Francisco'",
-        ],
+            "Job search query, e.g. 'ML Engineer', 'AI Engineer', "
+            "'Software Engineer'. Defaults to 'ML Engineer OR AI Engineer' "
+            "if left empty.",
+        ] = "",
+        num_jobs: Annotated[
+            int,
+            "Number of jobs to apply to. Defaults to 10.",
+        ] = 10,
+        location: Annotated[
+            str,
+            "Location filter, e.g. 'San Francisco Bay Area', 'Remote', "
+            "'New York'. Defaults to 'San Francisco Bay Area'.",
+        ] = "",
+        company_name: Annotated[
+            str,
+            "Optional company name to filter jobs, e.g. 'Google', 'Meta'. "
+            "Leave empty to search all companies.",
+        ] = "",
+        dry_run: Annotated[
+            bool,
+            "If true, only search and list jobs without actually applying. "
+            "Useful to preview what is available before committing.",
+        ] = False,
     ) -> AsyncIterable[str]:
         """
-        Use a web browser to perform tasks on the internet.
+        Search LinkedIn for jobs and automatically apply to them.
 
-        Use this when the user asks you to:
-        - Look up current or real-time information on the web
-        - Search for something online (news, prices, weather, etc.)
-        - Navigate to a specific website and read its content
-        - Interact with a web page (fill forms, click buttons, etc.)
-        - Find job postings, product listings, or any live web data
+        This tool will:
+        1. Read and analyse the candidate's resume for ATS keyword optimisation
+        2. Build a LinkedIn job search URL with the given filters
+        3. Extract ATS keywords and generate a tailored cover letter
+        4. Open a headless browser, navigate LinkedIn, and apply to each job
+        5. Return a summary of all applications submitted
 
-        The browser agent will autonomously navigate web pages to complete the
-        task and return the results. This runs in the background so you can
-        keep chatting with the user while it works.
+        Use this when the user asks to:
+        - Apply to jobs on LinkedIn
+        - Search for job openings and submit applications
+        - Do a dry-run job search to see what is available
+
+        The entire process runs in the background so you can keep chatting.
         """
-        if not BROWSER_USE_AVAILABLE:
+        if not BROWSER_AUTOMATION_AVAILABLE:
             yield (
-                "Browser automation is not available right now. "
-                "The browser-use package is not installed."
+                "LinkedIn job application is not available right now. "
+                "The browser_automation module could not be imported."
             )
             return
 
-        if self._browsing:
-            yield "I'm already working on a browser task. Please wait for that to finish first."
+        if self._applying:
+            yield (
+                "I'm already running a LinkedIn job application session. "
+                "Please wait for it to finish before starting another."
+            )
             return
 
-        self._browsing = True
-        yield "Opening my browser to look into that. Give me a moment..."
+        self._applying = True
+
+        action = "searching" if dry_run else "searching and applying to"
+        yield (
+            f"Starting LinkedIn job automation — {action} "
+            f"{num_jobs} jobs. This will take a few minutes. "
+            "I'll let you know when it's done."
+        )
 
         try:
-            browser = Browser(headless=True)
-            llm = BrowserChatAnthropic(model="claude-sonnet-4-0")
-            agent = BrowserAgent(task=task, llm=llm, browser=browser)
+            result = await search_and_apply_linkedin_jobs(
+                query=query or None,
+                num_jobs=num_jobs,
+                location=location or None,
+                company_name=company_name or None,
+                use_profile=True,
+                record_video=False,
+                headless=True,
+                dry_run=dry_run,
+                sort_by="most_recent",
+            )
 
-            result = await agent.run()
+            # Build a human-readable summary from the result dict
+            summary = _summarise_linkedin_result(result, dry_run)
+            yield summary
 
-            # Extract text result from browser-use agent output
-            text_result = _extract_browser_result(result)
-            if text_result:
-                yield text_result
-            else:
-                yield (
-                    "I finished browsing but could not extract a clear answer. "
-                    f"Here is what I found: {str(result)[:1000]}"
-                )
         except Exception as e:
-            yield f"I ran into a problem while browsing: {str(e)}"
+            yield f"I ran into a problem with the LinkedIn application: {str(e)}"
         finally:
-            self._browsing = False
+            self._applying = False
 
     # ------------------------------------------------------------------
     # Cleanup
@@ -222,21 +254,74 @@ class BrowserSupervisorAgent(AgentClass):
 # ---------------------------------------------------------------------------
 
 
-def _extract_browser_result(result) -> Optional[str]:
-    """
-    Extract a human-readable text result from a browser-use AgentHistoryList.
+def _summarise_linkedin_result(result: dict, dry_run: bool) -> str:
+    """Turn the dict returned by search_and_apply_linkedin_jobs into speech."""
+    if "error" in result:
+        return f"The LinkedIn search ran into a problem: {result['error']}"
 
-    browser-use stores the outcome in ``result.final_result`` or inside the
-    history entries.  We try the most specific attribute first and fall back
-    to stringifying the last history entry.
-    """
-    if hasattr(result, "final_result") and result.final_result:
-        return result.final_result
-    if hasattr(result, "history") and result.history:
-        for item in reversed(result.history):
-            if hasattr(item, "result") and item.result:
-                return str(item.result)
-    return None
+    parts: list[str] = []
+
+    if dry_run:
+        parts.append("Here are the jobs I found on LinkedIn:")
+        # dry-run result may contain a browser-use result blob
+        if "result" in result and result["result"]:
+            browser_result = result["result"]
+            if isinstance(browser_result, dict) and "result" in browser_result:
+                agent_result = browser_result["result"]
+                text = None
+                if hasattr(agent_result, "final_result") and agent_result.final_result:
+                    text = agent_result.final_result
+                elif hasattr(agent_result, "history") and agent_result.history:
+                    for item in reversed(agent_result.history):
+                        if hasattr(item, "result") and item.result:
+                            text = str(item.result)
+                            break
+                if text:
+                    parts.append(text)
+        # Also include resume analysis highlights
+        resume = result.get("resume_analysis", {})
+        if resume:
+            parts.append(
+                f"Based on your resume, your top skills are: "
+                f"{', '.join(resume.get('top_skills', [])[:5])}."
+            )
+    else:
+        # Full application mode
+        search_url = result.get("search_url", "")
+        num_targeted = result.get("num_jobs_targeted", "unknown")
+        company_filter = result.get("company_filter")
+        ats_keywords = result.get("ats_keywords_used", [])
+
+        parts.append(
+            f"I finished the LinkedIn job application session. "
+            f"I targeted {num_targeted} jobs"
+        )
+        if company_filter:
+            parts.append(f" at {company_filter}")
+        parts.append(".")
+
+        if ats_keywords:
+            parts.append(
+                f" I optimised your resume for these ATS keywords: "
+                f"{', '.join(ats_keywords[:7])}."
+            )
+
+        # Extract the browser-use agent's final summary if available
+        browser_result = result.get("result", {})
+        if isinstance(browser_result, dict) and "result" in browser_result:
+            agent_result = browser_result["result"]
+            text = None
+            if hasattr(agent_result, "final_result") and agent_result.final_result:
+                text = agent_result.final_result
+            elif hasattr(agent_result, "history") and agent_result.history:
+                for item in reversed(agent_result.history):
+                    if hasattr(item, "result") and item.result:
+                        text = str(item.result)
+                        break
+            if text:
+                parts.append(f" Here is the summary: {text}")
+
+    return "".join(parts) if parts else "The LinkedIn session completed but I could not extract a summary."
 
 
 # ---------------------------------------------------------------------------
@@ -245,37 +330,45 @@ def _extract_browser_result(result) -> Optional[str]:
 
 
 CHAT_SYSTEM_PROMPT = """\
-You are a friendly voice assistant that handles most conversations directly, \
-can consult a more powerful reasoning model for complex questions, and can \
-browse the web for current information.
+You are a friendly personal assistant. You help with everyday tasks, \
+answer questions, have casual conversations, and can think through \
+complex problems. One of the things you can do is search and apply to \
+jobs on LinkedIn, but that is just one of many things you help with.
 
 # Personality
-Warm, helpful, conversational. Handle routine questions yourself. Escalate \
-when you genuinely need deeper reasoning, and use the browser for anything \
-requiring live web data.
+Warm, natural, and conversational — like a helpful friend. You are \
+proactive but not pushy. You chat about anything: daily life, tech, \
+ideas, plans, recommendations, or just casual banter. You happen to \
+also have the ability to run deep research and automate job applications.
+
+# What you handle directly
+- General conversation and small talk
+- Answering factual questions and common knowledge
+- Giving advice, brainstorming, making plans
+- Everyday help: drafts, summaries, explanations, calculations
+- Anything you are confident about
 
 # When to use ask_supervisor
-Use for questions requiring careful analysis:
-- Complex math or proofs
-- Multi-step logic puzzles
-- Deep domain expertise (advanced physics, legal analysis, medical questions)
-- Ethical dilemmas, philosophical questions
+Escalate to deeper reasoning when you need it:
+- Complex math, proofs, or multi-step logic
+- Deep domain expertise (advanced science, law, medicine)
+- Philosophical or ethical dilemmas
 - Anything where accuracy is critical and you are uncertain
 
-# When to use browse_web
-Use for tasks that need live or current information from the internet:
-- Current events, news, or recent developments
-- Live data: stock prices, weather forecasts, sports scores
-- Searching for specific information on websites
-- Looking up job postings, product listings, or reviews
-- Navigating to a specific URL and reading its content
-- Filling out web forms or interacting with web pages
+# When to use apply_linkedin_jobs
+Use only when the user specifically asks about job searching or applying:
+- "Can you find me some ML jobs?"
+- "Apply to 10 jobs on LinkedIn for me"
+- "What jobs are available in New York right now?"
 
-Handle directly (no tools needed):
-- Greetings and small talk
-- Basic facts and common knowledge
-- Simple questions with clear answers
-- Casual conversation
+Default behaviour (if the user just says "apply to jobs"):
+- query: "ML Engineer OR AI Engineer"
+- num_jobs: 10
+- location: "San Francisco Bay Area"
+- dry_run: false
+
+Ask the user to confirm before applying (dry_run=false). If they just \
+want to see what is available, suggest dry_run=true first.
 
 # Tools
 ## ask_supervisor
@@ -292,23 +385,26 @@ When you receive the result:
 - Synthesize the response into natural, conversational language
 - Break complex explanations into digestible pieces
 
-## browse_web
-Runs a headless browser agent in the background.
+## apply_linkedin_jobs
+Runs a headless browser in the background to search and apply to LinkedIn jobs.
 
 When you call it:
-1. Provide a clear, detailed task description
-2. Acknowledge: "Let me look that up" or "I'll check that online"
-3. Wait for the result, then summarize it conversationally
+1. Confirm with the user: what kind of jobs, how many, which location, \
+   and whether to actually apply or just search (dry run)
+2. Acknowledge: "Starting the LinkedIn job search now" or similar
+3. The process takes several minutes — reassure the user periodically
 
-Good task descriptions:
-- "Search Google for the current stock price of NVIDIA"
-- "Go to weather.com and find today's forecast for San Francisco"
-- "Search LinkedIn for ML Engineer jobs in the Bay Area"
+Parameters:
+- query: job search terms (default: ML/AI Engineer)
+- num_jobs: how many to apply to (default: 10)
+- location: location filter (default: San Francisco Bay Area)
+- company_name: optional company filter
+- dry_run: true = just search, false = search and apply
 
 When you receive the result:
-- Distill the web content into key information
-- Don't dump raw HTML or verbose text — summarize
-- If the result is unclear, let the user know
+- Summarise the outcome: how many jobs found/applied to, key highlights
+- Mention the ATS keywords used if relevant
+- Keep it conversational — don't dump raw data
 
 ## end_call
 Use when the caller says goodbye, thanks, or is clearly done.
@@ -320,9 +416,10 @@ No emojis, asterisks, or markdown. Everything you say will be spoken aloud."""
 
 
 CHAT_INTRODUCTION = (
-    "Hey! I'm here to help with whatever's on your mind. "
-    "I can answer questions, think through complex problems, "
-    "and even browse the web for you. What would you like to talk about?"
+    "Hey! I'm your personal assistant. "
+    "I can help with pretty much anything — questions, planning, brainstorming, "
+    "or just chatting. I can also search LinkedIn and apply to jobs for you "
+    "if you need that. What's on your mind?"
 )
 
 
@@ -375,5 +472,5 @@ async def get_agent(env: AgentEnv, call_request: CallRequest):
 app = VoiceAgentApp(get_agent=get_agent)
 
 if __name__ == "__main__":
-    print("Starting Background Browser-Use Agent app")
+    print("Starting Background Browser-Use Agent (LinkedIn) app")
     app.run()
