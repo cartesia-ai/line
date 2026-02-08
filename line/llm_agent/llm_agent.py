@@ -15,6 +15,7 @@ from typing import (
     Callable,
     Dict,
     List,
+    Literal,
     Optional,
     TypeVar,
     Union,
@@ -197,18 +198,18 @@ class LlmAgent:
     ) -> None:
         """Register a transform that processes the history before message building.
 
-        The transform is called on the history before its passed to the LLM
+        The transform is called on the history before it's passed to the LLM
         It receives the original history and can filter, reorder, or inject events.
         """
         self._process_history_fn = fn
 
-    def add_history_entry(self, content: str, role: str = "system") -> None:
+    def add_history_entry(self, content: str, role: Literal["system", "user"] = "system") -> None:
         """Insert a CustomHistoryEntry event into local history.
 
         The entry appears as a message with the given role ("system" by default) in the
         LLM conversation
         """
-        event = CustomHistoryEntry(content=content, role=role)  # type: ignore[arg-type]
+        event = CustomHistoryEntry(content=content, role=role)
         self._append_to_local_history(event)
 
     async def process(self, env: TurnEnv, event: InputEvent) -> AsyncIterable[OutputEvent]:
@@ -908,7 +909,7 @@ def _to_history_event(event: Any) -> Optional[HistoryEvent]:
             AgentTurnEnded,
         ),
     ):
-        return event  # type: ignore[return-value]
+        return event
     # Non-history OutputEvents are filtered out
     elif isinstance(event, (AgentTransferCall, LogMetric, LogMessage, AgentUpdateCall)):
         return None
