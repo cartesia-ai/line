@@ -227,3 +227,6 @@ __pycache__/
 output_music/
 .env
 .venv/
+
+examples/background_browser_use_agent/song-generated/
+examples/background_browser_use_agent/browser_profile/
