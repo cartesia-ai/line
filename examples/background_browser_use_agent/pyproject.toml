@@ -1,12 +1,14 @@
 [project]
 name = "background-browser-use-agent"
 version = "0.1.0"
-description = "Voice agent with background web browsing via browser-use, supervisor reasoning via Claude Opus, and fast chat via Claude Haiku"
-requires-python = ">=3.11"
+description = "Personal voice assistant with supervisor reasoning and LinkedIn job automation"
+requires-python = ">=3.10"
 dependencies = [
     "cartesia-line==0.2.2",
-    "browser-use",
-    "anthropic",
+    "browser-use>=0.11.0",
+    "anthropic>=0.70.0",
+    "exa-py>=2.0.0",
+    "playwright>=1.40.0",
 ]
 
 [tool.setuptools]

@@ -7,9 +7,11 @@ browser_bin/
 __pycache__/
 *.pyc
 .venv/
+uv.lock
 
-# Secrets
-.env
+# Note: .env is NOT excluded here because Cartesia deploy needs it
+# for API keys (ANTHROPIC_API_KEY, etc.). Cartesia's default behavior
+# is to include .env in deployments.
 
 # Cartesia
 .cartesia/

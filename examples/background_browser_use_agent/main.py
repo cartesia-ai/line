@@ -27,18 +27,30 @@ from line.llm_agent import LlmAgent, LlmConfig, ToolEnv, end_call, loopback_tool
 from line.voice_agent_app import AgentEnv, CallRequest, VoiceAgentApp
 
 # ---------------------------------------------------------------------------
-# Import browser_automation (co-located in this directory)
+# browser_automation is imported lazily (on first tool call) to avoid
+# heavy side-effects at module load time on the Cartesia deployment server
+# where browser-use / playwright are not installed.
 # ---------------------------------------------------------------------------
-try:
-    from browser_automation import search_and_apply_linkedin_jobs
+_browser_automation_loaded = False
+_search_and_apply_linkedin_jobs = None
 
-    BROWSER_AUTOMATION_AVAILABLE = True
-except ImportError as exc:
-    BROWSER_AUTOMATION_AVAILABLE = False
-    print(
-        f"WARNING: Could not import browser_automation: {exc}\n"
-        "Make sure browser-use, anthropic, and playwright are installed."
-    )
+
+def _ensure_browser_automation():
+    """Lazy-import browser_automation on first use."""
+    global _browser_automation_loaded, _search_and_apply_linkedin_jobs
+    if _browser_automation_loaded:
+        return _search_and_apply_linkedin_jobs is not None
+    _browser_automation_loaded = True
+    try:
+        from browser_automation import search_and_apply_linkedin_jobs
+        _search_and_apply_linkedin_jobs = search_and_apply_linkedin_jobs
+        return True
+    except ImportError as exc:
+        print(
+            f"WARNING: Could not import browser_automation: {exc}\n"
+            "Make sure browser-use, anthropic, and playwright are installed."
+        )
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -194,10 +206,10 @@ class BrowserSupervisorAgent(AgentClass):
 
         The entire process runs in the background so you can keep chatting.
         """
-        if not BROWSER_AUTOMATION_AVAILABLE:
+        if not _ensure_browser_automation():
             yield (
                 "LinkedIn job application is not available right now. "
-                "The browser_automation module could not be imported."
+                "The browser-use package is not installed in this environment."
             )
             return
 
@@ -218,7 +230,7 @@ class BrowserSupervisorAgent(AgentClass):
         )
 
         try:
-            result = await search_and_apply_linkedin_jobs(
+            result = await _search_and_apply_linkedin_jobs(
                 query=query or None,
                 num_jobs=num_jobs,
                 location=location or None,
