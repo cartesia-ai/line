@@ -1,19 +1,23 @@
 """
-Background Browser-Use Agent — LinkedIn Job Application
-=========================================================
+Personal Voice Assistant
+========================
 
-A voice agent with three capabilities:
+A voice agent with four capabilities:
 1. Direct conversation via a fast chat model (Claude Haiku)
 2. Deep reasoning via a supervisor model (Claude Opus)
 3. Automated LinkedIn job search & application via browser-use
+4. Music / song generation via ACE-Step model server
 
-The LinkedIn tool runs in the background — the agent keeps chatting while
-the browser autonomously searches LinkedIn, optimises the resume for ATS
-keywords, and applies to jobs.
+Tools 3 and 4 run in the background — the agent keeps chatting while
+the long-running task completes.
 """
 
 import os
+import time
+from pathlib import Path
 from typing import Annotated, AsyncIterable, Optional
+
+import httpx
 
 from line.agent import AgentClass, TurnEnv
 from line.events import (
@@ -25,6 +29,12 @@ from line.events import (
 )
 from line.llm_agent import LlmAgent, LlmConfig, ToolEnv, end_call, loopback_tool
 from line.voice_agent_app import AgentEnv, CallRequest, VoiceAgentApp
+
+# ---------------------------------------------------------------------------
+# Music model server configuration
+# ---------------------------------------------------------------------------
+_MUSIC_SERVER_URL = os.getenv("MUSIC_MODEL_SERVER_URL", "http://localhost:8190")
+_SONG_OUTPUT_DIR = Path(__file__).resolve().parent / "song-generated"
 
 # ---------------------------------------------------------------------------
 # browser_automation is imported lazily (on first tool call) to avoid
@@ -60,13 +70,15 @@ def _ensure_browser_automation():
 
 class BrowserSupervisorAgent(AgentClass):
     """
-    A three-tier voice agent:
+    A four-tier voice agent:
 
     * **Chat** (Claude Haiku) — handles routine conversation with low latency.
     * **Supervisor** (Claude Opus) — consulted for complex reasoning tasks.
     * **LinkedIn Applicant** (browser_automation) — searches LinkedIn for jobs,
       optimises the resume for ATS keywords, generates a cover letter, and
       submits applications — all in the background.
+    * **Song Generator** (ACE-Step model server) — generates music / singing
+      audio from caption + lyrics via the ACE-Step 1.5 model server.
     """
 
     def __init__(self, api_key: Optional[str] = None):
@@ -87,6 +99,7 @@ class BrowserSupervisorAgent(AgentClass):
             tools=[
                 self.ask_supervisor,
                 self.apply_linkedin_jobs,
+                self.generate_song,
                 end_call,
             ],
             config=LlmConfig(
@@ -97,6 +110,7 @@ class BrowserSupervisorAgent(AgentClass):
 
         self._answering_question = False
         self._applying = False
+        self._generating_song = False
 
     # ------------------------------------------------------------------
     # Event processing
@@ -252,6 +266,169 @@ class BrowserSupervisorAgent(AgentClass):
             self._applying = False
 
     # ------------------------------------------------------------------
+    # Tool: generate_song (background)
+    # ------------------------------------------------------------------
+
+    @loopback_tool(is_background=True)
+    async def generate_song(
+        self,
+        ctx: ToolEnv,
+        caption: Annotated[
+            str,
+            "Text description of the desired music, e.g. "
+            "'female vocalist singing a catchy pop melody with soft acoustic "
+            "guitar accompaniment, warm and intimate, clear vocals, English'. "
+            "Be descriptive about genre, mood, instruments, and language.",
+        ],
+        lyrics: Annotated[
+            str,
+            "Song lyrics with section markers. Use markers like [Verse], "
+            "[Chorus], [Bridge], [Outro]. Use '[Instrumental]' for "
+            "instrumental-only music. Example:\n"
+            "[Verse]\\nHello hello\\nHello you stranger\\n\\n"
+            "[Chorus]\\nHello hello\\nHello you stranger",
+        ] = "",
+        instrumental: Annotated[
+            bool,
+            "If true, generate instrumental music without vocals. "
+            "Overrides lyrics to '[Instrumental]'.",
+        ] = False,
+        duration: Annotated[
+            float,
+            "Duration of the generated audio in seconds. "
+            "Range: 5 to 600. Default is 30 seconds.",
+        ] = 30.0,
+        bpm: Annotated[
+            int,
+            "Beats per minute. Range 30-300. "
+            "Leave as 0 for automatic BPM detection based on the caption.",
+        ] = 0,
+        seed: Annotated[
+            int,
+            "Random seed for reproducibility. Use -1 for a random seed.",
+        ] = -1,
+    ) -> AsyncIterable[str]:
+        """
+        Generate a song or music track using the ACE-Step AI music model.
+
+        This tool will:
+        1. Send the caption and lyrics to the ACE-Step 1.5 model server
+        2. Generate high-quality FLAC audio
+        3. Save the audio file to the song-generated directory
+        4. Return a summary with the file path and generation details
+
+        Use this when the user asks you to:
+        - Sing a song or generate music
+        - Create a melody, beat, or instrumental track
+        - Compose something musical
+
+        The generation runs in the background so you can keep chatting.
+        """
+        if self._generating_song:
+            yield (
+                "I'm already generating a song. "
+                "Please wait for it to finish before requesting another."
+            )
+            return
+
+        self._generating_song = True
+
+        yield (
+            f"Starting music generation — this usually takes 15 to 60 seconds "
+            f"depending on the duration. I'll let you know as soon as it's ready."
+        )
+
+        try:
+            # Check server health first
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                try:
+                    health = await client.get(f"{_MUSIC_SERVER_URL}/health")
+                    health_data = health.json()
+                    if health_data.get("status") != "ok":
+                        yield (
+                            "The music model server is still loading. "
+                            "Please try again in a minute."
+                        )
+                        return
+                except (httpx.ConnectError, httpx.ConnectTimeout):
+                    yield (
+                        "I can't reach the music model server right now. "
+                        "Make sure it's running on "
+                        f"{_MUSIC_SERVER_URL} and try again."
+                    )
+                    return
+
+            # Build the request payload
+            payload = {
+                "caption": caption,
+                "lyrics": lyrics if lyrics else ("[Instrumental]" if instrumental else ""),
+                "instrumental": instrumental,
+                "duration": duration,
+                "seed": seed,
+            }
+            if bpm and bpm > 0:
+                payload["bpm"] = bpm
+
+            # Make the generation request (long timeout — generation can take minutes)
+            async with httpx.AsyncClient(timeout=300.0) as client:
+                response = await client.post(
+                    f"{_MUSIC_SERVER_URL}/generate",
+                    json=payload,
+                )
+
+            if response.status_code != 200:
+                error_detail = response.text[:200]
+                yield f"The music server returned an error (HTTP {response.status_code}): {error_detail}"
+                return
+
+            # Save the audio file
+            _SONG_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+            timestamp = time.strftime("%Y%m%d_%H%M%S")
+            # Sanitise caption for filename (first 40 chars, alphanumeric + underscore)
+            safe_caption = "".join(
+                c if c.isalnum() or c in " _-" else "" for c in caption[:40]
+            ).strip().replace(" ", "_") or "song"
+            filename = f"{timestamp}_{safe_caption}.flac"
+            filepath = _SONG_OUTPUT_DIR / filename
+
+            filepath.write_bytes(response.content)
+
+            # Extract metadata from response headers
+            sample_rate = response.headers.get("X-Sample-Rate", "48000")
+            used_seed = response.headers.get("X-Seed", "unknown")
+            gen_time = response.headers.get("X-Generation-Time", "unknown")
+            file_size_kb = len(response.content) / 1024
+
+            summary_parts = [
+                f"Your song is ready! I generated {duration:.0f} seconds of audio",
+            ]
+            if not instrumental and lyrics:
+                summary_parts.append(" with vocals")
+            else:
+                summary_parts.append(" instrumental")
+            summary_parts.append(
+                f". It took {gen_time} seconds to generate"
+                f" and the file is {file_size_kb:.0f} KB."
+                f" Saved to {filepath.name}."
+            )
+            if used_seed != "unknown":
+                summary_parts.append(
+                    f" The seed was {used_seed} if you want to reproduce it."
+                )
+
+            yield "".join(summary_parts)
+
+        except httpx.TimeoutException:
+            yield (
+                "The music generation timed out. The song might be too long "
+                "or the server is overloaded. Try a shorter duration."
+            )
+        except Exception as e:
+            yield f"I ran into a problem generating the song: {str(e)}"
+        finally:
+            self._generating_song = False
+
+    # ------------------------------------------------------------------
     # Cleanup
     # ------------------------------------------------------------------
 
@@ -344,14 +521,16 @@ def _summarise_linkedin_result(result: dict, dry_run: bool) -> str:
 CHAT_SYSTEM_PROMPT = """\
 You are a friendly personal assistant. You help with everyday tasks, \
 answer questions, have casual conversations, and can think through \
-complex problems. One of the things you can do is search and apply to \
-jobs on LinkedIn, but that is just one of many things you help with.
+complex problems. You can also search and apply to jobs on LinkedIn, \
+and generate songs or music on demand. These are just some of the \
+many things you help with.
 
 # Personality
 Warm, natural, and conversational — like a helpful friend. You are \
 proactive but not pushy. You chat about anything: daily life, tech, \
 ideas, plans, recommendations, or just casual banter. You happen to \
-also have the ability to run deep research and automate job applications.
+also have the ability to run deep research, automate job applications, \
+and create music.
 
 # What you handle directly
 - General conversation and small talk
@@ -381,6 +560,27 @@ Default behaviour (if the user just says "apply to jobs"):
 
 Ask the user to confirm before applying (dry_run=false). If they just \
 want to see what is available, suggest dry_run=true first.
+
+# When to use generate_song
+Use when the user asks you to sing, make music, generate a song, \
+compose a track, or anything music-related:
+- "Sing me a song"
+- "Generate a pop song about hello"
+- "Make me an instrumental beat"
+- "Can you sing happy birthday?"
+
+When the user asks you to "sing", compose a suitable caption describing \
+the musical style and write appropriate lyrics yourself. Be creative! \
+For example if they say "sing me a lullaby", you would set:
+- caption: "soft female vocalist singing a gentle lullaby with piano \
+accompaniment, soothing and calm, clear vocals, English"
+- lyrics: "[Verse]\\nHush little baby...\\n[Chorus]\\n..."
+
+Default behaviour:
+- duration: 30 seconds (increase if user asks for a longer song)
+- instrumental: false (unless specifically requested)
+- bpm: 0 (auto-detect from caption)
+- seed: -1 (random)
 
 # Tools
 ## ask_supervisor
@@ -418,6 +618,30 @@ When you receive the result:
 - Mention the ATS keywords used if relevant
 - Keep it conversational — don't dump raw data
 
+## generate_song
+Generates music / singing audio using the ACE-Step AI model. \
+Runs in the background.
+
+When you call it:
+1. Craft a descriptive caption (genre, mood, instruments, vocal style, language)
+2. Write lyrics with section markers ([Verse], [Chorus], etc.) or use \
+   '[Instrumental]' for no vocals
+3. Acknowledge: "Let me generate that song for you" or similar
+4. It takes 15-60 seconds depending on duration
+
+Parameters:
+- caption: descriptive text about the music style (REQUIRED)
+- lyrics: song lyrics with section markers (default: empty)
+- instrumental: true for no vocals (default: false)
+- duration: length in seconds, 5-600 (default: 30)
+- bpm: beats per minute, 0 for auto (default: 0)
+- seed: random seed, -1 for random (default: -1)
+
+When you receive the result:
+- Tell the user their song is ready
+- Mention the filename and how long it took
+- Offer to generate another variation if they want
+
 ## end_call
 Use when the caller says goodbye, thanks, or is clearly done.
 Say goodbye naturally first, then call end_call.
@@ -430,8 +654,9 @@ No emojis, asterisks, or markdown. Everything you say will be spoken aloud."""
 CHAT_INTRODUCTION = (
     "Hey! I'm your personal assistant. "
     "I can help with pretty much anything — questions, planning, brainstorming, "
-    "or just chatting. I can also search LinkedIn and apply to jobs for you "
-    "if you need that. What's on your mind?"
+    "or just chatting. I can also search LinkedIn and apply to jobs for you, "
+    "and if you want me to sing or generate some music, I can do that too. "
+    "What's on your mind?"
 )
 
 

@@ -18,6 +18,7 @@ uv.lock
 
 # Output
 output_music/
+song-generated/
 
 # Misc
 *.pdf
