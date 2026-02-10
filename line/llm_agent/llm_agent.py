@@ -84,7 +84,7 @@ class LlmAgent:
     def __init__(
         self,
         model: str,
-        api_key: str,
+        api_key: Optional[str],
         tools: Optional[List[ToolSpec]] = None,
         config: Optional[LlmConfig] = None,
         max_tool_iterations: int = 10,
