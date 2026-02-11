@@ -8,7 +8,6 @@ from appointment_scheduler import (
     check_availability,
     reset_scheduler_instance,
     select_appointment_slot,
-    send_availability_link,
 )
 from intake_form import (
     edit_intake_answer,
@@ -106,9 +105,6 @@ Scheduling flow:
 2. select_appointment_slot - When user picks a time, select it
 3. book_appointment - Confirm booking using contact info from the intake form (no need to ask again)
 
-If the shown times don't work:
-- Use send_availability_link to email them a link to view all appointments (uses name, email, and phone from the intake form)
-
 Tips:
 - Don't read out every single slot. Summarize like "I have openings Tuesday morning and Thursday afternoon."
 - Ask which time of day works better to narrow it down
@@ -170,7 +166,6 @@ async def get_agent(env: AgentEnv, call_request: CallRequest):
             check_availability,
             select_appointment_slot,
             book_appointment,
-            send_availability_link,
             end_call,
         ],
         config=LlmConfig(
