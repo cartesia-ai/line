@@ -250,7 +250,7 @@ class VoiceAgentApp:
         await runner.run()
         logger.info("Websocket session ended")
 
-    def run(self, host="", port=None):
+    def run(self, host="", port: int = None):
         """Run the voice agent server."""
         port = port or int(os.getenv("PORT", 8000))
         uvicorn.run(self.fastapi_app, host=host, port=port)
