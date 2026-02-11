@@ -10,10 +10,10 @@ from line.llm_agent import ToolEnv, loopback_tool
 # Form field definitions
 FORM_FIELDS = [
     # Personal Information
-    {"id": "first_name", "text": "What is your first name?", "type": "string", "section": "personal", "required": True},
-    {"id": "last_name", "text": "What is your last name?", "type": "string", "section": "personal", "required": True},
-    {"id": "email", "text": "What is your email address?", "type": "string", "section": "personal", "required": True},
-    {"id": "phone", "text": "What is your phone number?", "type": "string", "section": "personal", "required": True},
+    {"id": "first_name", "text": "What is your first name?", "type": "string", "section": "personal", "required": True, "confirm": True},
+    {"id": "last_name", "text": "What is your last name?", "type": "string", "section": "personal", "required": True, "confirm": True},
+    {"id": "email", "text": "What is your email address?", "type": "string", "section": "personal", "required": True, "confirm": True},
+    {"id": "phone", "text": "What is your phone number?", "type": "string", "section": "personal", "required": True, "confirm": True},
     {"id": "date_of_birth", "text": "What is your date of birth?", "type": "string", "section": "personal", "required": True},
     {
         "id": "ethnicity",
@@ -355,6 +355,7 @@ class IntakeForm:
             "recorded_value": processed,
             "section_message": section_message,
             "next_question": self._format_question(next_field) if next_field else None,
+            "next_field": next_field,
             "is_complete": next_field is None,
             "progress": f"{len(self._answers)}/{len(self._fields)}",
         }
@@ -499,31 +500,33 @@ async def start_intake_form(ctx: ToolEnv) -> str:
 @loopback_tool(is_background=True)
 async def record_intake_answer(
     ctx: ToolEnv,
-    answer: Annotated[str, "The user's answer to the current form question"],
+    answer: Annotated[str, "The user's confirmed answer to record (NOT 'yes' or confirmations)"],
 ) -> str:
-    """Record the user's answer to the current intake form question. After recording, confirm the value with the user and let them know they can correct it if needed."""
+    """Record the user's answer to the current intake form question.
+    IMPORTANT: Only call this with the actual answer value, never with 'yes' or confirmation words.
+    For fields with confirm=true: first confirm verbally with user, then call this tool after they confirm."""
     form = get_form()
     result = form.record_answer(answer)
 
     if not result["success"]:
-        return f"Could not record answer: {result.get('error', 'Unknown error')}. Current question: {result.get('current_question', '')}"
+        return f"Error: {result.get('error', 'Unknown error')}. Current question: {result.get('current_question', '')}"
 
     recorded_field = result.get("recorded_field", "")
-    recorded_value = result.get("recorded_value", "")
 
     if result["is_complete"]:
         eligibility = form.check_eligibility()
         if eligibility["eligible"]:
-            return f"Recorded {recorded_field} as '{recorded_value}'. Form complete! The user is eligible for a DEXA scan. Confirm this last answer is correct, then ask if they want to submit the form."
+            return f"Recorded {recorded_field}. Form complete! User is eligible. Ask if they want to submit."
         else:
-            reasons = " ".join(eligibility["reasons"])
-            return f"Recorded {recorded_field} as '{recorded_value}'. Form complete but user may not be eligible: {reasons}. Confirm this last answer is correct, then ask if they want to submit anyway or contact support."
+            return f"Recorded {recorded_field}. Form complete but eligibility issue. Ask if they want to submit anyway."
 
     section_msg = result.get("section_message", "")
     next_q = result.get("next_question", "")
-    progress = result.get("progress", "")
+    next_field = result.get("next_field", {})
+    requires_confirm = next_field.get("confirm", False)
 
-    return f"Recorded {recorded_field} as '{recorded_value}'. Confirm this is correct with the user. If correct, proceed to next question. Progress: {progress}. {section_msg}Next question: {next_q}"
+    confirm_note = " (confirm answer before recording)" if requires_confirm else ""
+    return f"Recorded {recorded_field}. {section_msg}Next question{confirm_note}: {next_q}"
 
 
 @loopback_tool(is_background=True)

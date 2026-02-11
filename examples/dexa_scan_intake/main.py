@@ -33,46 +33,60 @@ from appointment_scheduler import (
 
 
 class TTFCTracker:
-    """Tracks time to first chunk (TTFC) for LLM responses and logs averages."""
+    """Tracks time to first token (TTFT) and time to first text chunk (TTFC) for LLM responses."""
 
     def __init__(self, log_interval: int = 5):
-        self._ttfc_times: List[float] = []
+        self._ttft_times: List[float] = []  # Time to first token (any output)
+        self._ttfc_times: List[float] = []  # Time to first text chunk
         self._turn_count: int = 0
         self._log_interval = log_interval
 
-    def record(self, ttfc_ms: float):
-        """Record a TTFC measurement and log average if at interval."""
+    def record_ttft(self, ttft_ms: float):
+        """Record time to first token (any output from LLM)."""
+        self._ttft_times.append(ttft_ms)
+        logger.info(f"TTFT turn {self._turn_count + 1}: {ttft_ms:.1f}ms")
+
+    def record_ttfc(self, ttfc_ms: float):
+        """Record time to first text chunk."""
         self._ttfc_times.append(ttfc_ms)
         self._turn_count += 1
         logger.info(f"TTFC turn {self._turn_count}: {ttfc_ms:.1f}ms")
 
         if self._turn_count % self._log_interval == 0:
-            avg = sum(self._ttfc_times) / len(self._ttfc_times)
-            logger.info(f"TTFC average over {len(self._ttfc_times)} turns: {avg:.1f}ms")
+            ttft_avg = sum(self._ttft_times) / len(self._ttft_times) if self._ttft_times else 0
+            ttfc_avg = sum(self._ttfc_times) / len(self._ttfc_times) if self._ttfc_times else 0
+            logger.info(f"Averages over {self._turn_count} turns - TTFT: {ttft_avg:.1f}ms, TTFC: {ttfc_avg:.1f}ms")
 
     def reset(self):
         """Reset tracking for a new call."""
+        self._ttft_times = []
         self._ttfc_times = []
         self._turn_count = 0
 
 
 class TTFCWrappedAgent:
-    """Wraps an LlmAgent to track time to first chunk."""
+    """Wraps an LlmAgent to track time to first token and first text chunk."""
 
     def __init__(self, agent: LlmAgent, tracker: TTFCTracker):
         self._agent = agent
         self._tracker = tracker
 
     async def process(self, env, event) -> AsyncIterable:
-        """Process an event and track TTFC."""
+        """Process an event and track TTFT and TTFC."""
         start_time = time.perf_counter()
-        first_chunk_seen = False
+        first_token_seen = False
+        first_text_seen = False
 
         async for output in self._agent.process(env, event):
-            if not first_chunk_seen and isinstance(output, AgentSendText):
+            if not first_token_seen:
+                ttft_ms = (time.perf_counter() - start_time) * 1000
+                self._tracker.record_ttft(ttft_ms)
+                first_token_seen = True
+
+            if not first_text_seen and isinstance(output, AgentSendText):
                 ttfc_ms = (time.perf_counter() - start_time) * 1000
-                self._tracker.record(ttfc_ms)
-                first_chunk_seen = True
+                self._tracker.record_ttfc(ttfc_ms)
+                first_text_seen = True
 
             yield output
 
@@ -92,8 +106,9 @@ SYSTEM_PROMPT = """You are a friendly voice assistant for a DEXA scanning facili
 
 # Intake Form Rules
 - Ask ONE question at a time
-- ONLY confirm name, email, and phone (repeat back: "so that's john at gmail dot com?")
-- For yes/no, numbers, and other fields: record directly without confirming
+- For name/email/phone: FIRST say it back to confirm ("so that's john at gmail dot com?"), THEN call record_intake_answer with the value AFTER user confirms
+- For all other fields (yes/no, numbers, etc): call record_intake_answer immediately with the answer
+- NEVER call record_intake_answer with "yes" or "correct" - only call it with the actual answer value
 - Field IDs for edits: first_name, last_name, email, phone, date_of_birth, ethnicity, gender, height_inches, weight_pounds
 
 # Locations
@@ -109,7 +124,6 @@ SYSTEM_PROMPT = """You are a friendly voice assistant for a DEXA scanning facili
 
 INTRODUCTION = (
     "Hey! Thanks for calling. So, I can help you with pretty much anything about DEXA scans, "
-    "whether you're curious about how it works, want to book an appointment, or, um, just have questions. "
     "What can I help you with?"
 )
 
