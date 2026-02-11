@@ -3,6 +3,7 @@
 import asyncio
 import json
 from typing import Annotated, Any, Optional
+
 from loguru import logger
 
 from line.llm_agent import ToolEnv, loopback_tool
@@ -40,6 +41,22 @@ FORM_FIELDS = [
         "type": "string",
         "section": "intake",
         "required": False,
+    },
+    {
+        "id": "email",
+        "text": "What is the best email address to reach you?",
+        "context": "Make sure you confirm it with the user by spelling it out. Call record_answer when you have a complete email address.",
+        "type": "string",
+        "section": "intake",
+        "required": True,
+    },
+    {
+        "id": "phone",
+        "text": "What is the best phone number to reach you?",
+        "context": "Include area code. Call record_answer when you have the full number.",
+        "type": "string",
+        "section": "intake",
+        "required": True,
     },
 ]
 
@@ -360,6 +377,25 @@ class IntakeForm:
             "full_name": self._answers.get("full_name"),
             "date_of_birth": self._answers.get("date_of_birth"),
             "time_preferences": self._answers.get("time_preferences"),
+            "email": self._answers.get("email"),
+            "phone": self._answers.get("phone"),
+        }
+
+    def get_contact_info(self) -> Optional[dict]:
+        """Get first_name, last_name, email, phone for scheduling. Returns None if any required contact field is missing."""
+        full_name = self._answers.get("full_name") or ""
+        email = self._answers.get("email") or ""
+        phone = self._answers.get("phone") or ""
+        if not full_name.strip() or not email.strip() or not phone.strip():
+            return None
+        parts = full_name.strip().split(None, 1)
+        first_name = parts[0] if parts else ""
+        last_name = parts[1] if len(parts) > 1 else ""
+        return {
+            "first_name": first_name,
+            "last_name": last_name,
+            "email": email.strip(),
+            "phone": phone.strip(),
         }
 
     async def submit_form(self) -> dict:
@@ -487,10 +523,7 @@ async def submit_intake_form(ctx: ToolEnv) -> str:
     if not result["success"]:
         return f"Could not submit: {result['error']}"
 
-    return (
-        f"Form submitted successfully! "
-        f"{result['next_steps']}"
-    )
+    return f"Form submitted successfully! {result['next_steps']}"
 
 
 @loopback_tool
@@ -498,7 +531,7 @@ async def edit_intake_answer(
     ctx: ToolEnv,
     field_id: Annotated[
         str,
-        "The ID of the field to edit (e.g., 'reason_for_visit', 'full_name', 'date_of_birth', 'time_preferences')",
+        "The ID of the field to edit (e.g., 'reason_for_visit', 'full_name', 'date_of_birth', 'time_preferences', 'email', 'phone')",
     ],
     new_answer: Annotated[str, "The new answer to set for this field"],
 ) -> str:
@@ -523,7 +556,8 @@ async def edit_intake_answer(
 async def go_back_in_intake_form(
     ctx: ToolEnv,
     field_id: Annotated[
-        str, "The ID of the field to go back to (e.g., 'email', 'first_name', 'date_of_birth')"
+        str,
+        "The ID of the field to go back to (e.g., 'reason_for_visit', 'full_name', 'date_of_birth', 'time_preferences', 'email', 'phone')",
     ],
 ) -> str:
     """Go back to a previous question in the intake form to re-answer it and subsequent questions.
@@ -535,7 +569,7 @@ async def go_back_in_intake_form(
     if not result["success"]:
         return f"Could not go back: {result['error']}"
 
-    response = f"Going back. "
+    response = "Going back. "
     if result["cleared_fields"]:
         response += f"Cleared {len(result['cleared_fields'])} answer(s). "
     response += f"Progress: {result['progress']}. "

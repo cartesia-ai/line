@@ -1,9 +1,11 @@
 """Appointment scheduling for DEXA scans with mock availability data."""
 
 import asyncio
-import random
 from datetime import datetime, timedelta
+import random
 from typing import Annotated, Optional
+
+from intake_form import get_form
 from loguru import logger
 
 from line.llm_agent import ToolEnv, loopback_tool
@@ -226,21 +228,27 @@ async def select_appointment_slot(
     slot = result["selected"]
     return (
         f"Got it! I've selected {slot['time']} on {slot['date']}. "
-        f"To confirm this booking, I'll need your name, email, and phone number."
+        f"Ready to confirm the booking using the contact info from the intake form."
     )
 
 
 @loopback_tool
-async def book_appointment(
-    ctx: ToolEnv,
-    first_name: Annotated[str, "Patient's first name"],
-    last_name: Annotated[str, "Patient's last name"],
-    email: Annotated[str, "Patient's email address"],
-    phone: Annotated[str, "Patient's phone number"],
-) -> str:
-    """Book the selected appointment slot with patient information."""
+async def book_appointment(ctx: ToolEnv) -> str:
+    """Book the selected appointment slot using contact info from the completed intake form."""
+    form = get_form()
+    contact = form.get_contact_info()
+    if not contact:
+        return (
+            "Contact info is missing from the intake form. "
+            "Please complete the form (name, email, and phone) before booking."
+        )
     scheduler = get_scheduler()
-    result = await scheduler.book_appointment(first_name, last_name, email, phone)
+    result = await scheduler.book_appointment(
+        contact["first_name"],
+        contact["last_name"],
+        contact["email"],
+        contact["phone"],
+    )
 
     if not result["success"]:
         return result["error"]
@@ -249,21 +257,27 @@ async def book_appointment(
     return (
         f"Your appointment is confirmed! "
         f"You're scheduled for {appt['time']} on {appt['date']}. "
-        f"An email is on its way to {email}."
+        f"An email is on its way to {contact['email']}."
     )
 
 
 @loopback_tool
-async def send_availability_link(
-    ctx: ToolEnv,
-    first_name: Annotated[str, "User's first name"],
-    last_name: Annotated[str, "User's last name"],
-    email: Annotated[str, "User's email address"],
-    phone: Annotated[str, "User's phone number"],
-) -> str:
-    """Send a link to view all available appointments when the shown times don't work."""
+async def send_availability_link(ctx: ToolEnv) -> str:
+    """Send a link to view all available appointments when the shown times don't work. Uses contact info from the intake form."""
+    form = get_form()
+    contact = form.get_contact_info()
+    if not contact:
+        return (
+            "Contact info is missing from the intake form. "
+            "Please complete the form (name, email, and phone) before I can send the link."
+        )
     scheduler = get_scheduler()
-    result = await scheduler.send_availability_link(first_name, last_name, email, phone)
+    result = await scheduler.send_availability_link(
+        contact["first_name"],
+        contact["last_name"],
+        contact["email"],
+        contact["phone"],
+    )
 
     if not result["success"]:
         return "There was an issue sending the link. Please try again."
