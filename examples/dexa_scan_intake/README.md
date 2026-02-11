@@ -96,4 +96,3 @@ LlmConfig(
 Future features planned for this agent:
 - Appointment scheduling assistance
 - Intake form completion
-- Provider location lookup

@@ -122,13 +122,13 @@ def _get_scheduler_status_summary() -> str:
         appt = scheduler._booked_appointment
         return (
             f"[APPOINTMENT BOOKED] Confirmation: {appt['confirmation_number']} | "
-            f"{appt['slot']['time']} on {appt['slot']['date']} at {appt['slot']['location_name']}"
+            f"{appt['slot']['time']} on {appt['slot']['date']}"
         )
 
     if scheduler._selected_slot:
         slot = scheduler._selected_slot
         return (
-            f"[APPOINTMENT SELECTED] {slot['time']} on {slot['date']} at {slot['location_name']} | "
+            f"[APPOINTMENT SELECTED] {slot['time']} on {slot['date']} | "
             f"Awaiting patient info to confirm booking"
         )
 

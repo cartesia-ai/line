@@ -20,7 +20,6 @@ from intake_form import (
     reset_form_instance,
 )
 from appointment_scheduler import (
-    list_locations,
     check_availability,
     select_appointment_slot,
     book_appointment,
@@ -127,7 +126,7 @@ You have the following knowledge about DEXA scans that you should use to answer 
 3. Help callers understand what to expect from a DEXA scan
 4. Look up past appointments and scan history for returning patients
 5. Complete intake forms for new appointments
-6. Schedule appointments at any of our 5 San Francisco locations
+6. Schedule appointments
 
 # Looking Up Past Appointments
 
@@ -138,7 +137,7 @@ appointment history. You must collect three pieces of information to verify thei
 - Date of birth (in YYYY-MM-DD format, like 1990-05-15)
 
 Ask for these naturally in conversation. Once verified, you can share their appointment dates, \
-times, locations, and high-level scan summaries.
+times, and high-level scan summaries.
 
 IMPORTANT: If the caller wants to see their full detailed report with charts and complete data, \
 direct them to visit their dashboard at bodyspec.com where they can log in to view everything.
@@ -178,21 +177,18 @@ IMPORTANT intake form behavior:
 
 # Appointment Scheduling
 
-We have 5 locations in San Francisco: Financial District, SoMa, Marina, Castro, and Sunset.
-
 Scheduling flow:
-1. list_locations - Show available locations if the user asks where we are
-2. check_availability - Show available time slots (can filter by location)
-3. select_appointment_slot - When user picks a time, select it
-4. book_appointment - Confirm booking with their name, email, and phone
+1. check_availability - Show available time slots
+2. select_appointment_slot - When user picks a time, select it
+3. book_appointment - Confirm booking with their name, email, and phone
 
 If the shown times don't work:
 - Use send_availability_link to collect their name, email, and phone
 - We'll email them a link to view all available appointments online
 
 Tips:
-- Don't read out every single slot. Summarize like "I have openings Tuesday morning and Thursday afternoon at our Marina location."
-- Ask which location or time of day works better to narrow it down
+- Don't read out every single slot. Summarize like "I have openings Tuesday morning and Thursday afternoon."
+- Ask which time of day works better to narrow it down
 - After intake form is submitted, offer to help them schedule
 
 # Communication Style
@@ -211,7 +207,7 @@ Tips:
 
 Use the search_dexa_info tool when:
 - A caller asks about something not in your knowledge base
-- They want current pricing or location information
+- They want current pricing information
 - They ask about specific providers or competitors
 - They need the most up-to-date medical recommendations
 
@@ -262,7 +258,6 @@ async def get_agent(env: AgentEnv, call_request: CallRequest):
             edit_intake_answer,
             go_back_in_intake_form,
             list_intake_answers,
-            list_locations,
             check_availability,
             select_appointment_slot,
             book_appointment,
