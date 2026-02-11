@@ -1,25 +1,14 @@
 """DEXA Scan Intake Agent with knowledge base and Exa web search."""
 
 import os
-import random
 import time
 from typing import AsyncIterable, List
 
 from loguru import logger
 
-from line.events import AgentSendText, UserTextSent, CallStarted, CallEnded
+from line.events import AgentSendText
 from line.llm_agent import LlmAgent, LlmConfig, end_call
 from line.voice_agent_app import AgentEnv, CallRequest, VoiceAgentApp
-
-# Filler words to yield immediately for perceived lower latency
-FILLER_WORDS = [
-    "Okay, ",
-    "Got it, ",
-    "Alright, ",
-    "So, ",
-    "Um, ",
-    "Let's see, ",
-]
 
 from tools import lookup_past_appointments, search_dexa_info, lookup_dexa_knowledge
 from intake_form import (
@@ -68,23 +57,16 @@ class TTFCTracker:
 
 
 class TTFCWrappedAgent:
-    """Wraps an LlmAgent to track time to first chunk and add filler words."""
+    """Wraps an LlmAgent to track time to first chunk."""
 
-    def __init__(self, agent: LlmAgent, tracker: TTFCTracker, use_fillers: bool = True):
+    def __init__(self, agent: LlmAgent, tracker: TTFCTracker):
         self._agent = agent
         self._tracker = tracker
-        self._use_fillers = use_fillers
 
     async def process(self, env, event) -> AsyncIterable:
-        """Process an event, add filler word, and track TTFC."""
+        """Process an event and track TTFC."""
         start_time = time.perf_counter()
         first_chunk_seen = False
-
-        # Yield immediate filler for user text messages (not CallStarted/CallEnded)
-        if self._use_fillers and isinstance(event, UserTextSent):
-            filler = random.choice(FILLER_WORDS)
-            yield AgentSendText(text=filler)
-            logger.info(f"Yielded filler '{filler.strip()}' immediately")
 
         async for output in self._agent.process(env, event):
             if not first_chunk_seen and isinstance(output, AgentSendText):
