@@ -106,6 +106,148 @@ class IntakeForm:
             "current_section": current["section"] if current else None,
         }
 
+    def _get_field_by_id(self, field_id: str) -> Optional[dict]:
+        """Get a field definition by its ID."""
+        for field in self._fields:
+            if field["id"] == field_id:
+                return field
+        return None
+
+    def _get_field_index(self, field_id: str) -> int:
+        """Get the index of a field by its ID. Returns -1 if not found."""
+        for i, field in enumerate(self._fields):
+            if field["id"] == field_id:
+                return i
+        return -1
+
+    def get_answered_fields_summary(self) -> dict:
+        """Get a summary of all answered fields with their values."""
+        answered = []
+        for field in self._fields:
+            if field["id"] in self._answers:
+                value = self._answers[field["id"]]
+                # Format the value for display
+                if field["type"] == "boolean":
+                    display_value = "Yes" if value else "No"
+                elif field["type"] == "select":
+                    # Find the text for the selected option
+                    display_value = value
+                    for opt in field.get("options", []):
+                        if opt["value"] == value:
+                            display_value = opt["text"]
+                            break
+                else:
+                    display_value = str(value)
+
+                answered.append({
+                    "field_id": field["id"],
+                    "question": field["text"],
+                    "answer": display_value,
+                    "raw_value": value,
+                })
+        return {
+            "answered_count": len(answered),
+            "total_count": len(self._fields),
+            "fields": answered,
+        }
+
+    def edit_answer(self, field_id: str, new_answer: str) -> dict:
+        """Edit a previously answered field without changing the current position."""
+        if not self._is_started:
+            return {
+                "success": False,
+                "error": "Form has not been started yet.",
+            }
+
+        if self._is_submitted:
+            return {
+                "success": False,
+                "error": "Form has already been submitted. Cannot edit answers.",
+            }
+
+        field = self._get_field_by_id(field_id)
+        if not field:
+            available = [f["id"] for f in self._fields]
+            return {
+                "success": False,
+                "error": f"Unknown field '{field_id}'. Available fields: {', '.join(available)}",
+            }
+
+        if field_id not in self._answers:
+            return {
+                "success": False,
+                "error": f"Field '{field_id}' has not been answered yet. Cannot edit.",
+            }
+
+        # Validate and process the new answer
+        success, processed, error = self._process_answer(new_answer, field)
+        if not success:
+            return {
+                "success": False,
+                "error": error,
+                "field_id": field_id,
+                "question": self._format_question(field),
+            }
+
+        old_value = self._answers[field_id]
+        self._answers[field_id] = processed
+        logger.info(f"Edited '{field_id}': {old_value} -> {processed}")
+
+        # Get current question info
+        current = self._get_current_field()
+
+        return {
+            "success": True,
+            "field_id": field_id,
+            "old_value": old_value,
+            "new_value": processed,
+            "message": f"Updated {field_id} from '{old_value}' to '{processed}'.",
+            "current_question": self._format_question(current) if current else None,
+            "is_complete": current is None,
+        }
+
+    def go_back_to_question(self, field_id: str) -> dict:
+        """Go back to a specific question, clearing all answers from that point forward."""
+        if not self._is_started:
+            return {
+                "success": False,
+                "error": "Form has not been started yet.",
+            }
+
+        if self._is_submitted:
+            return {
+                "success": False,
+                "error": "Form has already been submitted. Use restart_form to start over.",
+            }
+
+        field_index = self._get_field_index(field_id)
+        if field_index == -1:
+            available = [f["id"] for f in self._fields]
+            return {
+                "success": False,
+                "error": f"Unknown field '{field_id}'. Available fields: {', '.join(available)}",
+            }
+
+        # Clear answers from this field forward
+        cleared_fields = []
+        for i in range(field_index, len(self._fields)):
+            fid = self._fields[i]["id"]
+            if fid in self._answers:
+                del self._answers[fid]
+                cleared_fields.append(fid)
+
+        self._current_index = field_index
+        logger.info(f"Went back to '{field_id}', cleared: {cleared_fields}")
+
+        field = self._fields[field_index]
+        return {
+            "success": True,
+            "message": f"Returned to question: {field['text']}",
+            "cleared_fields": cleared_fields,
+            "current_question": self._format_question(field),
+            "progress": f"{len(self._answers)}/{len(self._fields)}",
+        }
+
     def _get_current_field(self) -> Optional[dict]:
         """Get the current field to ask about."""
         if self._current_index < len(self._fields):
@@ -359,26 +501,29 @@ async def record_intake_answer(
     ctx: ToolEnv,
     answer: Annotated[str, "The user's answer to the current form question"],
 ) -> str:
-    """Record the user's answer to the current intake form question."""
+    """Record the user's answer to the current intake form question. After recording, confirm the value with the user and let them know they can correct it if needed."""
     form = get_form()
     result = form.record_answer(answer)
 
     if not result["success"]:
         return f"Could not record answer: {result.get('error', 'Unknown error')}. Current question: {result.get('current_question', '')}"
 
+    recorded_field = result.get("recorded_field", "")
+    recorded_value = result.get("recorded_value", "")
+
     if result["is_complete"]:
         eligibility = form.check_eligibility()
         if eligibility["eligible"]:
-            return "Form complete! The user is eligible for a DEXA scan. Ask if they want to submit the form."
+            return f"Recorded {recorded_field} as '{recorded_value}'. Form complete! The user is eligible for a DEXA scan. Confirm this last answer is correct, then ask if they want to submit the form."
         else:
             reasons = " ".join(eligibility["reasons"])
-            return f"Form complete but user may not be eligible: {reasons}. Ask if they want to submit anyway or contact support."
+            return f"Recorded {recorded_field} as '{recorded_value}'. Form complete but user may not be eligible: {reasons}. Confirm this last answer is correct, then ask if they want to submit anyway or contact support."
 
     section_msg = result.get("section_message", "")
     next_q = result.get("next_question", "")
     progress = result.get("progress", "")
 
-    return f"Recorded. Progress: {progress}. {section_msg}Next question: {next_q}"
+    return f"Recorded {recorded_field} as '{recorded_value}'. Confirm this is correct with the user. If correct, proceed to next question. Progress: {progress}. {section_msg}Next question: {next_q}"
 
 
 @loopback_tool
@@ -428,3 +573,66 @@ async def submit_intake_form(ctx: ToolEnv) -> str:
         f"Form submitted successfully! Confirmation number: {result['confirmation_number']}. "
         f"{result['next_steps']}"
     )
+
+
+@loopback_tool
+async def edit_intake_answer(
+    ctx: ToolEnv,
+    field_id: Annotated[str, "The ID of the field to edit (e.g., 'email', 'first_name', 'phone')"],
+    new_answer: Annotated[str, "The new answer to set for this field"],
+) -> str:
+    """Edit a previous answer in the intake form without changing the current question.
+    Use when the user wants to correct a specific answer they gave earlier (e.g., 'actually my email is different').
+    The form will continue from where it left off after editing."""
+    form = get_form()
+    result = form.edit_answer(field_id, new_answer)
+
+    if not result["success"]:
+        return f"Could not edit answer: {result['error']}"
+
+    response = f"Updated {result['field_id']}: '{result['old_value']}' → '{result['new_value']}'. "
+
+    if result["is_complete"]:
+        return response + "Form is complete and ready to submit."
+    else:
+        return response + f"Continuing with: {result['current_question']}"
+
+
+@loopback_tool
+async def go_back_in_intake_form(
+    ctx: ToolEnv,
+    field_id: Annotated[str, "The ID of the field to go back to (e.g., 'email', 'first_name', 'date_of_birth')"],
+) -> str:
+    """Go back to a previous question in the intake form to re-answer it and subsequent questions.
+    Use when the user wants to go back and redo from a certain point (e.g., 'wait, go back to the email question').
+    This will clear answers from that question forward."""
+    form = get_form()
+    result = form.go_back_to_question(field_id)
+
+    if not result["success"]:
+        return f"Could not go back: {result['error']}"
+
+    response = f"Going back. "
+    if result["cleared_fields"]:
+        response += f"Cleared {len(result['cleared_fields'])} answer(s). "
+    response += f"Progress: {result['progress']}. "
+    response += f"Question: {result['current_question']}"
+
+    return response
+
+
+@loopback_tool
+async def list_intake_answers(ctx: ToolEnv) -> str:
+    """List all answers the user has provided so far in the intake form.
+    Use when the user asks to review their answers or wants to know what they've entered."""
+    form = get_form()
+    summary = form.get_answered_fields_summary()
+
+    if summary["answered_count"] == 0:
+        return "No answers recorded yet. The form may not have been started."
+
+    parts = [f"Answered {summary['answered_count']}/{summary['total_count']} questions:\n"]
+    for field in summary["fields"]:
+        parts.append(f"- {field['field_id']}: {field['answer']}\n")
+
+    return "".join(parts)
