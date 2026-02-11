@@ -18,7 +18,6 @@ MOCK_USER_DATABASE = {
             {
                 "date": "2025-01-15",
                 "time": "10:30 AM",
-                "location": "San Francisco - Financial District",
                 "type": "Full Body DEXA Scan",
                 "summary": {
                     "body_fat_percentage": 22.3,
@@ -30,7 +29,6 @@ MOCK_USER_DATABASE = {
             {
                 "date": "2024-10-08",
                 "time": "2:00 PM",
-                "location": "San Francisco - Financial District",
                 "type": "Full Body DEXA Scan",
                 "summary": {
                     "body_fat_percentage": 24.1,
@@ -48,7 +46,6 @@ MOCK_USER_DATABASE = {
             {
                 "date": "2025-02-01",
                 "time": "9:00 AM",
-                "location": "Los Angeles - Santa Monica",
                 "type": "Full Body DEXA Scan",
                 "summary": {
                     "body_fat_percentage": 18.5,
@@ -66,7 +63,6 @@ MOCK_USER_DATABASE = {
             {
                 "date": "2024-12-20",
                 "time": "11:15 AM",
-                "location": "San Diego - Downtown",
                 "type": "Full Body DEXA Scan",
                 "summary": {
                     "body_fat_percentage": 26.8,
@@ -78,7 +74,6 @@ MOCK_USER_DATABASE = {
             {
                 "date": "2024-09-15",
                 "time": "3:30 PM",
-                "location": "San Diego - Downtown",
                 "type": "Full Body DEXA Scan",
                 "summary": {
                     "body_fat_percentage": 28.2,
@@ -90,7 +85,6 @@ MOCK_USER_DATABASE = {
             {
                 "date": "2024-06-01",
                 "time": "10:00 AM",
-                "location": "San Diego - Downtown",
                 "type": "Full Body DEXA Scan",
                 "summary": {
                     "body_fat_percentage": 29.5,
@@ -194,7 +188,6 @@ async def lookup_past_appointments(
     for i, appt in enumerate(appointments, 1):
         result_parts.append(f"Appointment {i}:\n")
         result_parts.append(f"- Date: {appt['date']} at {appt['time']}\n")
-        result_parts.append(f"- Location: {appt['location']}\n")
         result_parts.append(f"- Type: {appt['type']}\n")
 
         summary = appt["summary"]
