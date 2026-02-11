@@ -14,6 +14,9 @@ from intake_form import (
     get_intake_form_status,
     restart_intake_form,
     submit_intake_form,
+    edit_intake_answer,
+    go_back_in_intake_form,
+    list_intake_answers,
     reset_form_instance,
 )
 from appointment_scheduler import (
@@ -24,6 +27,7 @@ from appointment_scheduler import (
     send_availability_link,
     reset_scheduler_instance,
 )
+from history_processor import process_history
 
 # Comprehensive DEXA knowledge base sourced from BodySpec FAQ and medical resources
 DEXA_KNOWLEDGE_BASE = """
@@ -154,8 +158,18 @@ Use these tools in order:
 4. submit_intake_form - Submit when all questions are answered
 5. restart_intake_form - ONLY if user explicitly asks to start over
 
+Editing and correcting answers:
+- edit_intake_answer - Use when the user wants to correct a previous answer without starting over (e.g., "actually my email is different", "I meant to say 150 pounds not 160"). Pass the field_id and new answer.
+- go_back_in_intake_form - Use when the user wants to go back to a previous question and redo from there
+- list_intake_answers - Use when the user wants to review what they've entered so far
+
+Field IDs for editing: first_name, last_name, email, phone, date_of_birth, ethnicity, gender, height_inches, weight_pounds, q_weight_concerns, q_reduce_body_fat, q_athlete, q_family_history, q_high_blood_pressure, q_injuries, disq_barium_xray, disq_nuclear_scan
+
 IMPORTANT intake form behavior:
 - Ask ONE question at a time and wait for the answer
+- After recording each answer, briefly confirm what you recorded (e.g., "Got it, I have your email as john@example.com")
+- Let the user know they can correct it if needed, especially for important fields like email, phone, and date of birth
+- If the user says something is wrong, use edit_intake_answer to fix it
 - The form has 3 sections: personal info, qualifying questions, then final questions
 - If the user changes topic mid-form, answer their question, then gently prompt them to continue
 - Say something like "Whenever you're ready, we can continue with the form" or "Should we finish up the intake?"
@@ -234,7 +248,7 @@ async def get_agent(env: AgentEnv, call_request: CallRequest):
 
     introduction = get_introduction()
 
-    return LlmAgent(
+    agent = LlmAgent(
         model="anthropic/claude-haiku-4-5-20251001",
         api_key=os.getenv("ANTHROPIC_API_KEY"),
         tools=[
@@ -245,6 +259,9 @@ async def get_agent(env: AgentEnv, call_request: CallRequest):
             get_intake_form_status,
             restart_intake_form,
             submit_intake_form,
+            edit_intake_answer,
+            go_back_in_intake_form,
+            list_intake_answers,
             list_locations,
             check_availability,
             select_appointment_slot,
@@ -252,14 +269,18 @@ async def get_agent(env: AgentEnv, call_request: CallRequest):
             send_availability_link,
             end_call,
         ],
-        config=LlmConfig.from_call_request(
-            call_request,
-            fallback_system_prompt=SYSTEM_PROMPT,
-            fallback_introduction=introduction,
+        config=LlmConfig(
+            system_prompt=SYSTEM_PROMPT,
+            introduction=introduction,
             max_tokens=MAX_OUTPUT_TOKENS,
             temperature=TEMPERATURE,
         ),
     )
+
+    # Set history processor for pruning and summarization on long conversations
+    agent.set_history_processor(process_history)
+
+    return agent
 
 
 app = VoiceAgentApp(get_agent=get_agent)
