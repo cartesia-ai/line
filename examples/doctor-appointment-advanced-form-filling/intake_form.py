@@ -27,8 +27,8 @@ FORM_FIELDS = [
     },
     {
         "id": "date_of_birth",
-        "text": "What is your date of birth? Please state the month, day, and year - such as January 1, 2000",
-        "context": "Please require the month, day, and year.",
+        "text": "What is your date of birth?",
+        "context": "Please require the month, day, and year. Call record_answer when all 3 are given.",
         "type": "date",
         "section": "intake",
         "required": True,

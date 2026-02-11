@@ -1,5 +1,6 @@
 """DEXA Scan Intake Agent with knowledge base and Exa web search."""
 
+from datetime import datetime
 import os
 
 from appointment_scheduler import (
@@ -24,7 +25,7 @@ from loguru import logger
 from line.llm_agent import LlmAgent, LlmConfig, end_call
 from line.voice_agent_app import AgentEnv, CallRequest, VoiceAgentApp
 
-SYSTEM_PROMPT = """
+SYSTEM_PROMPT = f"""
 You are a friendly medical office assistant helping patients schedule intake appointments over the phone.
 
 # Personality
@@ -58,8 +59,9 @@ If caller mentions chest pain, difficulty breathing, or other emergencies: "That
 # Phone guidelines
 Speak naturally without emojis or structured formatting. Spell out dates: "Tuesday, February fourth" not "2/4."
 
-# Tools
+It is sometimes hard to hear the user, so if you don't understand something or if an answer is ridiculous, confirm your answer to them.
 
+# Tools
 # Your Capabilities
 - Complete intake forms for new appointments
 - Schedule appointments
@@ -127,14 +129,14 @@ Tips:
 
 
 # Ending Calls
-
 When the caller indicates they are done or says goodbye, respond warmly and use the end_call \
 tool. Say something like "Thank you for calling. Have a great day!" before ending.
+
+# Additional information
+Today is {datetime.now().strftime("%A, %B %d, %Y")} and the current time is {datetime.now().strftime("%I:%M %p")}.
 """
 
-INTRODUCTION = (
-    "Hi, thanks for calling! I'd be happy to help you schedule an appointment. Let me just get a few details."
-)
+INTRODUCTION = "Hi, this is Jane speaking from UCSF medical. I'd be happy to help schedule an appointment for you. I have a few questions for you. First, why are you coming in?"
 
 MAX_OUTPUT_TOKENS = 16000
 TEMPERATURE = 1
