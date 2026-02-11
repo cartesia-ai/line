@@ -9,7 +9,6 @@ from appointment_scheduler import (
     select_appointment_slot,
     send_availability_link,
 )
-from history_processor import process_history
 from intake_form import (
     edit_intake_answer,
     get_intake_form_status,
@@ -180,9 +179,6 @@ async def get_agent(env: AgentEnv, call_request: CallRequest):
             temperature=TEMPERATURE,
         ),
     )
-
-    # Set history processor for pruning and summarization on long conversations
-    agent.set_history_processor(process_history)
 
     return agent
 
