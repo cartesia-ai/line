@@ -13,7 +13,8 @@ Model naming:
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Dict, List, Optional
 
-from litellm import acompletion, get_supported_openai_params
+from litellm import acompletion, get_llm_provider, get_supported_openai_params
+from litellm.utils import get_optional_params
 
 from line.llm_agent.config import LlmConfig
 from line.llm_agent.schema_converter import function_tools_to_openai
@@ -77,6 +78,19 @@ class LLMProvider:
         supported = get_supported_openai_params(model=model) or []
         self._supports_reasoning_effort = "reasoning_effort" in supported
 
+        # Determine the right default when no explicit reasoning_effort is configured.
+        # "none" is ideal (disables reasoning entirely) but not all providers support it.
+        # Probe litellm's own parameter mapping to find out: if mapping "none" through the
+        # provider's config raises, fall back to "low" (the lowest universally-supported level).
+        self._default_reasoning_effort = "low"
+        if self._supports_reasoning_effort:
+            try:
+                _, provider, _, _ = get_llm_provider(model=model)
+                get_optional_params(model=model, custom_llm_provider=provider, reasoning_effort="none")
+                self._default_reasoning_effort = "none"
+            except Exception:
+                pass
+
     def chat(
         self,
         messages: List[Message],
@@ -116,7 +130,7 @@ class LLMProvider:
         if self._config.frequency_penalty is not None:
             llm_kwargs["frequency_penalty"] = self._config.frequency_penalty
         if self._supports_reasoning_effort:
-            llm_kwargs["reasoning_effort"] = self._config.reasoning_effort or "low"
+            llm_kwargs["reasoning_effort"] = self._config.reasoning_effort or self._default_reasoning_effort
 
         if self._config.extra:
             llm_kwargs.update(self._config.extra)
