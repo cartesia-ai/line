@@ -388,8 +388,7 @@ class IntakeForm:
             "success": True,
             "submitted": True,
             "message": "Doctor visit intake submitted successfully.",
-            "confirmation_number": f"VISIT-{hash(json.dumps(form_data)) % 100000:05d}",
-            "next_steps": "You can now book an appointment. We will send a confirmation shortly.",
+            "next_steps": "You can now book an appointment.",
         }
 
 
@@ -489,7 +488,7 @@ async def submit_intake_form(ctx: ToolEnv) -> str:
         return f"Could not submit: {result['error']}"
 
     return (
-        f"Form submitted successfully! Confirmation number: {result['confirmation_number']}. "
+        f"Form submitted successfully! "
         f"{result['next_steps']}"
     )
 

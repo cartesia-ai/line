@@ -112,10 +112,7 @@ class AppointmentScheduler:
         # Simulate API call
         await asyncio.sleep(0.5)
 
-        confirmation_number = f"BS-{random.randint(100000, 999999)}"
-
         self._booked_appointment = {
-            "confirmation_number": confirmation_number,
             "slot": self._selected_slot,
             "patient": {
                 "first_name": first_name,
@@ -129,12 +126,11 @@ class AppointmentScheduler:
 
         return {
             "success": True,
-            "confirmation_number": confirmation_number,
             "appointment": {
                 "date": self._selected_slot["date"],
                 "time": self._selected_slot["time"],
             },
-            "message": "Appointment booked successfully! A confirmation email will be sent shortly.",
+            "message": "Appointment booked successfully! An email will be sent shortly.",
         }
 
     async def send_availability_link(self, first_name: str, last_name: str, email: str, phone: str) -> dict:
@@ -251,9 +247,9 @@ async def book_appointment(
 
     appt = result["appointment"]
     return (
-        f"Your appointment is confirmed! Confirmation number: {result['confirmation_number']}. "
+        f"Your appointment is confirmed! "
         f"You're scheduled for {appt['time']} on {appt['date']}. "
-        f"A confirmation email is on its way to {email}."
+        f"An email is on its way to {email}."
     )
 
 
