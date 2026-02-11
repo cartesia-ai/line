@@ -483,7 +483,7 @@ def reset_form_instance():
 
 # Tool definitions
 
-@loopback_tool
+@loopback_tool(is_background=True)
 async def start_intake_form(ctx: ToolEnv) -> str:
     """Start the DEXA scan intake form. Use when user wants to book an appointment, get started, or asks how often they should scan."""
     form = get_form()
@@ -496,7 +496,7 @@ async def start_intake_form(ctx: ToolEnv) -> str:
     )
 
 
-@loopback_tool
+@loopback_tool(is_background=True)
 async def record_intake_answer(
     ctx: ToolEnv,
     answer: Annotated[str, "The user's answer to the current form question"],
@@ -526,7 +526,7 @@ async def record_intake_answer(
     return f"Recorded {recorded_field} as '{recorded_value}'. Confirm this is correct with the user. If correct, proceed to next question. Progress: {progress}. {section_msg}Next question: {next_q}"
 
 
-@loopback_tool
+@loopback_tool(is_background=True)
 async def get_intake_form_status(ctx: ToolEnv) -> str:
     """Check the current status of the intake form including progress and next question."""
     form = get_form()
@@ -548,7 +548,7 @@ async def get_intake_form_status(ctx: ToolEnv) -> str:
     )
 
 
-@loopback_tool
+@loopback_tool(is_background=True)
 async def restart_intake_form(ctx: ToolEnv) -> str:
     """Clear all answers and restart the intake form from the beginning. Only use if the user explicitly asks to start over."""
     form = get_form()
@@ -556,7 +556,7 @@ async def restart_intake_form(ctx: ToolEnv) -> str:
     return f"Form restarted. {result['next_question']}"
 
 
-@loopback_tool
+@loopback_tool(is_background=True)
 async def submit_intake_form(ctx: ToolEnv) -> str:
     """Submit the completed intake form. Only use after all questions are answered."""
     form = get_form()
@@ -575,7 +575,7 @@ async def submit_intake_form(ctx: ToolEnv) -> str:
     )
 
 
-@loopback_tool
+@loopback_tool(is_background=True)
 async def edit_intake_answer(
     ctx: ToolEnv,
     field_id: Annotated[str, "The ID of the field to edit (e.g., 'email', 'first_name', 'phone')"],
@@ -598,7 +598,7 @@ async def edit_intake_answer(
         return response + f"Continuing with: {result['current_question']}"
 
 
-@loopback_tool
+@loopback_tool(is_background=True)
 async def go_back_in_intake_form(
     ctx: ToolEnv,
     field_id: Annotated[str, "The ID of the field to go back to (e.g., 'email', 'first_name', 'date_of_birth')"],
@@ -621,7 +621,7 @@ async def go_back_in_intake_form(
     return response
 
 
-@loopback_tool
+@loopback_tool(is_background=True)
 async def list_intake_answers(ctx: ToolEnv) -> str:
     """List all answers the user has provided so far in the intake form.
     Use when the user asks to review their answers or wants to know what they've entered."""

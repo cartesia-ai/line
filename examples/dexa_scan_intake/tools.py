@@ -118,6 +118,46 @@ async def _mock_api_call(first_name: str, last_name: str, date_of_birth: str) ->
         return {"success": False, "error": "No matching records found"}
 
 
+# DEXA Knowledge Base - used by lookup_dexa_knowledge tool
+DEXA_KNOWLEDGE = {
+    "what_is_dexa": "DEXA (Dual-Energy X-ray Absorptiometry) uses two X-ray beams to measure body composition and bone density with high precision, distinguishing bone, lean tissue, and fat.",
+    "how_it_works": "You lie on an open table while a scanning arm passes over you, emitting low-dose X-rays. Different tissues absorb different amounts, allowing precise measurement of bone, muscle, and fat.",
+    "what_it_measures": "Total body fat percentage, lean muscle mass by region, bone mineral density, visceral fat (around organs), and left/right symmetry.",
+    "accuracy": "DEXA is the gold standard with 1-2% margin of error for body fat. Much more accurate than scales, calipers, or underwater weighing.",
+    "safety": "Very safe - uses 1/10th the radiation of a chest X-ray (0.001 mSv), less than daily background radiation.",
+    "preparation": "Wear comfortable clothes without metal. Avoid calcium supplements 24hrs before. Stay hydrated. No fasting needed but avoid large meals. Remove jewelry.",
+    "what_to_expect": "Takes 7-10 minutes. Lie still on your back. Painless and non-invasive. The arm passes over but doesn't touch you.",
+    "frequency": "Every 3-6 months for tracking changes. More frequent scans may not show meaningful differences.",
+    "visceral_fat": "Fat around internal organs. High visceral fat increases risk of diabetes, heart disease, and metabolic syndrome. DEXA measures this directly.",
+    "results": "Shows body fat percentage (essential/athletic/fit/average/obese ranges), lean mass, bone density vs peers, and regional breakdown.",
+    "who_should_get": "Athletes, fitness trackers, bone health concerns, weight management, older adults, anyone wanting baseline health metrics.",
+}
+
+
+@loopback_tool
+async def lookup_dexa_knowledge(
+    ctx: ToolEnv,
+    topic: Annotated[
+        str,
+        "The topic to look up. Options: what_is_dexa, how_it_works, what_it_measures, accuracy, safety, preparation, what_to_expect, frequency, visceral_fat, results, who_should_get",
+    ],
+) -> str:
+    """Look up information about DEXA scans from the knowledge base. Use this to answer questions about DEXA."""
+    topic_key = topic.lower().replace(" ", "_").replace("-", "_")
+
+    # Try exact match first
+    if topic_key in DEXA_KNOWLEDGE:
+        return DEXA_KNOWLEDGE[topic_key]
+
+    # Try partial match
+    for key, value in DEXA_KNOWLEDGE.items():
+        if topic_key in key or key in topic_key:
+            return value
+
+    # Return all topics if no match
+    return f"Topic '{topic}' not found. Available: {', '.join(DEXA_KNOWLEDGE.keys())}"
+
+
 @loopback_tool(is_background=True)
 async def search_dexa_info(
     ctx: ToolEnv,

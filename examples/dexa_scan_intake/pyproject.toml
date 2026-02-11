@@ -11,3 +11,6 @@ dependencies = [
 
 [tool.setuptools]
 py-modules = ["main", "tools", "intake_form", "appointment_scheduler", "history_processor"]
+
+# [tool.uv.sources]
+# cartesia-line = { path = "../../", editable = true }
