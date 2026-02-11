@@ -92,8 +92,8 @@ SYSTEM_PROMPT = """You are a friendly voice assistant for a DEXA scanning facili
 
 # Intake Form Rules
 - Ask ONE question at a time
-- For name/email/phone/DOB: repeat back and confirm before recording ("so that's john at gmail dot com?")
-- For yes/no and simple fields: record directly
+- ONLY confirm name, email, and phone (repeat back: "so that's john at gmail dot com?")
+- For yes/no, numbers, and other fields: record directly without confirming
 - Field IDs for edits: first_name, last_name, email, phone, date_of_birth, ethnicity, gender, height_inches, weight_pounds
 
 # Locations
@@ -123,8 +123,8 @@ async def get_agent(env: AgentEnv, call_request: CallRequest):
     _ttfc_tracker.reset()
 
     agent = LlmAgent(
-        model="anthropic/claude-haiku-4-5-20251001",
-        api_key=os.getenv("ANTHROPIC_API_KEY"),
+        model="gemini/gemini-2.5-flash",
+        api_key=os.getenv("GEMINI_API_KEY"),
         tools=[
             lookup_dexa_knowledge,
             search_dexa_info,
