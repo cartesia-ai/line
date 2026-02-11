@@ -8,6 +8,7 @@ from loguru import logger
 
 from line.llm_agent import ToolEnv, loopback_tool
 
+
 def _generate_mock_availability(days_ahead: int = 7) -> list[dict]:
     """Generate mock availability slots."""
     slots = []
@@ -33,12 +34,14 @@ def _generate_mock_availability(days_ahead: int = 7) -> list[dict]:
         selected_times.sort()
 
         for time in selected_times:
-            slots.append({
-                "date": date.strftime("%A, %B %d"),
-                "date_iso": date.strftime("%Y-%m-%d"),
-                "time": time,
-                "slot_id": f"{date.strftime('%Y%m%d')}_{time.replace(':', '').replace(' ', '')}",
-            })
+            slots.append(
+                {
+                    "date": date.strftime("%A, %B %d"),
+                    "date_iso": date.strftime("%Y-%m-%d"),
+                    "time": time,
+                    "slot_id": f"{date.strftime('%Y%m%d')}_{time.replace(':', '').replace(' ', '')}",
+                }
+            )
 
     return slots
 
@@ -71,14 +74,19 @@ class AppointmentScheduler:
         slot_description_lower = slot_description.lower()
 
         for slot in all_slots:
-            if (slot["date"].lower() in slot_description_lower or
-                slot["time"].lower() in slot_description_lower or
-                slot["date_iso"] in slot_description_lower):
-
-                day_match = any(day in slot_description_lower for day in
-                              ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"])
-                time_match = any(t in slot_description_lower for t in
-                               ["morning", "afternoon", "9", "10", "11", "12", "1", "2", "3", "4", "5"])
+            if (
+                slot["date"].lower() in slot_description_lower
+                or slot["time"].lower() in slot_description_lower
+                or slot["date_iso"] in slot_description_lower
+            ):
+                day_match = any(
+                    day in slot_description_lower
+                    for day in ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+                )
+                time_match = any(
+                    t in slot_description_lower
+                    for t in ["morning", "afternoon", "9", "10", "11", "12", "1", "2", "3", "4", "5"]
+                )
 
                 if day_match or time_match:
                     self._selected_slot = slot
@@ -146,7 +154,7 @@ class AppointmentScheduler:
         return {
             "success": True,
             "message": f"A link to view all available appointments has been sent to {email}. "
-                      "The link will be valid for 48 hours.",
+            "The link will be valid for 48 hours.",
         }
 
     def reset(self):
