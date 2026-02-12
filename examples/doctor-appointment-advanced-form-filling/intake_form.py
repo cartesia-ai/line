@@ -10,17 +10,25 @@ from line.llm_agent import ToolEnv, loopback_tool
 # Form field definitions (Doctor Visit Scheduling Intake)
 FORM_FIELDS = [
     {
-        "id": "reason_for_visit",
-        "text": "What is the reason for your visit?",
-        "context": "Please ensure that the reason for the visit is concise and specific. Include symptoms and urgency if mentioned.",
+        "id": "first_name",
+        "text": "What is your first name?",
+        "context": "If you already know the caller's first name from the conversation, save it directly without asking. If they gave both first and last names, save the first name here.",
         "type": "string",
-        "section": "intake",
+        "section": "greeting",
         "required": True,
     },
     {
-        "id": "full_name",
-        "text": "What is your full name?",
-        "context": "Request the full legal name (first and last). If only one name is given, ask for the missing part. Only use the tool record_intake_answer when both first and last name is given.",
+        "id": "last_name",
+        "text": "What is your last name?",
+        "context": "If you already know the last name, save it directly. If you only have the first name, ask for the last name. After both names are saved, transition naturally to the intake questions.",
+        "type": "string",
+        "section": "greeting",
+        "required": True,
+    },
+    {
+        "id": "reason_for_visit",
+        "text": "What is the reason for your visit?",
+        "context": "Ask what brings them in today. Keep the reason concise and specific. Include symptoms and urgency if mentioned.",
         "type": "string",
         "section": "intake",
         "required": True,
@@ -28,25 +36,15 @@ FORM_FIELDS = [
     {
         "id": "date_of_birth",
         "text": "What is your date of birth?",
-        "context": "Ensure that the user provides the month, day, and year. Call record_intake_answer when all 3 are given.",
+        "context": "Format the date as 'Month Day, Year' (e.g., 'January 15, 1990') before saving.",
         "type": "date",
         "section": "intake",
         "required": True,
     },
     {
-        "id": "time_preferences",
-        "text": "Do you have any time preferences for the appointment?",
-        "context": "If no preference is given, note it as 'No preference'. If multiple options are provided, keep them all.",
-        "type": "string",
-        "section": "intake",
-        "required": False,
-    },
-<<<<<<< HEAD
-=======
-    {
         "id": "email",
         "text": "What is the best email address to reach you?",
-        "context": "Before calling record_intake_answer: spell out the email character by character and repeat it back to the user (e.g., 'So that's j as in john, o, h, n, at sign, example, dot, com'). Only call record_intake_answer after they confirm it is correct.",
+        "context": "Spell out and confirm the email address with the user before saving. Only save after they confirm it is correct.",
         "type": "string",
         "section": "intake",
         "required": True,
@@ -54,12 +52,11 @@ FORM_FIELDS = [
     {
         "id": "phone",
         "text": "What is the best phone number to reach you?",
-        "context": "Before calling record_intake_answer: spell out the phone number digit by digit and repeat it back to the user (e.g., 'So that's 5-5-5, 1-2-3, 4-5-6-7?'). Only call record_intake_answer after they confirm it is correct.",
+        "context": "Repeat the phone number back and confirm with the user before saving. Only save after they confirm it is correct.",
         "type": "string",
         "section": "intake",
         "required": True,
     },
->>>>>>> ecc3d66f538d4818c95a501034ba2d27b7b0b1d5
 ]
 
 
@@ -315,16 +312,15 @@ class IntakeForm:
         self._answers[field["id"]] = processed
         self._current_index += 1
         logger.info(f"Recorded '{field['id']}': {processed}")
+        logger.info(f"Current state of the form: {self.get_form_data()}")
 
         next_field = self._get_current_field()
 
         # Check section transitions
         section_message = ""
         if next_field and field["section"] != next_field["section"]:
-            if next_field["section"] == "qualifying":
-                section_message = "Now I need to ask a few qualifying questions. "
-            elif next_field["section"] == "disqualifying":
-                section_message = "Almost done. Just two more quick questions. "
+            if next_field["section"] == "intake":
+                section_message = "Greet them by name and transition to the intake questions. "
 
         return {
             "success": True,
@@ -340,23 +336,21 @@ class IntakeForm:
         """Get the complete form data as JSON-serializable dict."""
         return {
             "reason_for_visit": self._answers.get("reason_for_visit"),
-            "full_name": self._answers.get("full_name"),
+            "first_name": self._answers.get("first_name"),
+            "last_name": self._answers.get("last_name"),
             "date_of_birth": self._answers.get("date_of_birth"),
-            "time_preferences": self._answers.get("time_preferences"),
             "email": self._answers.get("email"),
             "phone": self._answers.get("phone"),
         }
 
     def get_contact_info(self) -> Optional[dict]:
-        """Get first_name, last_name, email, phone for scheduling. Returns None if any required contact field is missing."""
-        full_name = self._answers.get("full_name") or ""
+        """Get contact info for scheduling. Returns None if any required contact field is missing."""
+        first_name = self._answers.get("first_name") or ""
+        last_name = self._answers.get("last_name") or ""
         email = self._answers.get("email") or ""
         phone = self._answers.get("phone") or ""
-        if not full_name.strip() or not email.strip() or not phone.strip():
+        if not first_name.strip() or not last_name.strip() or not email.strip() or not phone.strip():
             return None
-        parts = full_name.strip().split(None, 1)
-        first_name = parts[0] if parts else ""
-        last_name = parts[1] if len(parts) > 1 else ""
         return {
             "first_name": first_name,
             "last_name": last_name,
@@ -430,24 +424,24 @@ async def record_intake_answer(
     ctx: ToolEnv,
     answer: Annotated[str, "The user's answer to the current form question"],
 ) -> str:
-    """Record the user's answer to the current intake form question. After recording, confirm the value with the user and let them know they can correct it if needed."""
+    """Save the user's answer to the current intake form question. Confirm the value with the user and let them know they can correct it if needed."""
     form = get_form()
     result = form.record_answer(answer)
 
     if not result["success"]:
-        return f"Could not record answer: {result.get('error', 'Unknown error')}. Current question: {result.get('current_question', '')}"
+        return f"Error: {result.get('error', 'Unknown error')}. Current question: {result.get('current_question', '')}"
 
-    recorded_field = result.get("recorded_field", "")
-    recorded_value = result.get("recorded_value", "")
+    field = result.get("recorded_field", "")
+    value = result.get("recorded_value", "")
 
     if result["is_complete"]:
-        return f"Recorded {recorded_field} as '{recorded_value}'. Form complete! Confirm this last answer is correct, then ask if they want to submit the form."
+        return f"[{field}: {value}] Form complete! Confirm this last answer is correct, then ask if they want to submit the form."
 
     section_msg = result.get("section_message", "")
     next_q = result.get("next_question", "")
     progress = result.get("progress", "")
 
-    return f"Recorded {recorded_field} as '{recorded_value}'. Confirm this is correct with the user. If correct, proceed to next question. Progress: {progress}. {section_msg}Next question: {next_q}"
+    return f"[{field}: {value}] Confirm this is correct with the user. If correct, proceed to next question. Progress: {progress}. {section_msg}Next question: {next_q}"
 
 
 @loopback_tool
@@ -489,11 +483,7 @@ async def edit_intake_answer(
     ctx: ToolEnv,
     field_id: Annotated[
         str,
-<<<<<<< HEAD
-        "The ID of the field to edit (e.g., 'reason_for_visit', 'full_name', 'date_of_birth', 'time_preferences')",
-=======
         "The ID of the field to edit (e.g., 'reason_for_visit', 'full_name', 'date_of_birth', 'time_preferences', 'email', 'phone')",
->>>>>>> ecc3d66f538d4818c95a501034ba2d27b7b0b1d5
     ],
     new_answer: Annotated[str, "The new answer to set for this field"],
 ) -> str:
