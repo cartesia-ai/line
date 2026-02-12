@@ -123,7 +123,7 @@ async def get_agent(env: AgentEnv, call_request: CallRequest):
     introduction = get_introduction()
 
     agent = LlmAgent(
-        model="gemini/gemini-2.5-flash",
+        model="gemini/gemini-3-flash-preview",
         api_key=os.getenv("GEMINI_API_KEY"),
         tools=[
             start_intake_form,
