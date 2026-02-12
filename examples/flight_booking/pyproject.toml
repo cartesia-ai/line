@@ -1,0 +1,12 @@
+[project]
+name = "flight-booking"
+version = "0.1.0"
+description = "Voice agent that helps customers with flight booking inquiries."
+requires-python = ">=3.10"
+dependencies = [
+    "cartesia-line==0.2.3a1",
+    "loguru>=0.7.0",
+]
+
+[tool.setuptools]
+py-modules = ["main", "booking_form"]
