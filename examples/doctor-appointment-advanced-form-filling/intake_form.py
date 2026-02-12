@@ -12,7 +12,7 @@ FORM_FIELDS = [
     {
         "id": "first_name",
         "text": "What is your first name?",
-        "context": "If you already know the caller's first name from the conversation, save it directly without asking. If they gave both first and last names, save the first name here.",
+        "context": "The user gave their name in the introduction. Save the first name directly—do NOT ask again.",
         "type": "string",
         "section": "greeting",
         "required": True,
@@ -20,7 +20,7 @@ FORM_FIELDS = [
     {
         "id": "last_name",
         "text": "What is your last name?",
-        "context": "If you already know the last name, save it directly. If you only have the first name, ask for the last name. After both names are saved, transition naturally to the intake questions.",
+        "context": "If the user gave their last name in the introduction, save it directly. If they only gave their first name, ask for the last name now.",
         "type": "string",
         "section": "greeting",
         "required": True,
@@ -435,7 +435,7 @@ async def record_intake_answer(
     value = result.get("recorded_value", "")
 
     if result["is_complete"]:
-        return f"[{field}: {value}] Form complete! Confirm this last answer is correct, then ask if they want to submit the form."
+        return f"[{field}: {value}] Form complete! Confirm this last answer is correct, then ask 'Ready to find an appointment time?' and submit the form."
 
     section_msg = result.get("section_message", "")
     next_q = result.get("next_question", "")
