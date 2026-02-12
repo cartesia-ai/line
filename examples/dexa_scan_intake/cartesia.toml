@@ -1,0 +1,11 @@
+[cartesia]
+name = "DEXA Scan Intake"
+description = "Voice agent that answers DEXA scan questions and helps with intake"
+version = "0.1.0"
+
+[cartesia.server]
+port = 8000
+host = "0.0.0.0"
+
+[cartesia.environment]
+required_vars = ["ANTHROPIC_API_KEY", "EXA_API_KEY"]
