@@ -134,12 +134,6 @@ class AppointmentScheduler:
             "message": "Appointment booked successfully! An email will be sent shortly.",
         }
 
-    def reset(self):
-        """Reset scheduler state."""
-        self._selected_slot = None
-        self._booked_appointment = None
-        self._availability_cache = {}
-
 
 # Global scheduler instance
 _scheduler_instance: Optional[AppointmentScheduler] = None

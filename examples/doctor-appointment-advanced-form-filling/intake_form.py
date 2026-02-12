@@ -209,47 +209,11 @@ class IntakeForm:
             "is_complete": current is None,
         }
 
-    def go_back_to_question(self, field_id: str) -> dict:
-        """Go back to a specific question, clearing all answers from that point forward."""
-        if not self._is_started:
-            return {
-                "success": False,
-                "error": "Form has not been started yet.",
-            }
-
-        if self._is_submitted:
-            return {
-                "success": False,
-                "error": "Form has already been submitted. Use restart_form to start over.",
-            }
-
-        field_index = self._get_field_index(field_id)
-        if field_index == -1:
-            available = [f["id"] for f in self._fields]
-            return {
-                "success": False,
-                "error": f"Unknown field '{field_id}'. Available fields: {', '.join(available)}",
-            }
-
-        # Clear answers from this field forward
-        cleared_fields = []
-        for i in range(field_index, len(self._fields)):
-            fid = self._fields[i]["id"]
-            if fid in self._answers:
-                del self._answers[fid]
-                cleared_fields.append(fid)
-
-        self._current_index = field_index
-        logger.info(f"Went back to '{field_id}', cleared: {cleared_fields}")
-
-        field = self._fields[field_index]
-        return {
-            "success": True,
-            "message": f"Returned to question: {field['text']}",
-            "cleared_fields": cleared_fields,
-            "current_question": self._format_question(field),
-            "progress": f"{len(self._answers)}/{len(self._fields)}",
-        }
+    def get_first_question(self) -> str:
+        """Return the first question text (for use in introduction or similar)."""
+        if not self._fields:
+            raise ValueError("IntakeForm has no fields")
+        return self._format_question(self._fields[0])
 
     def _get_current_field(self) -> Optional[dict]:
         """Get the current field to ask about."""
@@ -503,14 +467,6 @@ async def get_intake_form_status(ctx: ToolEnv) -> str:
         f"Current section: {status['current_section']}. "
         f"Current question: {status['current_question']}"
     )
-
-
-@loopback_tool
-async def restart_intake_form(ctx: ToolEnv) -> str:
-    """Clear all answers and restart the intake form from the beginning. Only use if the user explicitly asks to start over."""
-    form = get_form()
-    result = form.restart_form()
-    return f"Form restarted. {result['next_question']}"
 
 
 @loopback_tool

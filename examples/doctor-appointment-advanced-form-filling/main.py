@@ -11,6 +11,7 @@ from appointment_scheduler import (
 )
 from intake_form import (
     edit_intake_answer,
+    get_form,
     get_intake_form_status,
     list_intake_answers,
     record_intake_answer,
@@ -129,7 +130,7 @@ tool. Say something like "Thank you for calling. Have a great day!" before endin
 Today is {datetime.now().strftime("%A, %B %d, %Y")} and the current time is {datetime.now().strftime("%I:%M %p")}.
 """
 
-INTRODUCTION = "Hi, this is Jane speaking from UCSF medical. I'd be happy to help schedule an appointment for you. I have a few questions for you. First, why are you coming in?"
+INTRODUCTION_TEMPLATE = "Hi{name}, this is Jane speaking from UCSF medical. I'd be happy to help schedule an appointment for you. I have a few questions for you. First, {first_question}"
 
 MAX_OUTPUT_TOKENS = 16000
 TEMPERATURE = 1
@@ -143,9 +144,10 @@ async def get_agent(env: AgentEnv, call_request: CallRequest):
     reset_scheduler_instance()
 
     def get_introduction():
-        if call_request.from_ == "15555555555":
-            return INTRODUCTION.format(name="Lucy")
-        return INTRODUCTION.format(name="")
+        form = get_form()
+        first_question = form.get_first_question()
+        name = " Lucy" if call_request.from_ == "15555555555" else ""
+        return INTRODUCTION_TEMPLATE.format(name=name, first_question=first_question)
 
     introduction = get_introduction()
 
@@ -156,7 +158,6 @@ async def get_agent(env: AgentEnv, call_request: CallRequest):
             start_intake_form,
             record_intake_answer,
             get_intake_form_status,
-            # restart_intake_form,
             submit_intake_form,
             edit_intake_answer,
             list_intake_answers,

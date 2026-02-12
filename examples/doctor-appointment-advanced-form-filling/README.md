@@ -45,17 +45,13 @@ cartesia chat 8000
 
 ## How It Works
 
-The agent has two main components:
-
-1. **Knowledge Base** - A comprehensive DEXA FAQ embedded in the system prompt covering:
-   - What DEXA is and how it works
-   - What measurements DEXA provides
-   - Accuracy and safety information
-   - Preparation and what to expect
-   - How often to scan
-   - Who should get a DEXA scan
-
-2. **`search_dexa_info`** - A `@loopback_tool` that searches the web via Exa when questions go beyond the knowledge base
+The agent has a **Knowledge Base** - a comprehensive DEXA FAQ embedded in the system prompt covering:
+- What DEXA is and how it works
+- What measurements DEXA provides
+- Accuracy and safety information
+- Preparation and what to expect
+- How often to scan
+- Who should get a DEXA scan
 
 ## Configuration
 

@@ -5,9 +5,8 @@ description = "Customer support agent that answers questions on DEXA scan, and c
 requires-python = ">=3.10"
 dependencies = [
     "cartesia-line==0.2.2",
-    "exa-py>=1.0.0",
     "loguru>=0.7.0",
 ]
 
 [tool.setuptools]
-py-modules = ["main", "tools", "intake_form", "appointment_scheduler"]
+py-modules = ["main", "intake_form", "appointment_scheduler"]

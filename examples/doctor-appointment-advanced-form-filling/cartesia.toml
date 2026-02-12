@@ -8,4 +8,4 @@ port = 8000
 host = "0.0.0.0"
 
 [cartesia.environment]
-required_vars = ["ANTHROPIC_API_KEY", "EXA_API_KEY"]
+required_vars = ["ANTHROPIC_API_KEY"]
