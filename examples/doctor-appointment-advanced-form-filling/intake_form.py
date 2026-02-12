@@ -20,15 +20,15 @@ FORM_FIELDS = [
     {
         "id": "full_name",
         "text": "What is your full name?",
-        "context": "Request the full legal name (first and last). If only one name is given, ask for the missing part. Only call record_answer when both first and last name is given.",
+        "context": "Request the full legal name (first and last). If only one name is given, ask for the missing part. Only use the tool record_intake_answer when both first and last name is given.",
         "type": "string",
         "section": "intake",
         "required": True,
     },
     {
         "id": "date_of_birth",
-        "text": "What is your date of birth? Please state the month, day, and year - such as January 1, 2000",
-        "context": "Please require the month, day, and year.",
+        "text": "What is your date of birth?",
+        "context": "Ensure that the user provides the month, day, and year. Call record_intake_answer when all 3 are given.",
         "type": "date",
         "section": "intake",
         "required": True,
@@ -41,6 +41,25 @@ FORM_FIELDS = [
         "section": "intake",
         "required": False,
     },
+<<<<<<< HEAD
+=======
+    {
+        "id": "email",
+        "text": "What is the best email address to reach you?",
+        "context": "Before calling record_intake_answer: spell out the email character by character and repeat it back to the user (e.g., 'So that's j as in john, o, h, n, at sign, example, dot, com'). Only call record_intake_answer after they confirm it is correct.",
+        "type": "string",
+        "section": "intake",
+        "required": True,
+    },
+    {
+        "id": "phone",
+        "text": "What is the best phone number to reach you?",
+        "context": "Before calling record_intake_answer: spell out the phone number digit by digit and repeat it back to the user (e.g., 'So that's 5-5-5, 1-2-3, 4-5-6-7?'). Only call record_intake_answer after they confirm it is correct.",
+        "type": "string",
+        "section": "intake",
+        "required": True,
+    },
+>>>>>>> ecc3d66f538d4818c95a501034ba2d27b7b0b1d5
 ]
 
 
@@ -193,47 +212,11 @@ class IntakeForm:
             "is_complete": current is None,
         }
 
-    def go_back_to_question(self, field_id: str) -> dict:
-        """Go back to a specific question, clearing all answers from that point forward."""
-        if not self._is_started:
-            return {
-                "success": False,
-                "error": "Form has not been started yet.",
-            }
-
-        if self._is_submitted:
-            return {
-                "success": False,
-                "error": "Form has already been submitted. Use restart_form to start over.",
-            }
-
-        field_index = self._get_field_index(field_id)
-        if field_index == -1:
-            available = [f["id"] for f in self._fields]
-            return {
-                "success": False,
-                "error": f"Unknown field '{field_id}'. Available fields: {', '.join(available)}",
-            }
-
-        # Clear answers from this field forward
-        cleared_fields = []
-        for i in range(field_index, len(self._fields)):
-            fid = self._fields[i]["id"]
-            if fid in self._answers:
-                del self._answers[fid]
-                cleared_fields.append(fid)
-
-        self._current_index = field_index
-        logger.info(f"Went back to '{field_id}', cleared: {cleared_fields}")
-
-        field = self._fields[field_index]
-        return {
-            "success": True,
-            "message": f"Returned to question: {field['text']}",
-            "cleared_fields": cleared_fields,
-            "current_question": self._format_question(field),
-            "progress": f"{len(self._answers)}/{len(self._fields)}",
-        }
+    def get_first_question_raw_text(self) -> str:
+        """Return the raw first question text only (no context or formatting)."""
+        if not self._fields:
+            raise ValueError("IntakeForm has no fields")
+        return self._fields[0]["text"]
 
     def _get_current_field(self) -> Optional[dict]:
         """Get the current field to ask about."""
@@ -360,6 +343,25 @@ class IntakeForm:
             "full_name": self._answers.get("full_name"),
             "date_of_birth": self._answers.get("date_of_birth"),
             "time_preferences": self._answers.get("time_preferences"),
+            "email": self._answers.get("email"),
+            "phone": self._answers.get("phone"),
+        }
+
+    def get_contact_info(self) -> Optional[dict]:
+        """Get first_name, last_name, email, phone for scheduling. Returns None if any required contact field is missing."""
+        full_name = self._answers.get("full_name") or ""
+        email = self._answers.get("email") or ""
+        phone = self._answers.get("phone") or ""
+        if not full_name.strip() or not email.strip() or not phone.strip():
+            return None
+        parts = full_name.strip().split(None, 1)
+        first_name = parts[0] if parts else ""
+        last_name = parts[1] if len(parts) > 1 else ""
+        return {
+            "first_name": first_name,
+            "last_name": last_name,
+            "email": email.strip(),
+            "phone": phone.strip(),
         }
 
     async def submit_form(self) -> dict:
@@ -388,8 +390,7 @@ class IntakeForm:
             "success": True,
             "submitted": True,
             "message": "Doctor visit intake submitted successfully.",
-            "confirmation_number": f"VISIT-{hash(json.dumps(form_data)) % 100000:05d}",
-            "next_steps": "You can now book an appointment. We will send a confirmation shortly.",
+            "next_steps": "You can now book an appointment.",
         }
 
 
@@ -472,14 +473,6 @@ async def get_intake_form_status(ctx: ToolEnv) -> str:
 
 
 @loopback_tool
-async def restart_intake_form(ctx: ToolEnv) -> str:
-    """Clear all answers and restart the intake form from the beginning. Only use if the user explicitly asks to start over."""
-    form = get_form()
-    result = form.restart_form()
-    return f"Form restarted. {result['next_question']}"
-
-
-@loopback_tool
 async def submit_intake_form(ctx: ToolEnv) -> str:
     """Submit the completed intake form. Only use after all questions are answered."""
     form = get_form()
@@ -488,10 +481,7 @@ async def submit_intake_form(ctx: ToolEnv) -> str:
     if not result["success"]:
         return f"Could not submit: {result['error']}"
 
-    return (
-        f"Form submitted successfully! Confirmation number: {result['confirmation_number']}. "
-        f"{result['next_steps']}"
-    )
+    return f"Form submitted successfully! {result['next_steps']}"
 
 
 @loopback_tool
@@ -499,7 +489,11 @@ async def edit_intake_answer(
     ctx: ToolEnv,
     field_id: Annotated[
         str,
+<<<<<<< HEAD
         "The ID of the field to edit (e.g., 'reason_for_visit', 'full_name', 'date_of_birth', 'time_preferences')",
+=======
+        "The ID of the field to edit (e.g., 'reason_for_visit', 'full_name', 'date_of_birth', 'time_preferences', 'email', 'phone')",
+>>>>>>> ecc3d66f538d4818c95a501034ba2d27b7b0b1d5
     ],
     new_answer: Annotated[str, "The new answer to set for this field"],
 ) -> str:
@@ -518,31 +512,6 @@ async def edit_intake_answer(
         return response + "Form is complete and ready to submit."
     else:
         return response + f"Continuing with: {result['current_question']}"
-
-
-@loopback_tool
-async def go_back_in_intake_form(
-    ctx: ToolEnv,
-    field_id: Annotated[
-        str, "The ID of the field to go back to (e.g., 'email', 'first_name', 'date_of_birth')"
-    ],
-) -> str:
-    """Go back to a previous question in the intake form to re-answer it and subsequent questions.
-    Use when the user wants to go back and redo from a certain point (e.g., 'wait, go back to the email question').
-    This will clear answers from that question forward."""
-    form = get_form()
-    result = form.go_back_to_question(field_id)
-
-    if not result["success"]:
-        return f"Could not go back: {result['error']}"
-
-    response = f"Going back. "
-    if result["cleared_fields"]:
-        response += f"Cleared {len(result['cleared_fields'])} answer(s). "
-    response += f"Progress: {result['progress']}. "
-    response += f"Question: {result['current_question']}"
-
-    return response
 
 
 @loopback_tool

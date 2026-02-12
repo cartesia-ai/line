@@ -1,9 +1,11 @@
-"""Appointment scheduling for DEXA scans with mock availability data."""
+"""Appointment scheduling for doctor visits with mock availability data."""
 
 import asyncio
-import random
 from datetime import datetime, timedelta
+import random
 from typing import Annotated, Optional
+
+from intake_form import get_form
 from loguru import logger
 
 from line.llm_agent import ToolEnv, loopback_tool
@@ -53,7 +55,6 @@ class AppointmentScheduler:
         self._selected_slot: Optional[dict] = None
         self._booked_appointment: Optional[dict] = None
         self._availability_cache: dict[str, list[dict]] = {}
-        self._contact_for_link: Optional[dict] = None
         logger.info("AppointmentScheduler initialized")
 
     def get_availability(self, days_ahead: int = 7) -> dict:
@@ -112,10 +113,7 @@ class AppointmentScheduler:
         # Simulate API call
         await asyncio.sleep(0.5)
 
-        confirmation_number = f"BS-{random.randint(100000, 999999)}"
-
         self._booked_appointment = {
-            "confirmation_number": confirmation_number,
             "slot": self._selected_slot,
             "patient": {
                 "first_name": first_name,
@@ -129,40 +127,12 @@ class AppointmentScheduler:
 
         return {
             "success": True,
-            "confirmation_number": confirmation_number,
             "appointment": {
                 "date": self._selected_slot["date"],
                 "time": self._selected_slot["time"],
             },
-            "message": "Appointment booked successfully! A confirmation email will be sent shortly.",
+            "message": "Appointment booked successfully! An email will be sent shortly.",
         }
-
-    async def send_availability_link(self, first_name: str, last_name: str, email: str, phone: str) -> dict:
-        """Send a link to check more availabilities via email."""
-        # Simulate API call
-        await asyncio.sleep(0.3)
-
-        self._contact_for_link = {
-            "first_name": first_name,
-            "last_name": last_name,
-            "email": email,
-            "phone": phone,
-        }
-
-        logger.info(f"Sending availability link to {email}")
-
-        return {
-            "success": True,
-            "message": f"A link to view all available appointments has been sent to {email}. "
-            "The link will be valid for 48 hours.",
-        }
-
-    def reset(self):
-        """Reset scheduler state."""
-        self._selected_slot = None
-        self._booked_appointment = None
-        self._availability_cache = {}
-        self._contact_for_link = None
 
 
 # Global scheduler instance
@@ -197,7 +167,7 @@ async def check_availability(ctx: ToolEnv) -> str:
 
     slots = result["slots"]
     if not slots:
-        return "No available appointments found in the next week. Would you like me to send you a link to check more dates?"
+        return "No available appointments found in the next week."
 
     output = f"I found {result['total_available']} available slots. Here are some options:\n"
 
@@ -209,8 +179,7 @@ async def check_availability(ctx: ToolEnv) -> str:
         output += f"- {slot['time']}\n"
 
     if result["total_available"] > result["showing"]:
-        output += f"\nThere are {result['total_available'] - result['showing']} more slots available. "
-        output += "I can send you a link to view all options if you'd like."
+        output += f"\nThere are {result['total_available'] - result['showing']} more slots available."
 
     return output
 
@@ -230,46 +199,34 @@ async def select_appointment_slot(
     slot = result["selected"]
     return (
         f"Got it! I've selected {slot['time']} on {slot['date']}. "
-        f"To confirm this booking, I'll need your name, email, and phone number."
+        f"Ready to confirm the booking using the contact info from the intake form."
     )
 
 
 @loopback_tool
-async def book_appointment(
-    ctx: ToolEnv,
-    first_name: Annotated[str, "Patient's first name"],
-    last_name: Annotated[str, "Patient's last name"],
-    email: Annotated[str, "Patient's email address"],
-    phone: Annotated[str, "Patient's phone number"],
-) -> str:
-    """Book the selected appointment slot with patient information."""
+async def book_appointment(ctx: ToolEnv) -> str:
+    """Book the selected appointment slot using contact info from the completed intake form."""
+    form = get_form()
+    contact = form.get_contact_info()
+    if not contact:
+        return (
+            "Contact info is missing from the intake form. "
+            "Please complete the form (name, email, and phone) before booking."
+        )
     scheduler = get_scheduler()
-    result = await scheduler.book_appointment(first_name, last_name, email, phone)
+    result = await scheduler.book_appointment(
+        contact["first_name"],
+        contact["last_name"],
+        contact["email"],
+        contact["phone"],
+    )
 
     if not result["success"]:
         return result["error"]
 
     appt = result["appointment"]
     return (
-        f"Your appointment is confirmed! Confirmation number: {result['confirmation_number']}. "
+        f"Your appointment is confirmed! "
         f"You're scheduled for {appt['time']} on {appt['date']}. "
-        f"A confirmation email is on its way to {email}."
+        f"An email is on its way to {contact['email']}."
     )
-
-
-@loopback_tool
-async def send_availability_link(
-    ctx: ToolEnv,
-    first_name: Annotated[str, "User's first name"],
-    last_name: Annotated[str, "User's last name"],
-    email: Annotated[str, "User's email address"],
-    phone: Annotated[str, "User's phone number"],
-) -> str:
-    """Send a link to view all available appointments when the shown times don't work."""
-    scheduler = get_scheduler()
-    result = await scheduler.send_availability_link(first_name, last_name, email, phone)
-
-    if not result["success"]:
-        return "There was an issue sending the link. Please try again."
-
-    return result["message"]
