@@ -12,7 +12,6 @@ from appointment_scheduler import (
 from intake_form import (
     edit_intake_answer,
     get_intake_form_status,
-    go_back_in_intake_form,
     list_intake_answers,
     record_intake_answer,
     reset_form_instance,
@@ -82,7 +81,6 @@ Use these tools in order:
 
 Editing and correcting answers:
 - edit_intake_answer - Use when the user wants to correct a previous answer without starting over (e.g., "actually my email is different", "I meant to say 150 pounds not 160"). Pass the field_id and new answer.
-- go_back_in_intake_form - Use when the user wants to go back to a previous question and redo from there
 - list_intake_answers - Use when the user wants to review what they've entered so far
 
 Field IDs for editing: reason_for_visit, full_name, date_of_birth, time_preferences, email, phone
@@ -161,7 +159,6 @@ async def get_agent(env: AgentEnv, call_request: CallRequest):
             # restart_intake_form,
             submit_intake_form,
             edit_intake_answer,
-            go_back_in_intake_form,
             list_intake_answers,
             check_availability,
             select_appointment_slot,

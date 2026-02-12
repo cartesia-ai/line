@@ -3,7 +3,6 @@
 import asyncio
 import json
 from typing import Annotated, Any, Optional
-
 from loguru import logger
 
 from line.llm_agent import ToolEnv, loopback_tool
@@ -45,7 +44,7 @@ FORM_FIELDS = [
     {
         "id": "email",
         "text": "What is the best email address to reach you?",
-        "context": "Make sure you confirm it with the user by spelling it out. Call record_answer when you have a complete email address.",
+        "context": "Make sure you confirm it with the user by spelling it out. Call record_answer when you have the confirmed email address.",
         "type": "string",
         "section": "intake",
         "required": True,
@@ -53,7 +52,7 @@ FORM_FIELDS = [
     {
         "id": "phone",
         "text": "What is the best phone number to reach you?",
-        "context": "Include area code. Call record_answer when you have the full number.",
+        "context": "Confirm the phone number with the user by spelling it out. Call record_answer when you have the full number.",
         "type": "string",
         "section": "intake",
         "required": True,
@@ -550,32 +549,6 @@ async def edit_intake_answer(
         return response + "Form is complete and ready to submit."
     else:
         return response + f"Continuing with: {result['current_question']}"
-
-
-@loopback_tool
-async def go_back_in_intake_form(
-    ctx: ToolEnv,
-    field_id: Annotated[
-        str,
-        "The ID of the field to go back to (e.g., 'reason_for_visit', 'full_name', 'date_of_birth', 'time_preferences', 'email', 'phone')",
-    ],
-) -> str:
-    """Go back to a previous question in the intake form to re-answer it and subsequent questions.
-    Use when the user wants to go back and redo from a certain point (e.g., 'wait, go back to the email question').
-    This will clear answers from that question forward."""
-    form = get_form()
-    result = form.go_back_to_question(field_id)
-
-    if not result["success"]:
-        return f"Could not go back: {result['error']}"
-
-    response = "Going back. "
-    if result["cleared_fields"]:
-        response += f"Cleared {len(result['cleared_fields'])} answer(s). "
-    response += f"Progress: {result['progress']}. "
-    response += f"Question: {result['current_question']}"
-
-    return response
 
 
 @loopback_tool
