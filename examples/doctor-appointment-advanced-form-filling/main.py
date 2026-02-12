@@ -80,6 +80,7 @@ Field IDs for editing: reason_for_visit, full_name, date_of_birth, time_preferen
 
 IMPORTANT intake form behavior:
 - Ask ONE question at a time and wait for the answer
+- For email and phone: spell out and repeat the value back to the user before recording (e.g., spell the email character by character, say the phone number digit by digit). Only call record_intake_answer after they confirm it is correct.
 - After recording each answer, briefly confirm what you recorded (e.g., "Got it, I have your email as john@example.com")
 - Let the user know they can correct it if needed, especially for important fields like email, phone, and date of birth
 - If the user says something is wrong, use edit_intake_answer to fix it

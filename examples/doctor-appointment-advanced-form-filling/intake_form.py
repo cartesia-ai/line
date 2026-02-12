@@ -20,7 +20,7 @@ FORM_FIELDS = [
     {
         "id": "full_name",
         "text": "What is your full name?",
-        "context": "Request the full legal name (first and last). If only one name is given, ask for the missing part. Only call record_answer when both first and last name is given.",
+        "context": "Request the full legal name (first and last). If only one name is given, ask for the missing part. Only call record_intake_answer when both first and last name is given.",
         "type": "string",
         "section": "intake",
         "required": True,
@@ -28,7 +28,7 @@ FORM_FIELDS = [
     {
         "id": "date_of_birth",
         "text": "What is your date of birth?",
-        "context": "Please require the month, day, and year. Call record_answer when all 3 are given.",
+        "context": "Please require the month, day, and year. Call record_intake_answer when all 3 are given.",
         "type": "date",
         "section": "intake",
         "required": True,
@@ -44,7 +44,7 @@ FORM_FIELDS = [
     {
         "id": "email",
         "text": "What is the best email address to reach you?",
-        "context": "Make sure you confirm it with the user by spelling it out. Call record_answer when you have the confirmed email address.",
+        "context": "Before calling record_intake_answer: spell out the email character by character and repeat it back to the user (e.g., 'So that's j as in john, o, h, n, at sign, example, dot, com'). Only call record_intake_answer after they confirm it is correct.",
         "type": "string",
         "section": "intake",
         "required": True,
@@ -52,7 +52,7 @@ FORM_FIELDS = [
     {
         "id": "phone",
         "text": "What is the best phone number to reach you?",
-        "context": "Confirm the phone number with the user by spelling it out. Call record_answer when you have the full number.",
+        "context": "Before calling record_intake_answer: spell out the phone number digit by digit and repeat it back to the user (e.g., 'So that's 5-5-5, 1-2-3, 4-5-6-7?'). Only call record_intake_answer after they confirm it is correct.",
         "type": "string",
         "section": "intake",
         "required": True,
