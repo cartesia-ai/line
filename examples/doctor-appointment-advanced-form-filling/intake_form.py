@@ -20,7 +20,7 @@ FORM_FIELDS = [
     {
         "id": "full_name",
         "text": "What is your full name?",
-        "context": "Request the full legal name (first and last). If only one name is given, ask for the missing part. Only call record_intake_answer when both first and last name is given.",
+        "context": "Request the full legal name (first and last). If only one name is given, ask for the missing part. Only use the tool record_intake_answer when both first and last name is given.",
         "type": "string",
         "section": "intake",
         "required": True,
@@ -28,7 +28,7 @@ FORM_FIELDS = [
     {
         "id": "date_of_birth",
         "text": "What is your date of birth?",
-        "context": "Please require the month, day, and year. Call record_intake_answer when all 3 are given.",
+        "context": "Ensure that the user provides the month, day, and year. Call record_intake_answer when all 3 are given.",
         "type": "date",
         "section": "intake",
         "required": True,
