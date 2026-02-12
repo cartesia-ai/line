@@ -1,6 +1,6 @@
 [cartesia]
-name = "DEXA Scan Intake"
-description = "Voice agent that answers DEXA scan questions and helps with intake"
+name = "Doctor Appointment Scheduling"
+description = "Voice agent that helps patients schedule doctor appointments and complete intake forms"
 version = "0.1.0"
 
 [cartesia.server]

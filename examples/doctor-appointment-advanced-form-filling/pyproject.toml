@@ -1,7 +1,7 @@
 [project]
-name = "dexa-scan-intake"
+name = "doctor-appointment-advanced-form-filling"
 version = "0.1.0"
-description = "Customer support agent that answers questions on DEXA scan, and completes an intake form for scheduling."
+description = "Voice agent that helps patients schedule doctor appointments and complete intake forms."
 requires-python = ">=3.10"
 dependencies = [
     "cartesia-line==0.2.2",

@@ -1,4 +1,4 @@
-"""Appointment scheduling for DEXA scans with mock availability data."""
+"""Appointment scheduling for doctor visits with mock availability data."""
 
 import asyncio
 from datetime import datetime, timedelta

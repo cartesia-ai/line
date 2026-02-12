@@ -1,4 +1,4 @@
-"""DEXA Scan Intake Agent with knowledge base and Exa web search."""
+"""Doctor appointment scheduling agent with intake form and appointment booking."""
 
 from datetime import datetime
 import os
@@ -137,7 +137,7 @@ TEMPERATURE = 1
 
 
 async def get_agent(env: AgentEnv, call_request: CallRequest):
-    logger.info(f"Starting new DEXA intake call: {call_request}")
+    logger.info(f"Starting new doctor appointment call: {call_request}")
 
     # Reset state for new call
     reset_form_instance()

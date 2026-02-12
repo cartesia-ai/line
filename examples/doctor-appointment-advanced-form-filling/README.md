@@ -1,13 +1,13 @@
-# DEXA Scan Intake Agent
+# Doctor Appointment Scheduling Agent
 
-A voice agent that answers questions about DEXA scans using an embedded knowledge base and Exa web search.
+A voice agent that helps patients schedule doctor appointments by completing an intake form and booking available time slots.
 
 ## Overview
 
-This example creates a DEXA scan customer support agent that:
-- Answers common questions about DEXA scans from an embedded knowledge base
-- Searches the web via Exa for information beyond its knowledge base
-- Uses natural, voice-friendly responses without formatting
+This example creates a doctor appointment scheduling agent that:
+- Guides callers through an intake form (reason for visit, name, DOB, preferences, contact info)
+- Checks availability and books appointment slots
+- Uses natural, voice-friendly responses
 - Gracefully ends calls when the user is done
 
 ## Setup
@@ -15,19 +15,17 @@ This example creates a DEXA scan customer support agent that:
 ### Prerequisites
 
 - [Anthropic API key](https://console.anthropic.com/)
-- [Exa API key](https://dashboard.exa.ai/api-keys)
 
 ### Environment Variables
 
 ```bash
 export ANTHROPIC_API_KEY=your-anthropic-key
-export EXA_API_KEY=your-exa-key
 ```
 
 ### Installation
 
 ```bash
-cd examples/dexa_scan_intake
+cd examples/doctor-appointment-advanced-form-filling
 uv sync
 ```
 
@@ -45,50 +43,38 @@ cartesia chat 8000
 
 ## How It Works
 
-The agent has a **Knowledge Base** - a comprehensive DEXA FAQ embedded in the system prompt covering:
-- What DEXA is and how it works
-- What measurements DEXA provides
-- Accuracy and safety information
-- Preparation and what to expect
-- How often to scan
-- Who should get a DEXA scan
+The agent:
+- **Intake form** – Asks one question at a time (reason for visit, full name, date of birth, time preferences, email, phone), confirms each answer, and supports editing previous answers.
+- **Appointment scheduling** – After the form is complete, checks availability, lets the user pick a slot, and books using contact info from the form.
+- **Call flow** – Starts with a greeting, collects intake data, offers to schedule, then summarizes and ends the call when the user is done.
 
 ## Configuration
-
-### Exa Search Parameters
-
-```python
-client.search_and_contents(
-    f"DEXA scan {query}",
-    num_results=5,
-    type="auto",
-    text={"max_characters": 800}
-)
-```
 
 ### LLM Configuration
 
 ```python
 LlmConfig(
     system_prompt=SYSTEM_PROMPT,
-    introduction=INTRODUCTION,
-    max_tokens=300,
-    temperature=0.7,
+    introduction=introduction,
+    max_tokens=MAX_OUTPUT_TOKENS,
+    temperature=TEMPERATURE,
 )
 ```
 
-## Example Conversations
+## Example Flow
 
-**User**: "What exactly does a DEXA scan measure?"
+**Agent**: "Hi, this is Jane speaking from UCSF medical. I'd be happy to help schedule an appointment for you. I have a few questions for you. First, what's the main reason for your visit?"
 
-**Agent**: "A DEXA scan measures your total body fat percentage and how it's distributed, your lean muscle mass broken down by body region, bone mineral density, and visceral fat around your organs. It also shows symmetry between your left and right sides."
+**User**: "Annual checkup."
 
-**User**: "How much radiation is there?"
+**Agent**: "Got it, annual checkup. And your full name?"
 
-**Agent**: "DEXA uses very low radiation, about one tenth of a standard chest X-ray. A single scan is roughly 0.001 millisieverts, which is actually less than the natural background radiation you'd get in a typical day. It's considered very safe."
+… (intake continues) …
 
-## Roadmap
+**Agent**: "I have openings Tuesday morning and Thursday afternoon. Which works better?"
 
-Future features planned for this agent:
-- Appointment scheduling assistance
-- Intake form completion
+**User**: "Tuesday morning."
+
+**Agent**: "Got it! I've selected 9:00 AM on Tuesday, February 12. Ready to confirm the booking using the contact info from the intake form."
+
+**Agent**: "Your appointment is confirmed! You're scheduled for 9:00 AM on Tuesday, February 12. An email is on its way to you. Thanks for calling—take care!"
