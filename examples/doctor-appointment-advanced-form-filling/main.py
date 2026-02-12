@@ -123,8 +123,8 @@ async def get_agent(env: AgentEnv, call_request: CallRequest):
     introduction = get_introduction()
 
     agent = LlmAgent(
-        model="anthropic/claude-haiku-4-5-20251001",
-        api_key=os.getenv("ANTHROPIC_API_KEY"),
+        model="gemini/gemini-2.5-flash",
+        api_key=os.getenv("GEMINI_API_KEY"),
         tools=[
             start_intake_form,
             record_intake_answer,
