@@ -209,11 +209,11 @@ class IntakeForm:
             "is_complete": current is None,
         }
 
-    def get_first_question(self) -> str:
-        """Return the first question text (for use in introduction or similar)."""
+    def get_first_question_raw_text(self) -> str:
+        """Return the raw first question text only (no context or formatting)."""
         if not self._fields:
             raise ValueError("IntakeForm has no fields")
-        return self._format_question(self._fields[0])
+        return self._fields[0]["text"]
 
     def _get_current_field(self) -> Optional[dict]:
         """Get the current field to ask about."""
