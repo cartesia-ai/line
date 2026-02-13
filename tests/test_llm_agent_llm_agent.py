@@ -2245,5 +2245,5 @@ async def test_process_replaces_config(turn_env):
     assert isinstance(outputs[0], AgentSendText)
 
     # The agent should still have its original config
-    assert agent.config.temperature == 0.5
-    assert agent.config.max_tokens == 100
+    assert agent._config.temperature == 0.5
+    assert agent._config.max_tokens == 100
