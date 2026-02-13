@@ -12,11 +12,11 @@ from appointment_scheduler import (
 )
 from intake_form import (
     edit_intake_answer,
+    get_form,
     get_intake_form_status,
     list_intake_answers,
     record_intake_answer,
     reset_form_instance,
-    start_intake_form,
     submit_intake_form,
 )
 from loguru import logger
@@ -103,14 +103,13 @@ Process:
 4. Then call end_call
 
 Conversation flow:
-1. The introduction asks for their name. When they respond, greet them: "Nice to meet you, [Name]! I'll just need a few details to get you scheduled."
-2. Start the intake form. The user's name from the introduction should be saved directly—don't ask for it again.
-3. Fill out the remaining questions one by one.
+1. The introduction asks for their name. When they respond, greet them: "Nice to meet you, [Name]!"
+2. Immediately save their name using record_intake_answer (first name, then last name). The intake form is already started.
+3. Then say something like "I just need a few more details" and continue with the remaining questions.
 4. When the form is complete, ask "Ready to find an appointment time?" Then submit the form and check availability.
 
 Tools:
-- start_intake_form - Begin the form process
-- record_intake_answer - Save each answer (don't announce this to the user)
+- record_intake_answer - Save each answer (the form is already started, just use this directly)
 - get_intake_form_status - Check progress if needed
 - submit_intake_form - Submit when all questions are answered
 - edit_intake_answer - Fix a previous answer (e.g., "actually my email is different")
@@ -119,7 +118,8 @@ Tools:
 Field IDs for editing: first_name, last_name, reason_for_visit, date_of_birth, email, phone
 
 IMPORTANT intake form behavior:
-- The user's name from the introduction should be saved directly to first_name and last_name. NEVER ask for their name again.
+- The intake form is already started. Just use record_intake_answer directly.
+- When the user gives their name, immediately save it (first_name, then last_name) using record_intake_answer. NEVER ask for their name again.
 - Ask ONE question at a time and wait for the answer
 - For email and phone: spell out and repeat the value back to the user before saving. Only save after they confirm it is correct.
 - Let the user know they can correct it if needed, especially for email, phone, and date of birth
@@ -163,13 +163,17 @@ async def get_agent(env: AgentEnv, call_request: CallRequest):
     reset_form_instance()
     reset_scheduler_instance()
 
+    # Pre-start the intake form so the agent can immediately use record_intake_answer
+    form = get_form()
+    form.start_form()
+    logger.info("Intake form pre-started for new call")
+
     introduction = INTRODUCTION_TEMPLATE
 
     agent = LlmAgent(
         model="gemini/gemini-3-flash-preview",
         api_key=os.getenv("GEMINI_API_KEY"),
         tools=[
-            start_intake_form,
             record_intake_answer,
             get_intake_form_status,
             submit_intake_form,
