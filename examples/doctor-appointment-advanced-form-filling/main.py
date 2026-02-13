@@ -2,6 +2,7 @@
 
 from datetime import datetime
 import os
+import time
 
 from appointment_scheduler import (
     book_appointment,
@@ -22,6 +23,37 @@ from loguru import logger
 
 from line.llm_agent import LlmAgent, LlmConfig, end_call
 from line.voice_agent_app import AgentEnv, CallRequest, VoiceAgentApp
+from line.events import AgentSendText
+
+
+class TimingWrapper:
+    """Wrapper that logs TTFT and time to first text chunk for LlmAgent.process()"""
+
+    def __init__(self, agent: LlmAgent):
+        self._agent = agent
+
+    def __getattr__(self, name):
+        return getattr(self._agent, name)
+
+    async def process(self, env, event):
+        start_time = time.perf_counter()
+        first_token_logged = False
+        first_text_logged = False
+
+        async for output in self._agent.process(env, event):
+            now = time.perf_counter()
+
+            if not first_token_logged:
+                ttft = (now - start_time) * 1000
+                logger.debug(f"TTFT (time to first token): {ttft:.2f}ms")
+                first_token_logged = True
+
+            if not first_text_logged and isinstance(output, AgentSendText):
+                ttft_text = (now - start_time) * 1000
+                logger.debug(f"Time to first text chunk: {ttft_text:.2f}ms")
+                first_text_logged = True
+
+            yield output
 
 SYSTEM_PROMPT = f"""
 You are a friendly medical office assistant helping patients schedule intake appointments over the phone.
@@ -136,8 +168,8 @@ async def get_agent(env: AgentEnv, call_request: CallRequest):
     introduction = INTRODUCTION_TEMPLATE
 
     agent = LlmAgent(
-        model="anthropic/claude-haiku-4-5-20251001",
-        api_key=os.getenv("ANTHROPIC_API_KEY"),
+        model="gemini/gemini-2.5-flash-preview-09-2025",
+        api_key=os.getenv("GEMINI_API_KEY"),
         tools=[
             start_intake_form,
             record_intake_answer,
@@ -158,7 +190,7 @@ async def get_agent(env: AgentEnv, call_request: CallRequest):
         ),
     )
 
-    return agent
+    return TimingWrapper(agent)
 
 
 app = VoiceAgentApp(get_agent=get_agent)
