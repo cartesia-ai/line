@@ -143,23 +143,6 @@ class LlmAgent:
 
         logger.info(f"LlmAgent initialized with model={self._model}")
 
-    @property
-    def model(self) -> str:
-        return self._model
-
-    @property
-    def tools(self) -> List[ToolSpec]:
-        return self._tools
-
-    @property
-    def config(self) -> LlmConfig:
-        return self._config
-
-    @property
-    def handoff_target(self) -> Optional[AgentCallable]:
-        """The normalized process function we've handed off to, if any."""
-        return self._handoff_target
-
     def set_history_processor(
         self,
         fn: Callable[[List[HistoryEvent]], Union[List[HistoryEvent], Awaitable[List[HistoryEvent]]]],
