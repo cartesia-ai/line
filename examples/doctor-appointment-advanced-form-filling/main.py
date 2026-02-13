@@ -143,10 +143,8 @@ Tips:
 - Confirm the slot with the user before booking.
 
 # Ending Calls
-When the caller indicates they are done or says goodbye, respond warmly and use the end_call \
+After scheduling the appointment, check if the caller has any other requests. When the caller indicates they are done or says goodbye, respond warmly and use the end_call \
 tool. Thank them genuinely, such as "Thank you for calling. Have a great day!" before ending.
-- Only use end_call after they explicitly say goodbye or confirm they're done
-- Always say "Goodbye!" before ending the call.
 
 # Additional information
 Today is {datetime.now().strftime("%A, %B %d, %Y")} and the current time is {datetime.now().strftime("%I:%M %p")}.
@@ -168,7 +166,7 @@ async def get_agent(env: AgentEnv, call_request: CallRequest):
     introduction = INTRODUCTION_TEMPLATE
 
     agent = LlmAgent(
-        model="gemini/gemini-2.5-flash-preview-09-2025",
+        model="gemini/gemini-3-flash-preview",
         api_key=os.getenv("GEMINI_API_KEY"),
         tools=[
             start_intake_form,

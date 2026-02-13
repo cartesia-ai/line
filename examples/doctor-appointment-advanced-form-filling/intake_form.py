@@ -12,7 +12,7 @@ FORM_FIELDS = [
     {
         "id": "first_name",
         "text": "What is your first name?",
-        "context": "The user gave their name in the introduction. Save the first name directly—do NOT ask again.",
+        "context": "If the user gave their name in the introduction. Save the first name directly—do NOT ask again.",
         "type": "string",
         "section": "greeting",
         "required": True,
