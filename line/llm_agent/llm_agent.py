@@ -52,7 +52,7 @@ from line.events import (
     UserTurnEnded,
     UserTurnStarted,
 )
-from line.llm_agent.config import LlmConfig
+from line.llm_agent.config import LlmConfig, _merge_configs
 from line.llm_agent.provider import LLMProvider, Message, ToolCall
 from line.llm_agent.tools.decorators import loopback_tool
 from line.llm_agent.tools.system import WebSearchTool
@@ -110,40 +110,8 @@ class LlmAgent:
         self._config = effective_config
         self._max_tool_iterations = max_tool_iterations
 
-        # Process tools: separate WebSearchTool from regular FunctionTools
-        self._web_search_options: Optional[Dict[str, Any]] = None
-        self._tools: List[FunctionTool] = []
+        self._tools: List[ToolSpec] = list(tools or [])
 
-        # First pass: separate WebSearchTool from regular tools
-        web_search_tool: Optional[WebSearchTool] = None
-        for tool in tools or []:
-            if isinstance(tool, WebSearchTool):
-                web_search_tool = tool
-            elif isinstance(tool, FunctionTool):
-                self._tools.append(tool)
-            else:
-                # Plain callable - wrap as loopback tool
-                self._tools.append(loopback_tool(tool))
-
-        # Decide how to handle web search: use native web search only if the model
-        # supports it AND there are no other function tools (some models like Gemini 3
-        # don't support combining native web search with function calling tools).
-        if web_search_tool is not None:
-            if _check_web_search_support(model) and not self._tools:
-                self._web_search_options = web_search_tool.get_web_search_options()
-                logger.info(f"Model {model} supports native web search, using web_search_options")
-            else:
-                fallback_tool = _web_search_tool_to_function_tool(web_search_tool)
-                self._tools.append(fallback_tool)
-                if self._tools:
-                    logger.info(
-                        f"Model {model} has function tools alongside web search, "
-                        "using fallback tool-based web search to avoid conflicts"
-                    )
-                else:
-                    logger.info(f"Model {model} doesn't support native web search, using fallback tool")
-
-        self._tool_map: Dict[str, FunctionTool] = {t.name: t for t in self._tools}
         self._llm = LLMProvider(
             model=self._model,
             api_key=self._api_key,
@@ -174,14 +142,14 @@ class LlmAgent:
             Callable[[List[HistoryEvent]], Union[List[HistoryEvent], Awaitable[List[HistoryEvent]]]]
         ] = None
 
-        logger.info(f"LlmAgent initialized with model={self._model}, tools={[t.name for t in self._tools]}")
+        logger.info(f"LlmAgent initialized with model={self._model}")
 
     @property
     def model(self) -> str:
         return self._model
 
     @property
-    def tools(self) -> List[FunctionTool]:
+    def tools(self) -> List[ToolSpec]:
         return self._tools
 
     @property
@@ -213,11 +181,31 @@ class LlmAgent:
         event = CustomHistoryEntry(content=content, role=role)
         self._append_to_local_history(event)
 
-    async def process(self, env: TurnEnv, event: InputEvent) -> AsyncIterable[OutputEvent]:
-        """Process an input event and yield output events."""
+    async def process(
+        self,
+        env: TurnEnv,
+        event: InputEvent,
+        *,
+        config: Optional[LlmConfig] = None,
+        tools: Optional[List[ToolSpec]] = None,
+    ) -> AsyncIterable[OutputEvent]:
+        """Process an input event and yield output events.
+
+        Args:
+            env: The turn environment.
+            event: The input event to process.
+            config: Optional LlmConfig to merge with self._config for this call.
+                Non-default values in the passed config override self._config.
+            tools: Optional tools to use for this call. Tools with matching names replace
+                those in self._tools; other tools from self._tools are preserved.
+        """
         # Track the event_id of the triggering input event
         # The triggering event is the last element in event.history
         self._current_event_id = event.history[-1].event_id if event.history else ""
+
+        # Compute effective config and tools for this call
+        effective_config = _merge_configs(self._config, config) if config else self._config
+        effective_tools = self._merge_tools(self._tools, tools) if tools else self._tools
 
         # If handoff is active, call the handed-off process function
         if self._handoff_target is not None:
@@ -228,8 +216,8 @@ class LlmAgent:
 
         # Handle CallStarted
         if isinstance(event, CallStarted):
-            if self._config.introduction and not self._introduction_sent:
-                output = AgentSendText(text=self._config.introduction)
+            if effective_config.introduction and not self._introduction_sent:
+                output = AgentSendText(text=effective_config.introduction)
                 self._append_to_local_history(output)
                 self._introduction_sent = True
                 yield output
@@ -240,11 +228,102 @@ class LlmAgent:
             await self.cleanup()
             return
 
-        async for output in self._generate_response(env, event):
+        async for output in self._generate_response(env, event, effective_tools, effective_config):
             yield output
 
-    async def _generate_response(self, env: TurnEnv, event: InputEvent) -> AsyncIterable[OutputEvent]:
-        """Generate a response using the LLM."""
+    def _get_tool_name(self, tool: ToolSpec) -> str:
+        """Extract the name from a ToolSpec.
+
+        Args:
+            tool: A ToolSpec (FunctionTool, WebSearchTool, or Callable)
+
+        Returns:
+            The name of the tool
+        """
+        if isinstance(tool, WebSearchTool):
+            return "web_search"
+        elif isinstance(tool, FunctionTool):
+            return tool.name
+        else:  # Plain callable
+            return tool.__name__
+
+    def _merge_tools(
+        self, base_tools: List[ToolSpec], override_tools: Optional[List[ToolSpec]]
+    ) -> List[ToolSpec]:
+        """Merge two tool lists, with override_tools replacing base_tools by name.
+
+        Args:
+            base_tools: The base list of tools (typically self._tools)
+            override_tools: Tools to merge in, replacing any with matching names
+
+        Returns:
+            A merged list where tools from override_tools replace those in base_tools
+            that have the same name, and all other base_tools are preserved.
+        """
+        if not override_tools:
+            return base_tools
+
+        # Build a set of names from override_tools
+        override_names = {self._get_tool_name(tool) for tool in override_tools}
+
+        # Filter base_tools to exclude any with names in override_names
+        filtered_base = [tool for tool in base_tools if self._get_tool_name(tool) not in override_names]
+
+        # Return filtered base + override tools
+        return filtered_base + override_tools
+
+    def _resolve_tools(
+        self, tool_specs: List[ToolSpec]
+    ) -> tuple[List[FunctionTool], Optional[Dict[str, Any]]]:
+        """Resolve ToolSpecs into FunctionTools and optional web_search_options.
+
+        Separates WebSearchTool from other tools, converts plain callables to
+        FunctionTools via loopback_tool, and decides whether to use native web
+        search or a fallback tool based on model support.
+
+        Returns:
+            (function_tools, web_search_options) — web_search_options is set only
+            when the model supports native web search and there are no other
+            function tools; otherwise the WebSearchTool is converted to a fallback
+            FunctionTool included in the first list.
+        """
+        function_tools: List[FunctionTool] = []
+        web_search_tool: Optional[WebSearchTool] = None
+
+        for tool in tool_specs:
+            if isinstance(tool, WebSearchTool):
+                web_search_tool = tool
+            elif isinstance(tool, FunctionTool):
+                function_tools.append(tool)
+            else:
+                function_tools.append(loopback_tool(tool))
+
+        web_search_options: Optional[Dict[str, Any]] = None
+        if web_search_tool is not None:
+            if _check_web_search_support(self._model) and not function_tools:
+                web_search_options = web_search_tool.get_web_search_options()
+            else:
+                function_tools.append(_web_search_tool_to_function_tool(web_search_tool))
+
+        return function_tools, web_search_options
+
+    async def _generate_response(
+        self,
+        env: TurnEnv,
+        event: InputEvent,
+        tool_specs: List[ToolSpec],
+        config: LlmConfig,
+    ) -> AsyncIterable[OutputEvent]:
+        """Generate a response using the LLM.
+
+        Args:
+            env: The turn environment.
+            event: The input event to process.
+            extra_tools: Additional ToolSpecs to concatenate with self._tools for this call.
+            config: The effective LlmConfig for this call.
+        """
+        tools, web_search_options = self._resolve_tools(tool_specs)
+        tool_map: Dict[str, FunctionTool] = {t.name: t for t in tools}
 
         is_first_iteration = True
         should_loopback = False
@@ -279,8 +358,8 @@ class LlmAgent:
 
             # Build kwargs for LLM chat, including web_search_options if available
             chat_kwargs: Dict[str, Any] = {}
-            if self._web_search_options:
-                chat_kwargs["web_search_options"] = self._web_search_options
+            if web_search_options:
+                chat_kwargs["web_search_options"] = web_search_options
 
             # Timing metrics
             request_start_time = time.perf_counter()
@@ -289,7 +368,8 @@ class LlmAgent:
 
             stream = self._llm.chat(
                 messages,
-                self._tools if self._tools else None,
+                tools if tools else None,
+                config=config,
                 **chat_kwargs,
             )
             async with stream:
@@ -335,7 +415,7 @@ class LlmAgent:
                 if not tc.is_complete:
                     continue
 
-                tool = self._tool_map.get(tc.name)
+                tool = tool_map.get(tc.name)
                 if not tool:
                     logger.warning(f"Unknown tool: {tc.name}")
                     continue
