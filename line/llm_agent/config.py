@@ -1,5 +1,6 @@
 """LLM configuration. See README.md for examples."""
 
+import dataclasses
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Literal, Optional
 
@@ -104,3 +105,31 @@ class LlmConfig:
             introduction=introduction,
             **kwargs,
         )
+
+
+def _merge_configs(base: LlmConfig, override: LlmConfig) -> LlmConfig:
+    """Create a new LlmConfig by merging override values onto a base config.
+
+    Non-default values in the override take precedence over values in the base.
+    Fields in the override that are left at their default value are ignored,
+    preserving the corresponding value from the base.
+    """
+    merged_kwargs = {}
+    for f in dataclasses.fields(LlmConfig):
+        base_val = getattr(base, f.name)
+        override_val = getattr(override, f.name)
+        # Determine the field's default value
+        if f.default is not dataclasses.MISSING:
+            default_val = f.default
+        elif f.default_factory is not dataclasses.MISSING:
+            default_val = f.default_factory()
+        else:
+            # No default defined; always prefer the override
+            merged_kwargs[f.name] = override_val
+            continue
+        # Use override value when it differs from the default
+        if override_val != default_val:
+            merged_kwargs[f.name] = override_val
+        else:
+            merged_kwargs[f.name] = base_val
+    return LlmConfig(**merged_kwargs)

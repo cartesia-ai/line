@@ -95,10 +95,20 @@ class LLMProvider:
         self,
         messages: List[Message],
         tools: Optional[List[FunctionTool]] = None,
+        config: Optional[LlmConfig] = None,
         **kwargs,
     ) -> "_ChatStream":
-        """Start a streaming chat completion."""
-        llm_messages = self._build_messages(messages)
+        """Start a streaming chat completion.
+
+        Args:
+            messages: Conversation messages.
+            tools: Optional function tools available for this call.
+            config: Optional per-call config override. When provided, its values
+                are used for sampling/model parameters and system prompt instead
+                of the config passed at init time.
+        """
+        cfg = config or self._config
+        llm_messages = self._build_messages(messages, cfg)
 
         llm_kwargs: Dict[str, Any] = {
             "model": self._model,
@@ -115,25 +125,25 @@ class LLMProvider:
             llm_kwargs["timeout"] = self._timeout
 
         # Add config parameters
-        if self._config.temperature is not None:
-            llm_kwargs["temperature"] = self._config.temperature
-        if self._config.max_tokens is not None:
-            llm_kwargs["max_tokens"] = self._config.max_tokens
-        if self._config.top_p is not None:
-            llm_kwargs["top_p"] = self._config.top_p
-        if self._config.stop:
-            llm_kwargs["stop"] = self._config.stop
-        if self._config.seed is not None:
-            llm_kwargs["seed"] = self._config.seed
-        if self._config.presence_penalty is not None:
-            llm_kwargs["presence_penalty"] = self._config.presence_penalty
-        if self._config.frequency_penalty is not None:
-            llm_kwargs["frequency_penalty"] = self._config.frequency_penalty
+        if cfg.temperature is not None:
+            llm_kwargs["temperature"] = cfg.temperature
+        if cfg.max_tokens is not None:
+            llm_kwargs["max_tokens"] = cfg.max_tokens
+        if cfg.top_p is not None:
+            llm_kwargs["top_p"] = cfg.top_p
+        if cfg.stop:
+            llm_kwargs["stop"] = cfg.stop
+        if cfg.seed is not None:
+            llm_kwargs["seed"] = cfg.seed
+        if cfg.presence_penalty is not None:
+            llm_kwargs["presence_penalty"] = cfg.presence_penalty
+        if cfg.frequency_penalty is not None:
+            llm_kwargs["frequency_penalty"] = cfg.frequency_penalty
         if self._supports_reasoning_effort:
-            llm_kwargs["reasoning_effort"] = self._config.reasoning_effort or self._default_reasoning_effort
+            llm_kwargs["reasoning_effort"] = cfg.reasoning_effort or self._default_reasoning_effort
 
-        if self._config.extra:
-            llm_kwargs.update(self._config.extra)
+        if cfg.extra:
+            llm_kwargs.update(cfg.extra)
 
         if tools:
             llm_kwargs["tools"] = function_tools_to_openai(tools, strict=False)
@@ -142,12 +152,15 @@ class LLMProvider:
 
         return _ChatStream(llm_kwargs)
 
-    def _build_messages(self, messages: List[Message]) -> List[Dict[str, Any]]:
+    def _build_messages(
+        self, messages: List[Message], config: Optional[LlmConfig] = None
+    ) -> List[Dict[str, Any]]:
         """Convert Message objects to LiteLLM format."""
+        cfg = config or self._config
         result = []
 
-        if self._config.system_prompt:
-            result.append({"role": "system", "content": self._config.system_prompt})
+        if cfg.system_prompt:
+            result.append({"role": "system", "content": cfg.system_prompt})
 
         for msg in messages:
             llm_msg: Dict[str, Any] = {"role": msg.role}
