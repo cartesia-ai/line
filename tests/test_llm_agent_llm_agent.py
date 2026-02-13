@@ -2267,3 +2267,36 @@ async def test_process_replaces_tools_with_same_name(turn_env):
     # Should use the override version, not the original
     assert tool_result.result == "Override: 85°F in NYC"
     assert "Original" not in tool_result.result
+
+
+async def test_process_replaces_config(turn_env):
+    """Test that config passed to process() overrides the agent's config."""
+
+    # Create agent with base config
+    base_config = LlmConfig(temperature=0.5, max_tokens=100)
+    agent, mock_llm = create_agent_with_mock(
+        [
+            [
+                StreamChunk(text="Response"),
+                StreamChunk(is_final=True),
+            ],
+        ],
+        config=base_config,
+    )
+
+    # Call process with override config
+    override_config = LlmConfig(temperature=0.9, max_tokens=500)
+    outputs = await collect_outputs(
+        agent,
+        turn_env,
+        UserTextSent(content="Hi", history=[UserTextSent(content="Hi")]),
+        config=override_config,
+    )
+
+    # Verify output was generated
+    assert len(outputs) == 1
+    assert isinstance(outputs[0], AgentSendText)
+
+    # The agent should still have its original config
+    assert agent._config.temperature == 0.5
+    assert agent._config.max_tokens == 100
