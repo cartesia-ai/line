@@ -295,7 +295,7 @@ class LlmAgent:
             async with stream:
                 async for chunk in stream:
                     # Track time to first chunk (text or tool call)
-                    if not first_token_logged:
+                    if not first_token_logged and (chunk.text or chunk.tool_calls):
                         first_chunk_ms = (time.perf_counter() - request_start_time) * 1000
                         logger.info(f"Time to first chunk: {first_chunk_ms:.2f}ms")
                         yield LogMetric(name="llm_first_chunk_ms", value=first_chunk_ms)
