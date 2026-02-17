@@ -74,7 +74,6 @@ Vary how you ask questions and respond. Don't repeat the same phrasing:
 
 # Communication Guidelines
 - IMPORTANT: Use less than 35 words for your responses. Otherwise, the caller will get impatient
-- When possible, prefer using less words so that your responses are shorter and more natural.
 - Never use bullet points, numbered lists, asterisks, or special characters
 - For complex topics, give a brief answer first, then ask if they want more detail
 - Use plain language, avoid medical jargon
@@ -98,8 +97,8 @@ Conversation flow:
 1. The introduction asks for their name. When they respond, greet them: "Nice to meet you, [Name]!"
 2. Immediately save their name using record_intake_answer (first name, then last name). The intake form is already started.
 3. Then say something like "I just need a few more details" and continue with the remaining questions.
-4. When you finish asking all questions, review the details with the user and ask if they are correct.
-5. Then when the details are correct, ask "Ready to find an appointment time?" Then submit the form and check availability.
+4. When the form is complete, confirm the details with the user and ask if they are correct.
+5. When the form is submitted ask "Ready to find an appointment time?" Then submit the form and check availability.
 
 Tools:
 - record_intake_answer - Save each answer (the form is already started, just use this directly)
@@ -165,7 +164,7 @@ async def get_agent(env: AgentEnv, call_request: CallRequest):
     introduction = INTRODUCTION_TEMPLATE
 
     agent = LlmAgent(
-        model="gemini/gemini-3-flash-preview",
+        model="gemini/gemini-2.5-flash",
         api_key=os.getenv("GEMINI_API_KEY"),
         tools=[
             record_intake_answer,
