@@ -217,8 +217,10 @@ async def test_timing_metrics_emitted(turn_env):
 
     # Collect outputs including metrics
     outputs = await collect_outputs(
-        agent, turn_env, UserTextSent(content="Hi", history=[UserTextSent(content="Hi")]),
-        include_metrics=True
+        agent,
+        turn_env,
+        UserTextSent(content="Hi", history=[UserTextSent(content="Hi")]),
+        include_metrics=True,
     )
 
     # Should have 4 events: 2 LogMetric + 2 AgentSendText
