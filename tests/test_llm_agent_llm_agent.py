@@ -226,16 +226,16 @@ async def test_timing_metrics_emitted(turn_env):
 
     # First two should be LogMetric events
     assert isinstance(outputs[0], LogMetric)
-    assert outputs[0].name == "llm_ttft_ms"
+    assert outputs[0].name == "llm_first_chunk_ms"
     assert isinstance(outputs[0].value, float)
     assert outputs[0].value >= 0
 
     assert isinstance(outputs[1], LogMetric)
-    assert outputs[1].name == "llm_first_agent_text_ms"
+    assert outputs[1].name == "llm_first_text_ms"
     assert isinstance(outputs[1].value, float)
     assert outputs[1].value >= 0
 
-    # TTFT should be <= first agent text time (or very close)
+    # First chunk should be <= first text time (or very close)
     assert outputs[0].value <= outputs[1].value + 1  # Allow 1ms tolerance
 
     # Last two should be AgentSendText events
