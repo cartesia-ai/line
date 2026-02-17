@@ -143,7 +143,7 @@ Thank them genuinely, such as "Thank you for calling. Have a great day!" before 
 Today is {datetime.now().strftime("%A, %B %d, %Y")} and the current time is {datetime.now().strftime("%I:%M %p")}.
 """
 
-INTRODUCTION_TEMPLATE = "Hi, this is Carla from UCSF Medical. I'm here to help you schedule an appointment. Who am I speaking with?"
+INTRODUCTION_TEMPLATE = "Hi, this is Jane from UCSF Medical. I'm here to help you schedule an appointment. Who am I speaking with?"
 
 MAX_OUTPUT_TOKENS = 16000
 TEMPERATURE = 1
