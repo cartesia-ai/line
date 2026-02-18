@@ -9,7 +9,7 @@ from typing import Annotated, Literal, Optional
 import pytest
 
 from line.events import AgentSendText
-from line.llm_agent.schema_converter import function_tool_to_openai
+from line.llm_agent.schema_converter import function_tool_to_litellm
 from line.llm_agent.tools.decorators import handoff_tool, loopback_tool, passthrough_tool
 
 # =============================================================================
@@ -208,7 +208,7 @@ def test_parameter_with_literal_enum():
         return category
 
     # Check that the schema has enum values
-    schema = function_tool_to_openai(tool_with_enum)
+    schema = function_tool_to_litellm(tool_with_enum)
     props = schema["function"]["parameters"]["properties"]
     assert props["category"]["enum"] == ["a", "b", "c"]
 

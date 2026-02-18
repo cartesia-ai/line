@@ -1,31 +1,21 @@
 """
-Schema converter utilities for converting function tools to provider-specific formats.
+Schema converter utilities for converting tools to LiteLLM format.
 
-This module provides functions to convert FunctionTool instances to the tool/function
-calling formats expected by different LLM providers:
-
-- OpenAI (Chat Completions API and Responses API)
-- Anthropic (Claude API)
-- Google (Gemini API)
+This module provides functions to convert FunctionTool instances
+to the tool format expected by LiteLLM (OpenAI-compatible).
 
 Example:
     ```python
     from typing import Annotated
     from line.llm_agent import loopback_tool
-    from line.llm_agent.schema_converter import (
-        function_tool_to_openai,
-        function_tool_to_anthropic,
-        function_tool_to_gemini,
-    )
+    from line.llm_agent.schema_converter import function_tool_to_litellm
 
     @loopback_tool
     async def my_tool(ctx, param: Annotated[str, "Parameter description"]):
         '''Tool description'''
         ...
 
-    openai_tool = function_tool_to_openai(my_tool)
-    anthropic_tool = function_tool_to_anthropic(my_tool)
-    gemini_tool = function_tool_to_gemini(my_tool)
+    litellm_tool = function_tool_to_litellm(my_tool)
     ```
 """
 
@@ -145,19 +135,16 @@ def build_parameters_schema(parameters: Dict[str, ParameterInfo]) -> Dict[str, A
     return schema
 
 
-def function_tool_to_openai(
-    tool: FunctionTool, *, strict: bool = True, responses_api: bool = False
-) -> Dict[str, Any]:
+def function_tool_to_litellm(tool: FunctionTool, *, strict: bool = True) -> Dict[str, Any]:
     """
-    Convert a FunctionTool to OpenAI tool format.
+    Convert a FunctionTool to LiteLLM (OpenAI Chat Completions) tool format.
 
     Args:
         tool: The FunctionTool to convert.
         strict: Whether to enable strict mode (default True).
-        responses_api: If True, use the Responses API format; otherwise Chat Completions.
 
     Returns:
-        OpenAI tool definition dictionary.
+        Tool definition dictionary.
 
     Example:
         ```python
@@ -166,8 +153,7 @@ def function_tool_to_openai(
             '''Get the weather'''
             ...
 
-        # Chat Completions API format
-        openai_tool = function_tool_to_openai(get_weather)
+        tool = function_tool_to_litellm(get_weather)
         # Returns:
         # {
         #     "type": "function",
@@ -178,17 +164,6 @@ def function_tool_to_openai(
         #         "strict": True
         #     }
         # }
-
-        # Responses API format
-        openai_tool = function_tool_to_openai(get_weather, responses_api=True)
-        # Returns:
-        # {
-        #     "type": "function",
-        #     "name": "get_weather",
-        #     "description": "Get the weather",
-        #     "parameters": {...},
-        #     "strict": True
-        # }
         ```
     """
     params_schema = build_parameters_schema(tool.parameters)
@@ -196,179 +171,28 @@ def function_tool_to_openai(
     if strict:
         params_schema["additionalProperties"] = False
 
-    if responses_api:
-        # Responses API format (flat structure)
-        result: Dict[str, Any] = {
-            "type": "function",
+    result: Dict[str, Any] = {
+        "type": "function",
+        "function": {
             "name": tool.name,
             "description": tool.description,
             "parameters": params_schema,
-        }
-        if strict:
-            result["strict"] = True
-        return result
-    else:
-        # Chat Completions API format (nested under "function")
-        result = {
-            "type": "function",
-            "function": {
-                "name": tool.name,
-                "description": tool.description,
-                "parameters": params_schema,
-            },
-        }
-        if strict:
-            result["function"]["strict"] = True
-        return result
-
-
-def function_tool_to_anthropic(tool: FunctionTool) -> Dict[str, Any]:
-    """
-    Convert a FunctionTool to Anthropic Claude tool format.
-
-    Args:
-        tool: The FunctionTool to convert.
-
-    Returns:
-        Anthropic tool definition dictionary.
-
-    Example:
-        ```python
-        @loopback_tool
-        async def get_weather(ctx, city: Annotated[str, "City name"]):
-            '''Get the weather'''
-            ...
-
-        anthropic_tool = function_tool_to_anthropic(get_weather)
-        # Returns:
-        # {
-        #     "name": "get_weather",
-        #     "description": "Get the weather",
-        #     "input_schema": {
-        #         "type": "object",
-        #         "properties": {...},
-        #         "required": [...]
-        #     }
-        # }
-        ```
-    """
-    return {
-        "name": tool.name,
-        "description": tool.description,
-        "input_schema": build_parameters_schema(tool.parameters),
+        },
     }
+    if strict:
+        result["function"]["strict"] = True
+    return result
 
 
-def function_tool_to_gemini(tool: FunctionTool) -> Any:
+def tools_to_litellm(tools: List[FunctionTool], *, strict: bool = True) -> List[Dict[str, Any]]:
     """
-    Convert a FunctionTool to Google Gemini tool format.
+    Convert a list of FunctionTools to LiteLLM format.
 
     Args:
-        tool: The FunctionTool to convert.
+        tools: List of FunctionTool instances.
+        strict: Whether to enable strict mode for function tools.
 
     Returns:
-        Gemini Tool object.
-
-    Example:
-        ```python
-        @loopback_tool
-        async def get_weather(ctx, city: Annotated[str, "City name"]):
-            '''Get the weather'''
-            ...
-
-        gemini_tool = function_tool_to_gemini(get_weather)
-        # Returns a gemini_types.Tool object
-        ```
+        List of tool definitions.
     """
-    try:
-        from google.genai import types as gemini_types
-    except ImportError as e:
-        raise ImportError(
-            "google-genai is required for Gemini integration. Install with: pip install google-genai"
-        ) from e
-
-    params_schema = build_parameters_schema(tool.parameters)
-
-    return gemini_types.Tool(
-        function_declarations=[
-            gemini_types.FunctionDeclaration(
-                name=tool.name,
-                description=tool.description,
-                parameters=params_schema,
-            )
-        ]
-    )
-
-
-def function_tools_to_openai(
-    tools: List[FunctionTool], *, strict: bool = True, responses_api: bool = False
-) -> List[Dict[str, Any]]:
-    """
-    Convert multiple FunctionTools to OpenAI format.
-
-    Args:
-        tools: List of FunctionTools to convert.
-        strict: Whether to enable strict mode.
-        responses_api: If True, use the Responses API format.
-
-    Returns:
-        List of OpenAI tool definitions.
-    """
-    return [function_tool_to_openai(t, strict=strict, responses_api=responses_api) for t in tools]
-
-
-def function_tools_to_anthropic(tools: List[FunctionTool]) -> List[Dict[str, Any]]:
-    """
-    Convert multiple FunctionTools to Anthropic format.
-
-    Args:
-        tools: List of FunctionTools to convert.
-
-    Returns:
-        List of Anthropic tool definitions.
-    """
-    return [function_tool_to_anthropic(t) for t in tools]
-
-
-def function_tools_to_gemini(tools: List[FunctionTool]) -> List[Any]:
-    """
-    Convert multiple FunctionTools to Gemini format.
-
-    Note: Gemini prefers all function declarations in a single Tool object.
-    This function returns individual Tool objects; use `merge_gemini_tools`
-    to combine them if needed.
-
-    Args:
-        tools: List of FunctionTools to convert.
-
-    Returns:
-        List of Gemini Tool objects.
-    """
-    return [function_tool_to_gemini(t) for t in tools]
-
-
-def merge_gemini_tools(tools: List[Any]) -> Any:
-    """
-    Merge multiple Gemini Tool objects into a single Tool.
-
-    Gemini works best when all function declarations are in a single Tool object.
-
-    Args:
-        tools: List of Gemini Tool objects.
-
-    Returns:
-        A single Gemini Tool with all function declarations.
-    """
-    try:
-        from google.genai import types as gemini_types
-    except ImportError as e:
-        raise ImportError(
-            "google-genai is required for Gemini integration. Install with: pip install google-genai"
-        ) from e
-
-    all_declarations = []
-    for tool in tools:
-        if hasattr(tool, "function_declarations"):
-            all_declarations.extend(tool.function_declarations)
-
-    return gemini_types.Tool(function_declarations=all_declarations)
+    return [function_tool_to_litellm(t, strict=strict) for t in tools]
