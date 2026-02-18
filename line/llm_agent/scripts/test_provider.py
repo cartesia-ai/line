@@ -27,6 +27,10 @@ Environment variables:
     ANTHROPIC_API_KEY   - For Anthropic models (anthropic/claude-sonnet-4-20250514)
     GEMINI_API_KEY      - For Google models (gemini/gemini-2.5-flash-preview-09-2025)
 
+MCP Tests:
+    MCP tests use a local dice-rolling MCP server (line/llm_agent/scripts/test_mcp_server.py)
+    that exposes a roll tool via stdio transport.
+
 The script will test whichever providers have API keys set.
 """
 
@@ -34,6 +38,7 @@ import argparse
 import asyncio
 import logging
 import os
+import pathlib
 import sys
 from typing import Annotated, List
 import warnings
@@ -56,6 +61,7 @@ from line.llm_agent import (
     LlmConfig,
     end_call,
     loopback_tool,
+    mcp_tool,
     web_search,
 )
 from line.llm_agent.provider import LLMProvider, Message
@@ -726,6 +732,115 @@ async def test_function_tools_with_web_search(model: str, api_key: str):
     print("✓ Function tools + web search test passed")
 
 
+def _local_mcp_server_command() -> str:
+    """Return the command to launch the local test MCP server."""
+    server_path = pathlib.Path(__file__).parent / "test_mcp_server.py"
+    return f"{sys.executable} {server_path}"
+
+
+async def test_mcp_list_tools(model: str, api_key: str):
+    """Test MCP tool listing with the local test MCP server."""
+    print(f"\n{'=' * 60}")
+    print(f"Testing MCP tool listing with {model}")
+    print("=" * 60)
+
+    agent = LlmAgent(
+        model=model,
+        api_key=api_key,
+        tools=[
+            mcp_tool(
+                name="dice",
+                command=_local_mcp_server_command(),
+            )
+        ],
+        config=LlmConfig(
+            system_prompt="You are a helpful assistant with access to an MCP server. "
+            "Use the available tools when asked.",
+        ),
+    )
+
+    env = TurnEnv()
+    user_message = "What tools are available?"
+    event = UserTextSent(
+        content=user_message,
+        history=[UserTextSent(content=user_message)],
+    )
+
+    print(f"User: {user_message}")
+    print("\nAgent response:")
+
+    mcp_tool_used = False
+    async for output in agent.process(env, event):
+        if isinstance(output, AgentSendText):
+            print(output.text, end="", flush=True)
+        elif isinstance(output, AgentToolCalled):
+            if output.tool_name == "mcp_dice":
+                mcp_tool_used = True
+            print(f"\n  [Tool call]: {output.tool_name}({output.tool_args})")
+        elif isinstance(output, AgentToolReturned):
+            result_preview = output.result[:400] + "..." if len(output.result) > 400 else output.result
+            print(f"  [Tool result]: {result_preview}")
+
+    print()
+
+    if mcp_tool_used:
+        print("✓ MCP tool listing test passed (mcp_dice tool was called)")
+    else:
+        print("⚠ MCP tool was not called (model may have answered directly)")
+
+
+async def test_mcp_tool_execution(model: str, api_key: str):
+    """Test MCP tool execution with the local test MCP server."""
+    print(f"\n{'=' * 60}")
+    print(f"Testing MCP tool execution with {model}")
+    print("=" * 60)
+
+    agent = LlmAgent(
+        model=model,
+        api_key=api_key,
+        tools=[
+            mcp_tool(
+                name="dice",
+                command=_local_mcp_server_command(),
+            )
+        ],
+        config=LlmConfig(
+            system_prompt="You are a helpful assistant with access to an MCP server. "
+            "First list available tools, then use them as requested.",
+        ),
+    )
+
+    env = TurnEnv()
+    user_message = "Roll 3 six-sided dice for me."
+    event = UserTextSent(
+        content=user_message,
+        history=[UserTextSent(content=user_message)],
+    )
+
+    print(f"User: {user_message}")
+    print("\nAgent response:")
+
+    mcp_tool_calls = []
+    async for output in agent.process(env, event):
+        if isinstance(output, AgentSendText):
+            print(output.text, end="", flush=True)
+        elif isinstance(output, AgentToolCalled):
+            if output.tool_name == "mcp_dice":
+                mcp_tool_calls.append(output.tool_args)
+            print(f"\n  [Tool call]: {output.tool_name}({output.tool_args})")
+        elif isinstance(output, AgentToolReturned):
+            result_preview = output.result[:200] + "..." if len(output.result) > 200 else output.result
+            print(f"  [Tool result]: {result_preview}")
+
+    print()
+
+    if mcp_tool_calls:
+        print(f"✓ MCP tool execution test passed ({len(mcp_tool_calls)} tool calls made)")
+    else:
+        print("⚠ MCP tool was not called (model may have answered directly)")
+    print("✓ MCP tool execution test completed")
+
+
 # =============================================================================
 # Main
 # =============================================================================
@@ -746,6 +861,7 @@ AVAILABLE_TESTS = [
     "end_call_form_eval",  # test_end_call_form_eval
     "web_search",  # test_web_search
     "web_search_fn",  # test_function_tools_with_web_search
+    "mcp",  # test_mcp_list_tools and test_mcp_tool_execution
 ]
 
 
@@ -850,6 +966,9 @@ async def main(args):
                 await test_web_search(model, api_key, search_context_size="high")
             if "web_search_fn" in tests_to_run:
                 await test_function_tools_with_web_search(model, api_key)
+            if "mcp" in tests_to_run:
+                await test_mcp_list_tools(model, api_key)
+                await test_mcp_tool_execution(model, api_key)
         except Exception as e:
             print(f"\n✗ Error testing {model}: {e}")
             import traceback

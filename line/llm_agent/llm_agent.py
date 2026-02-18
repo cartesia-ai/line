@@ -141,8 +141,8 @@ class LlmAgent:
             Callable[[List[HistoryEvent]], Union[List[HistoryEvent], Awaitable[List[HistoryEvent]]]]
         ] = None
 
-        resolved_tools, web_seach_options = self._resolve_tools(self._tools)
-        tool_names = [t.name for t in resolved_tools] + (["web_search"] if web_seach_options else [])
+        resolved_tools, web_search_options = self._resolve_tools(self._tools)
+        tool_names = [t.name for t in resolved_tools] + (["web_search"] if web_search_options else [])
         logger.info(f"LlmAgent initialized with model={self._model}, tools={tool_names}")
 
     def set_tools(self, tools: List[ToolSpec]) -> None:
@@ -226,7 +226,7 @@ class LlmAgent:
         """Extract the name from a ToolSpec.
 
         Args:
-            tool: A ToolSpec (FunctionTool, WebSearchTool, EndCallTool, or Callable)
+            tool: A ToolSpec (FunctionTool, WebSearchTool, EndCallTool, McpTool, or Callable)
 
         Returns:
             The name of the tool
@@ -268,17 +268,14 @@ class LlmAgent:
     def _resolve_tools(
         self, tool_specs: List[ToolSpec]
     ) -> tuple[List[FunctionTool], Optional[Dict[str, Any]]]:
-        """Resolve ToolSpecs into FunctionTools and optional web_search_options.
+        """Resolve ToolSpecs into FunctionTools and web_search_options.
 
         Separates WebSearchTool from other tools, converts plain callables to
         FunctionTools via loopback_tool, and decides whether to use native web
         search or a fallback tool based on model support.
 
         Returns:
-            (function_tools, web_search_options) — web_search_options is set only
-            when the model supports native web search and there are no other
-            function tools; otherwise the WebSearchTool is converted to a fallback
-            FunctionTool included in the first list.
+            (function_tools, web_search_options)
         """
         function_tools: List[FunctionTool] = []
         web_search_tool: Optional[WebSearchTool] = None
@@ -314,7 +311,7 @@ class LlmAgent:
         Args:
             env: The turn environment.
             event: The input event to process.
-            extra_tools: Additional ToolSpecs to concatenate with self._tools for this call.
+            tool_specs: ToolSpecs to resolve and use for this call.
             config: The effective LlmConfig for this call.
         """
         tools, web_search_options = self._resolve_tools(tool_specs)
@@ -363,7 +360,7 @@ class LlmAgent:
 
             stream = self._llm.chat(
                 messages,
-                tools if tools else None,
+                tools or None,
                 config=config,
                 **chat_kwargs,
             )

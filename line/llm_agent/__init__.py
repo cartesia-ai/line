@@ -17,7 +17,14 @@ from line.llm_agent.llm_agent import LlmAgent
 from line.llm_agent.tools.decorators import handoff_tool, loopback_tool, passthrough_tool
 
 # Built-in tools
-from line.llm_agent.tools.system import agent_as_handoff, end_call, send_dtmf, transfer_call, web_search
+from line.llm_agent.tools.system import (
+    agent_as_handoff,
+    end_call,
+    mcp_tool,
+    send_dtmf,
+    transfer_call,
+    web_search,
+)
 
 # Function tool definitions and types
 from line.llm_agent.tools.utils import (
@@ -47,6 +54,7 @@ __all__ = [
     "transfer_call",
     "web_search",
     "agent_as_handoff",
+    "mcp_tool",
     # Tool types
     "ToolEnv",
     "LoopbackToolFn",

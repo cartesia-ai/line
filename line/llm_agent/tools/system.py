@@ -256,6 +256,195 @@ class EndCallTool:
 end_call = EndCallTool()
 
 
+@dataclass
+class _McpServer:
+    """Internal: holds MCP server connection config and the execute method."""
+
+    name: str
+    server_url: Optional[str] = None
+    server_config: Dict[str, Any] = field(default_factory=dict)
+
+    async def execute(
+        self,
+        ctx: ToolEnv,
+        tool_name: Annotated[
+            Optional[str],
+            "The MCP tool to call. Omit to list available tools.",
+        ] = None,
+        tool_args: Annotated[
+            Optional[str],
+            "JSON-encoded arguments for the tool (when tool_name is provided).",
+        ] = None,
+    ) -> str:
+        """
+        List available tools or execute a specific tool on the MCP server.
+
+        The LLM calls this with no arguments to discover tools,
+        or with ``tool_name`` and ``tool_args`` to invoke one.
+        """
+        import json
+
+        # Parse tool_args up front so a bad value doesn't crash inside the MCP session.
+        parsed_args: Dict[str, Any] = {}
+        if tool_args is not None and tool_name is not None:
+            if isinstance(tool_args, dict):
+                parsed_args = tool_args
+            else:
+                try:
+                    parsed_args = json.loads(tool_args)
+                except (ValueError, json.JSONDecodeError):
+                    return json.dumps(
+                        {
+                            "error": f"tool_args must be a JSON object, got: {tool_args!r}. "
+                            "Call with no arguments first to see each tool's expected schema."
+                        }
+                    )
+
+        try:
+            async with self._connect() as session:
+                if tool_name is None or tool_name == "list_tools":
+                    result = await session.list_tools()
+                    tools_list = []
+                    for tool in result.tools:
+                        info: Dict[str, Any] = {
+                            "name": tool.name,
+                            "description": tool.description or "",
+                        }
+                        if tool.inputSchema:
+                            info["inputSchema"] = tool.inputSchema
+                        tools_list.append(info)
+                    return json.dumps({"tools": tools_list}, indent=2)
+
+                result = await session.call_tool(tool_name, arguments=parsed_args)
+
+                if result.isError:
+                    return json.dumps({"error": str(result.content)})
+
+                parts = []
+                for content in result.content:
+                    if hasattr(content, "text"):
+                        parts.append(content.text)
+                    elif hasattr(content, "data"):
+                        parts.append(str(content.data))
+                    else:
+                        parts.append(str(content))
+                return "\n".join(parts) if parts else json.dumps({"result": "success"})
+
+        except ImportError:
+            return json.dumps({"error": "MCP SDK not installed (requires Python >= 3.10)."})
+        except Exception as e:
+            return json.dumps({"error": f"MCP error on server '{self.name}': {e}"})
+
+    # -- internals ----------------------------------------------------------
+
+    def _connect(self):
+        """Return an async context manager that yields a ``ClientSession``.
+
+        Chooses transport based on available configuration:
+        - ``server_url`` → streamable-HTTP
+        - ``command`` in server_config → stdio
+        """
+        from contextlib import asynccontextmanager
+
+        @asynccontextmanager
+        async def _ctx():
+            from mcp import ClientSession
+
+            if self.server_url:
+                from mcp.client.streamable_http import streamablehttp_client
+
+                async with streamablehttp_client(self.server_url) as (r, w, _):
+                    async with ClientSession(r, w) as session:
+                        await session.initialize()
+                        yield session
+            else:
+                # dunno if we need to support this?
+                command = self.server_config.get("command")
+                if not command:
+                    raise ValueError(f"mcp_tool(name='{self.name}'): provide server_url or command.")
+
+                import shlex
+
+                from mcp import StdioServerParameters
+                from mcp.client.stdio import stdio_client
+
+                if isinstance(command, str):
+                    parts = shlex.split(command)
+                else:
+                    parts = list(command)
+                params = StdioServerParameters(
+                    command=parts[0],
+                    args=parts[1:],
+                    env=self.server_config.get("env"),
+                )
+                async with stdio_client(params) as (r, w):
+                    async with ClientSession(r, w) as session:
+                        await session.initialize()
+                        yield session
+
+        return _ctx()
+
+
+def mcp_tool(name: str, server_url: Optional[str] = None, **server_config: Any) -> "FunctionTool":
+    """
+    Create an MCP tool for accessing Model Context Protocol servers.
+
+    Returns a FunctionTool that the LLM can call to list or invoke tools
+    on the MCP server.
+
+    Args:
+        name: A label identifying this MCP server (e.g., "github", "dmcp").
+        server_url: HTTP/SSE URL for remote MCP servers.
+        **server_config: Additional options.
+            - command: Shell command to launch a local stdio server.
+            - env: Environment variables for the stdio server process.
+
+    Returns:
+        A FunctionTool that can be passed to LlmAgent's tools list.
+
+    Example:
+        # Remote HTTP server
+        LlmAgent(tools=[mcp_tool(
+            name="dmcp",
+            server_url="https://dmcp-server.deno.dev/sse",
+        )])
+
+        # Local stdio server
+        LlmAgent(tools=[mcp_tool(
+            name="memory",
+            command="npx -y @modelcontextprotocol/server-memory",
+        )])
+    """
+    import sys
+
+    if sys.version_info < (3, 10):
+        raise ImportError(
+            "mcp_tool requires Python >= 3.10 (the 'mcp' package is not supported on older versions)."
+        )
+
+    try:
+        import mcp as _mcp  # noqa: F401
+    except ImportError:
+        raise ImportError(
+            "mcp_tool requires the 'mcp' package. Install it with: pip install 'mcp>=1.0.0'"
+        ) from None
+
+    if not server_url and "command" not in server_config:
+        raise ValueError(f"mcp_tool(name='{name}'): provide either server_url or command.")
+
+    from line.llm_agent.tools.utils import ToolType, construct_function_tool
+
+    mcp_server = _McpServer(name=name, server_url=server_url, server_config=server_config)
+    return construct_function_tool(
+        func=mcp_server.execute,
+        name=f"mcp_{name}",
+        description=f"Access the '{name}' MCP server. "
+        "Call without arguments to list available tools, "
+        "or with tool_name and tool_args to invoke one.",
+        tool_type=ToolType.LOOPBACK,
+    )
+
+
 @passthrough_tool
 async def send_dtmf(
     ctx: ToolEnv,
@@ -393,6 +582,7 @@ __all__ = [
     "UpdateCallConfig",
     "WebSearchTool",
     "web_search",
+    "mcp_tool",
     "end_call",
     "send_dtmf",
     "transfer_call",
