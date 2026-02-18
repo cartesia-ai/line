@@ -16,7 +16,7 @@ from typing import Any, AsyncIterator, Dict, List, Optional
 from litellm import acompletion, get_llm_provider, get_supported_openai_params
 from litellm.utils import get_optional_params
 
-from line.llm_agent.config import LlmConfig
+from line.llm_agent.config import LlmConfig, _normalize_config  
 from line.llm_agent.schema_converter import function_tools_to_openai
 from line.llm_agent.tools.utils import FunctionTool
 
@@ -70,7 +70,7 @@ class LLMProvider:
     ):
         self._model = model
         self._api_key = api_key
-        self._config = config or LlmConfig()
+        self._config = _normalize_config(config or LlmConfig())
         self._num_retries = num_retries
         self._fallbacks = fallbacks
         self._timeout = timeout

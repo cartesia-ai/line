@@ -52,7 +52,7 @@ from line.events import (
     UserTurnEnded,
     UserTurnStarted,
 )
-from line.llm_agent.config import LlmConfig, _merge_configs
+from line.llm_agent.config import LlmConfig, _merge_configs, _normalize_config
 from line.llm_agent.provider import LLMProvider, Message, ToolCall
 from line.llm_agent.tools.decorators import loopback_tool
 from line.llm_agent.tools.system import WebSearchTool
@@ -98,7 +98,10 @@ class LlmAgent:
                 f"Model {model} is not supported. See https://models.litellm.ai/ for supported models."
             )
 
-        effective_config = config or LlmConfig()
+        # Resolve the base config: merge the provided config (if any) onto an
+        # empty LlmConfig so that every _UNSET sentinel is replaced with its
+        # real default value.
+        effective_config = _normalize_config(config or LlmConfig())
         if effective_config.reasoning_effort is not None and "reasoning_effort" not in supported_params:
             raise ValueError(
                 f"Model {model} does not support reasoning_effort. "
@@ -142,7 +145,9 @@ class LlmAgent:
             Callable[[List[HistoryEvent]], Union[List[HistoryEvent], Awaitable[List[HistoryEvent]]]]
         ] = None
 
-        logger.info(f"LlmAgent initialized with model={self._model}")
+        resolved_tools, web_seach_options = self._resolve_tools(self._tools)
+        tool_names = [t.name for t in resolved_tools] + (["web_search"] if web_seach_options else [])
+        logger.info(f"LlmAgent initialized with model={self._model}, tools={tool_names}}")
 
     @property
     def model(self) -> str:
@@ -195,7 +200,6 @@ class LlmAgent:
             env: The turn environment.
             event: The input event to process.
             config: Optional LlmConfig to merge with self._config for this call.
-                Non-default values in the passed config override self._config.
             tools: Optional tools to use for this call. Tools with matching names replace
                 those in self._tools; other tools from self._tools are preserved.
         """
