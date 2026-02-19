@@ -98,9 +98,7 @@ class LlmAgent:
                 f"Model {model} is not supported. See https://models.litellm.ai/ for supported models."
             )
 
-        # Resolve the base config: merge the provided config (if any) onto an
-        # empty LlmConfig so that every _UNSET sentinel is replaced with its
-        # real default value.
+        # Resolve the base config to insert default values for any _UNSET sentinels.
         effective_config = _normalize_config(config or LlmConfig())
         if effective_config.reasoning_effort is not None and "reasoning_effort" not in supported_params:
             raise ValueError(
@@ -147,7 +145,15 @@ class LlmAgent:
 
         resolved_tools, web_seach_options = self._resolve_tools(self._tools)
         tool_names = [t.name for t in resolved_tools] + (["web_search"] if web_seach_options else [])
-        logger.info(f"LlmAgent initialized with model={self._model}, tools={tool_names}}")
+        logger.info(f"LlmAgent initialized with model={self._model}, tools={tool_names}")
+
+    def set_tools(self, tools: List[ToolSpec]) -> None:
+        """Replace the agent's tools with a new list."""
+        self._tools = tools
+
+    def set_config(self, config: LlmConfig) -> None:
+        """Replace the agent's config."""
+        self._config = _normalize_config(config)
 
     @property
     def model(self) -> str:
