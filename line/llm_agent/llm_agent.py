@@ -843,18 +843,13 @@ def _build_full_history(
     current_event_id: str,
 ) -> List[HistoryEvent]:
     """
-    Build full history by merging input_history (canonical) with local_history.
+    We have a split brain situation, where "input_history" (maintained by the external harness) is the source
+    of truth for what actually happened in the conversation, but "local_history" (maintained by the agent)
+    contains additional events that we want to include in the history (tool calls, custom entries). we need
+    to merge them together in a coherent way before building messages for the LLM.
 
-    Args:
-        input_history: Canonical history from the external harness (source of truth)
-        local_history: Local events annotated with (triggering_event_id, event)
-        current_event_id: Event ID of the current input event being processed
-
-    Returns:
-        List of HistoryEvent items (InputEvent | AgentToolCalled | AgentToolReturned | CustomHistoryEntry).
-
-    We have certain events that are "matchable". They show up in both input and local history, 
-    but the input version is considered "canonical" 
+    To that end, we have certain events that are "matchable". They show up in both input and local history,
+    but the input version is considered "canonical"
     (it's what actually occured in the conversation)
 
     Invariants:
@@ -867,10 +862,38 @@ def _build_full_history(
 
     Algorithm:
     1) For each input event, if it triggered any output events, load a queue
-    of those local output events. 
-    2) Unmatchable input events are output directly. 
+    of those local output events.
+    2) Unmatchable input events are output directly.
     3) Matchable input events are matched against the queue, with non-matchable locals (tool calls, custom
     entries) drained alongside their matched matchable.
+
+    Examples:
+
+    1) Simple turn with a tool call:
+
+        input_history:  [UserTextSent("hi", id=A), AgentTextSent("hello", id=B)]
+        local_history:  [(A, AgentToolCalled(...)), (A, AgentToolReturned(...)), (A, AgentSendText("hello"))]
+
+        result: [UserTextSent("hi"), AgentToolCalled(...), AgentToolReturned(...), AgentTextSent("hello")]
+
+        UserTextSent is non-matchable so it's emitted directly. AgentTextSent is matchable and matches
+        the local AgentSendText("hello"), so the canonical input version is used. The non-matchable tool
+        events are drained alongside it.
+
+    2) Multi-turn with interleaved tool calls:
+
+        input_history:  [UserTextSent("weather?", id=A), AgentTextSent("It's sunny", id=B),
+                         UserTextSent("thanks", id=C), AgentTextSent("You're welcome", id=D)]
+        local_history:  [(A, AgentToolCalled(weather)), (A, AgentToolReturned(weather)),
+                         (A, AgentSendText("It's sunny")),
+                         (C, AgentSendText("You're welcome"))]
+
+        result: [UserTextSent("weather?"), AgentToolCalled(weather), AgentToolReturned(weather),
+                 AgentTextSent("It's sunny"), UserTextSent("thanks"), AgentTextSent("You're welcome")]
+
+        When we reach UserTextSent("thanks", id=C), its id is in local_by_event_id so we flush the
+        remaining queue from the previous trigger (nothing left) and load the new queue. The tool events
+        from the first turn are properly interleaved before the matched AgentTextSent.
 
     """
     # Split local history into prior and current based on event_id
@@ -1065,8 +1088,9 @@ def _to_history_event(event: Any) -> Optional[HistoryEvent]:
 
 def _concat_contiguous_agent_send_text(local_history: List[_LocalEvent]) -> List[_LocalEvent]:
     """
-    Since the LLM streams output, we likely will have many AgentSendText events that are part of the same logical "message" from the LLM.
-    This concats them into a single AgentSendText event for easier matching to the input history, which only has one AgentTextSent per LLM message.
+    Since the LLM streams output, we likely will have many AgentSendText events that are part of the same
+    logical "message" from the LLM. This concats them into a single AgentSendText event for easier matching
+    to the input history, which only has one AgentTextSent per LLM message.
     """
     if not local_history:
         return []
