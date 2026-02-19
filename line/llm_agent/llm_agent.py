@@ -53,6 +53,7 @@ from line.events import (
 )
 from line.llm_agent.config import LlmConfig
 from line.llm_agent.provider import LLMProvider, Message, ToolCall
+from line.llm_agent.history import History, _INIT_EVENT_ID, _LocalEvent
 from line.llm_agent.tools.decorators import loopback_tool
 from line.llm_agent.tools.system import WebSearchTool
 from line.llm_agent.tools.utils import FunctionTool, ToolEnv, ToolType, construct_function_tool
@@ -62,13 +63,6 @@ T = TypeVar("T")
 # Type alias for tools that can be passed to LlmAgent
 # Plain callables are automatically wrapped as loopback tools
 ToolSpec = Union[FunctionTool, WebSearchTool, Callable]
-
-# Type for events stored in local history (OutputEvent or CustomHistoryEntry)
-_LocalEvent = Union[OutputEvent, CustomHistoryEntry]
-
-# Sentinel event_id used before the first process() call.
-# _build_full_history prepends entries tagged with this ID at the start of the history.
-_INIT_EVENT_ID = "__init__"
 
 
 class LlmAgent:
@@ -153,11 +147,7 @@ class LlmAgent:
         )
 
         self._introduction_sent = False
-        # Local history annotated with (triggering_event_id, event)
-        # The event_id is the stable UUID of the triggering input event
-        self._local_history: List[tuple[str, _LocalEvent]] = []
-        # Event ID of the current triggering input event (set on each process() call)
-        self._current_event_id: str = _INIT_EVENT_ID
+        self.history = History()
         self._handoff_target: Optional[AgentCallable] = None  # Normalized process function
         # Background task for backgrounded tools - None means no pending work
         self._background_task: Optional[asyncio.Task[None]] = None
@@ -168,10 +158,6 @@ class LlmAgent:
         # Cache for thought signatures (Gemini 3+ models)
         # Maps tool_call_id -> thought_signature
         self._tool_signatures: Dict[str, str] = {}
-        # Registered history transform (called in _build_messages after _build_full_history)
-        self._process_history_fn: Optional[
-            Callable[[List[HistoryEvent]], Union[List[HistoryEvent], Awaitable[List[HistoryEvent]]]]
-        ] = None
 
         logger.info(f"LlmAgent initialized with model={self._model}, tools={[t.name for t in self._tools]}")
 
@@ -201,7 +187,7 @@ class LlmAgent:
         The transform is called on the history before it's passed to the LLM
         It receives the original history and can filter, reorder, or inject events.
         """
-        self._process_history_fn = fn
+        self.history.set_processor(fn)
 
     def add_history_entry(self, content: str, role: Literal["system", "user"] = "system") -> None:
         """Insert a CustomHistoryEntry event into local history.
@@ -209,14 +195,19 @@ class LlmAgent:
         The entry appears as a message with the given role ("system" by default) in the
         LLM conversation
         """
-        event = CustomHistoryEntry(content=content, role=role)
-        self._append_to_local_history(event)
+        self.history.append(content, role)
 
-    async def process(self, env: TurnEnv, event: InputEvent) -> AsyncIterable[OutputEvent]:
+    async def process(
+        self,
+        env: TurnEnv,
+        event: InputEvent,
+        *,
+        context: Union[str, List[HistoryEvent], None] = None,
+    ) -> AsyncIterable[OutputEvent]:
         """Process an input event and yield output events."""
-        # Track the event_id of the triggering input event
-        # The triggering event is the last element in event.history
-        self._current_event_id = event.history[-1].event_id if event.history else ""
+        # Sync canonical history and event_id
+        event_id = event.history[-1].event_id if event.history else ""
+        self.history._sync(event.history, event_id)
 
         # If handoff is active, call the handed-off process function
         if self._handoff_target is not None:
@@ -239,10 +230,16 @@ class LlmAgent:
             await self.cleanup()
             return
 
-        async for output in self._generate_response(env, event):
+        async for output in self._generate_response(env, event, context=context):
             yield output
 
-    async def _generate_response(self, env: TurnEnv, event: InputEvent) -> AsyncIterable[OutputEvent]:
+    async def _generate_response(
+        self,
+        env: TurnEnv,
+        event: InputEvent,
+        *,
+        context: Union[str, List[HistoryEvent], None] = None,
+    ) -> AsyncIterable[OutputEvent]:
         """Generate a response using the LLM."""
 
         is_first_iteration = True
@@ -273,7 +270,7 @@ class LlmAgent:
             # ==== END LOOPBACK MANAGMENT ==== #
 
             # ==== GENERATION CALL ==== #
-            messages = await self._build_messages(event.history, self._local_history, self._current_event_id)
+            messages = await self._build_messages(context=context)
             tool_calls_dict: Dict[str, ToolCall] = {}
 
             # Build kwargs for LLM chat, including web_search_options if available
@@ -458,39 +455,16 @@ class LlmAgent:
 
     async def _build_messages(
         self,
-        input_history: List[InputEvent],
-        local_history: List[tuple[str, _LocalEvent]],
-        current_event_id: str,
+        *,
+        context: Union[str, List[HistoryEvent], None] = None,
     ) -> List[Message]:
         """Build LLM messages from conversation history.
 
-        Merges input_history (canonical) with local_history using the following rules:
-        1. Input history is the source of truth for all events
-        2. Local history events are interpolated based on which input event triggered them
-        3. Observable events are matched between local and input history
-        4. Unobservable events (tool calls, custom text) are interpolated relative to observables
-        5. Tool calls without matching results get a "pending" result
-
-        The full_history contains HistoryEvent items:
-        - InputEvent for events from input_history (observable OutputEvents converted to InputEvent
-          counterparts)
-        - AgentToolCalled/AgentToolReturned for tool interactions from local_history
-        - CustomHistoryEntry for injected history entries from local_history
+        Uses self.history.build() to merge canonical + local history, apply
+        any registered processor, and append context. Then converts the
+        resulting HistoryEvent list to LLM Message objects.
         """
-        full_history = _build_full_history(input_history, local_history, current_event_id)
-
-        # Apply registered history transform
-        if self._process_history_fn is not None:
-            try:
-                result = self._process_history_fn(full_history)
-                if inspect.isawaitable(result):
-                    result = await result
-                full_history = _validate_processed_history(result)
-            except Exception:
-                logger.error(
-                    f"History processor failed, using unprocessed history:\n{traceback.format_exc(limit=-10)}"
-                )
-                # full_history is unchanged — fall back to unprocessed version
+        full_history = await self.history.build(context=context)
 
         # First pass: collect all tool_call_ids that have matching AgentToolReturned
         returned_tool_call_ids: set[str] = set()
@@ -578,7 +552,7 @@ class LlmAgent:
         for processing on the next process() call.
         """
         # Capture the event_id at the start - this is the triggering event
-        triggering_event_id = self._current_event_id
+        triggering_event_id = self.history._current_event_id
 
         async def generate_events() -> None:
             n = 0
@@ -588,8 +562,8 @@ class LlmAgent:
                     called, returned = _construct_tool_events(call_id, tc_name, tool_args, value)
 
                     # Add to local history with the triggering event_id
-                    self._local_history.append((triggering_event_id, called))
-                    self._local_history.append((triggering_event_id, returned))
+                    self.history._append_local_with_id(called, triggering_event_id)
+                    self.history._append_local_with_id(returned, triggering_event_id)
                     # Add to queue for loopback processing
                     await self._background_event_queue.put((called, returned))
                     n += 1
@@ -598,8 +572,8 @@ class LlmAgent:
                 logger.error(f"Error in Tool Call {tc_name}: {e}\n{traceback.format_exc(limit=-10)}")
                 called, returned = _construct_tool_events(f"{tc_id}-{n}", tc_name, tool_args, f"error: {e}")
                 # Add to local history with the triggering event_id
-                self._local_history.append((triggering_event_id, called))
-                self._local_history.append((triggering_event_id, returned))
+                self.history._append_local_with_id(called, triggering_event_id)
+                self.history._append_local_with_id(returned, triggering_event_id)
                 # Add to queue for loopback processing
                 await self._background_event_queue.put((called, returned))
 
@@ -617,7 +591,7 @@ class LlmAgent:
 
     def _append_to_local_history(self, event: _LocalEvent) -> None:
         """Append an event to local history, annotated with the triggering event_id."""
-        self._local_history.append((self._current_event_id, event))
+        self.history._append_local(event)
 
     async def _maybe_await_background_event(self) -> Union[None, tuple[AgentToolCalled, AgentToolReturned]]:
         """Wait for either a background event or background task completion.

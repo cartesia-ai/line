@@ -39,6 +39,7 @@ from line.events import (
     UserTurnEnded,
     UserTurnStarted,
 )
+from line.llm_agent import History
 from line.voice_agent_app import (
     AgentConfig,
     AgentEnv,
@@ -90,5 +91,6 @@ __all__ = [
     # Custom events
     "CustomHistoryEntry",
     # History
+    "History",
     "HistoryEvent",
 ]

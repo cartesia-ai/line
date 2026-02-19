@@ -27,7 +27,8 @@ from line.events import (
     UserTextSent,
 )
 from line.llm_agent.config import LlmConfig
-from line.llm_agent.llm_agent import _INIT_EVENT_ID, LlmAgent, _build_full_history
+from line.llm_agent.history import History, _INIT_EVENT_ID
+from line.llm_agent.llm_agent import LlmAgent, _build_full_history
 from line.llm_agent.provider import Message, StreamChunk, ToolCall
 from line.llm_agent.tools.decorators import handoff_tool, loopback_tool, passthrough_tool
 from line.llm_agent.tools.utils import FunctionTool
@@ -140,10 +141,10 @@ def create_agent_with_mock(
 # =============================================================================
 
 
-async def collect_outputs(agent: LlmAgent, env: TurnEnv, event) -> List[OutputEvent]:
+async def collect_outputs(agent: LlmAgent, env: TurnEnv, event, **kwargs) -> List[OutputEvent]:
     """Collect all outputs from agent.process()."""
     outputs = []
-    async for output in agent.process(env, event):
+    async for output in agent.process(env, event, **kwargs):
         outputs.append(output)
     return outputs
 
@@ -1635,7 +1636,9 @@ class TestBuildMessagesPendingToolResults:
             event_id=user0.event_id,
         )
 
-        messages = await agent._build_messages(input_history, local_history, current_event_id="current")
+        agent.history._sync(input_history, "current")
+        agent.history._local = local_history
+        messages = await agent._build_messages()
 
         # Should have: user message, assistant with tool call, tool result
         assert len(messages) == 3
@@ -1660,7 +1663,9 @@ class TestBuildMessagesPendingToolResults:
             event_id=user0.event_id,
         )
 
-        messages = await agent._build_messages(input_history, local_history, current_event_id="current")
+        agent.history._sync(input_history, "current")
+        agent.history._local = local_history
+        messages = await agent._build_messages()
 
         # Should have: user message, assistant with tool call, pending tool result
         assert len(messages) == 3
@@ -1690,7 +1695,9 @@ class TestBuildMessagesPendingToolResults:
             event_id=user0.event_id,
         )
 
-        messages = await agent._build_messages(input_history, local_history, current_event_id="current")
+        agent.history._sync(input_history, "current")
+        agent.history._local = local_history
+        messages = await agent._build_messages()
 
         # Should have: user, tool_call_1, result_1, tool_call_2, pending_2
         assert len(messages) == 5
@@ -1726,7 +1733,9 @@ class TestBuildMessagesPendingToolResults:
             event_id=user0.event_id,
         )
 
-        messages = await agent._build_messages(input_history, local_history, current_event_id="current")
+        agent.history._sync(input_history, "current")
+        agent.history._local = local_history
+        messages = await agent._build_messages()
 
         # Should have: user, tool_call_1, pending_1, tool_call_2, pending_2
         assert len(messages) == 5
@@ -1763,7 +1772,9 @@ class TestBuildMessagesPendingToolResults:
             event_id=user0.event_id,
         )
 
-        messages = await agent._build_messages(input_history, local_history, current_event_id="current")
+        agent.history._sync(input_history, "current")
+        agent.history._local = local_history
+        messages = await agent._build_messages()
 
         # Should have: user, tool_call_1, tool_call_2, pending_2, result_1
         # (pending is inserted immediately after call_2 since it has no result)
@@ -1805,7 +1816,9 @@ class TestBuildMessagesPendingToolResults:
             event_id=user0.event_id,
         )
 
-        messages = await agent._build_messages(input_history, local_history, current_event_id="current")
+        agent.history._sync(input_history, "current")
+        agent.history._local = local_history
+        messages = await agent._build_messages()
 
         pending_msg = messages[-1]
         assert pending_msg.role == "tool"
@@ -1827,7 +1840,9 @@ class TestBuildMessagesPendingToolResults:
             event_id="current",
         )
 
-        messages = await agent._build_messages(input_history, local_history, current_event_id="current")
+        agent.history._sync(input_history, "current")
+        agent.history._local = local_history
+        messages = await agent._build_messages()
 
         # Should have: user, tool_call, pending
         assert len(messages) == 3
@@ -1838,7 +1853,9 @@ class TestBuildMessagesPendingToolResults:
         """Empty history should produce no messages."""
         agent, _ = create_agent_with_mock([])
 
-        messages = await agent._build_messages([], [], current_event_id="current")
+        agent.history._sync([], "current")
+        agent.history._local = []
+        messages = await agent._build_messages()
 
         assert len(messages) == 0
 
@@ -1857,14 +1874,14 @@ class TestAddHistoryEntry:
         return [(event_id, e) for e in events]
 
     async def test_adds_custom_history_entry_to_local_history(self):
-        """add_history_entry inserts a CustomHistoryEntry into _local_history."""
+        """add_history_entry inserts a CustomHistoryEntry into history._local."""
         agent, _ = create_agent_with_mock([])
-        agent._current_event_id = "evt-1"
+        agent.history._current_event_id = "evt-1"
 
         agent.add_history_entry("injected context")
 
-        assert len(agent._local_history) == 1
-        eid, event = agent._local_history[0]
+        assert len(agent.history._local) == 1
+        eid, event = agent.history._local[0]
         assert eid == "evt-1"
         assert isinstance(event, CustomHistoryEntry)
         assert event.content == "injected context"
@@ -1876,14 +1893,13 @@ class TestAddHistoryEntry:
         # Called before any process() — _current_event_id is still the init sentinel
         agent.add_history_entry("pre-process context")
 
-        assert agent._local_history[0][0] == _INIT_EVENT_ID
+        assert agent.history._local[0][0] == _INIT_EVENT_ID
 
         user0 = UserTextSent(content="Hello")
         input_history = [user0]
 
-        messages = await agent._build_messages(
-            input_history, agent._local_history, current_event_id=user0.event_id
-        )
+        agent.history._sync(input_history, user0.event_id)
+        messages = await agent._build_messages()
 
         # Init entry should appear before the user message
         assert len(messages) == 2
@@ -1898,7 +1914,8 @@ class TestAddHistoryEntry:
 
         agent.add_history_entry("early context")
 
-        messages = await agent._build_messages([], agent._local_history, current_event_id="current")
+        agent.history._sync([], "current")
+        messages = await agent._build_messages()
 
         assert len(messages) == 1
         assert messages[0].role == "system"
@@ -1908,14 +1925,14 @@ class TestAddHistoryEntry:
         """Each call tags the entry with the current event_id."""
         agent, _ = create_agent_with_mock([])
 
-        agent._current_event_id = "evt-a"
+        agent.history._current_event_id = "evt-a"
         agent.add_history_entry("first")
 
-        agent._current_event_id = "evt-b"
+        agent.history._current_event_id = "evt-b"
         agent.add_history_entry("second")
 
-        assert agent._local_history[0][0] == "evt-a"
-        assert agent._local_history[1][0] == "evt-b"
+        assert agent.history._local[0][0] == "evt-a"
+        assert agent.history._local[1][0] == "evt-b"
 
     async def test_custom_entry_defaults_to_system_message(self):
         """CustomHistoryEntry in local_history defaults to a system message."""
@@ -1928,7 +1945,9 @@ class TestAddHistoryEntry:
             event_id=user0.event_id,
         )
 
-        messages = await agent._build_messages(input_history, local_history, current_event_id="current")
+        agent.history._sync(input_history, "current")
+        agent.history._local = local_history
+        messages = await agent._build_messages()
 
         # Should have: user message from input, then custom entry as system message
         assert len(messages) == 2
@@ -1948,7 +1967,9 @@ class TestAddHistoryEntry:
             event_id=user0.event_id,
         )
 
-        messages = await agent._build_messages(input_history, local_history, current_event_id="current")
+        agent.history._sync(input_history, "current")
+        agent.history._local = local_history
+        messages = await agent._build_messages()
 
         assert len(messages) == 2
         assert messages[0].role == "user"
@@ -1967,7 +1988,9 @@ class TestAddHistoryEntry:
             event_id="current",
         )
 
-        messages = await agent._build_messages(input_history, local_history, current_event_id="current")
+        agent.history._sync(input_history, "current")
+        agent.history._local = local_history
+        messages = await agent._build_messages()
 
         assert len(messages) == 2
         assert messages[0].role == "user"
@@ -1990,7 +2013,9 @@ class TestAddHistoryEntry:
             event_id=user0.event_id,
         )
 
-        messages = await agent._build_messages(input_history, local_history, current_event_id="current")
+        agent.history._sync(input_history, "current")
+        agent.history._local = local_history
+        messages = await agent._build_messages()
 
         # user, assistant(tool_call), tool(result), system(custom)
         assert len(messages) == 4
@@ -2085,7 +2110,9 @@ class TestSetHistoryProcessor:
 
         user0 = UserTextSent(content="Hello")
         input_history = [user0, AgentTextSent(content="Hi there")]
-        messages = await agent._build_messages(input_history, [], current_event_id="current")
+        agent.history._sync(input_history, "current")
+        agent.history._local = []
+        messages = await agent._build_messages()
 
         # Transform filtered out AgentTextSent, only UserTextSent remains
         assert len(messages) == 1
@@ -2103,7 +2130,9 @@ class TestSetHistoryProcessor:
 
         user0 = UserTextSent(content="Hello")
         input_history = [user0]
-        messages = await agent._build_messages(input_history, [], current_event_id="current")
+        agent.history._sync(input_history, "current")
+        agent.history._local = []
+        messages = await agent._build_messages()
 
         # Transform prepended a CustomHistoryEntry (default role is "system")
         assert len(messages) == 2
@@ -2143,3 +2172,344 @@ class TestSetHistoryProcessor:
         system_messages = [m for m in llm_messages if m.role == "system"]
         system_contents = [m.content for m in system_messages]
         assert "Remember: be concise" in system_contents
+
+
+# =============================================================================
+# Tests: History class
+# =============================================================================
+
+
+class TestHistory:
+    """Tests for the History class."""
+
+    async def test_events_empty_initially(self):
+        """New History has no events."""
+        h = History()
+        assert h.events == []
+
+    async def test_append_adds_entry(self):
+        """append() inserts a CustomHistoryEntry into local history."""
+        h = History()
+        h.append("hello")
+        assert len(h._local) == 1
+        _, event = h._local[0]
+        assert isinstance(event, CustomHistoryEntry)
+        assert event.content == "hello"
+        assert event.role == "system"
+
+    async def test_append_with_user_role(self):
+        """append() supports role='user'."""
+        h = History()
+        h.append("user msg", role="user")
+        _, event = h._local[0]
+        assert event.role == "user"
+
+    async def test_events_merges_canonical_and_local(self):
+        """events property merges canonical and local history."""
+        h = History()
+        user0 = UserTextSent(content="Hi")
+        h._sync([user0], user0.event_id)
+        h._append_local(AgentSendText(text="Hello"))
+
+        events = h.events
+        # user message + agent text (converted to AgentTextSent by _build_full_history)
+        assert len(events) == 2
+        assert isinstance(events[0], UserTextSent)
+        assert isinstance(events[1], AgentTextSent)
+        assert events[1].content == "Hello"
+
+    async def test_replace_overrides_history(self):
+        """replace() overrides the conversation history."""
+        h = History()
+        user0 = UserTextSent(content="Old")
+        h._sync([user0], user0.event_id)
+
+        replacement = [UserTextSent(content="New")]
+        h.replace(replacement)
+
+        events = h.events
+        assert len(events) == 1
+        assert isinstance(events[0], UserTextSent)
+        assert events[0].content == "New"
+
+    async def test_replace_clears_local_history(self):
+        """replace() clears local history."""
+        h = History()
+        h.append("old context")
+        assert len(h._local) == 1
+
+        h.replace([UserTextSent(content="Fresh start")])
+        assert len(h._local) == 0
+
+    async def test_replace_auto_appends_new_canonical_events(self):
+        """After replace(), new canonical events arriving via _sync are appended."""
+        h = History()
+        user0 = UserTextSent(content="Old")
+        h._sync([user0], user0.event_id)
+
+        h.replace([UserTextSent(content="Override")])
+
+        # Simulate new canonical event arriving
+        user1 = UserTextSent(content="New turn")
+        h._sync([user0, user1], user1.event_id)
+
+        events = h.events
+        assert len(events) == 2
+        assert events[0].content == "Override"
+        assert isinstance(events[1], UserTextSent)
+        assert events[1].content == "New turn"
+
+    async def test_set_processor_transforms_events(self):
+        """set_processor() registers a transform applied during build()."""
+        h = History()
+        user0 = UserTextSent(content="Hello")
+        h._sync([user0], user0.event_id)
+
+        def only_user(events):
+            return [e for e in events if isinstance(e, UserTextSent)]
+
+        h.set_processor(only_user)
+        result = await h.build()
+        assert len(result) == 1
+        assert isinstance(result[0], UserTextSent)
+
+    async def test_build_with_string_context(self):
+        """build(context=str) appends a system CustomHistoryEntry."""
+        h = History()
+        user0 = UserTextSent(content="Hello")
+        h._sync([user0], user0.event_id)
+
+        result = await h.build(context="extra info")
+        assert len(result) == 2
+        assert isinstance(result[0], UserTextSent)
+        assert isinstance(result[1], CustomHistoryEntry)
+        assert result[1].content == "extra info"
+        assert result[1].role == "system"
+
+    async def test_build_with_list_context(self):
+        """build(context=list) appends the list of events."""
+        h = History()
+        user0 = UserTextSent(content="Hello")
+        h._sync([user0], user0.event_id)
+
+        ctx = [CustomHistoryEntry(content="ctx1"), CustomHistoryEntry(content="ctx2")]
+        result = await h.build(context=ctx)
+        assert len(result) == 3
+        assert result[1].content == "ctx1"
+        assert result[2].content == "ctx2"
+
+    async def test_context_appended_after_processor(self):
+        """Context is appended AFTER processor, so processor can't strip it."""
+        h = History()
+        user0 = UserTextSent(content="Hello")
+        h._sync([user0], user0.event_id)
+
+        def drop_custom(events):
+            return [e for e in events if not isinstance(e, CustomHistoryEntry)]
+
+        h.set_processor(drop_custom)
+        result = await h.build(context="important")
+
+        # Processor drops CustomHistoryEntry, but context is appended after
+        custom_events = [e for e in result if isinstance(e, CustomHistoryEntry)]
+        assert len(custom_events) == 1
+        assert custom_events[0].content == "important"
+
+    async def test_async_processor_supported(self):
+        """Async processor functions work with build()."""
+        h = History()
+        user0 = UserTextSent(content="Hello")
+        h._sync([user0], user0.event_id)
+
+        async def async_processor(events):
+            return list(events) + [CustomHistoryEntry(content="async injected")]
+
+        h.set_processor(async_processor)
+        result = await h.build()
+        assert len(result) == 2
+        assert result[1].content == "async injected"
+
+    async def test_processor_error_falls_back(self):
+        """If processor raises, build() falls back to unprocessed history."""
+        h = History()
+        user0 = UserTextSent(content="Hello")
+        h._sync([user0], user0.event_id)
+
+        def bad_processor(events):
+            raise RuntimeError("boom")
+
+        h.set_processor(bad_processor)
+        result = await h.build()
+        # Falls back to unprocessed
+        assert len(result) == 1
+        assert isinstance(result[0], UserTextSent)
+
+    async def test_iter_and_len(self):
+        """History supports __iter__ and __len__."""
+        h = History()
+        user0 = UserTextSent(content="Hi")
+        h._sync([user0], user0.event_id)
+
+        assert len(h) == 1
+        items = list(h)
+        assert len(items) == 1
+        assert isinstance(items[0], UserTextSent)
+
+
+# =============================================================================
+# Tests: process(context=...)
+# =============================================================================
+
+
+class TestProcessWithContext:
+    """Tests for passing context to process()."""
+
+    async def test_string_context_becomes_system_message(self, turn_env):
+        """String context becomes a system message visible to the LLM."""
+        agent, mock_llm = create_agent_with_mock(
+            [[StreamChunk(text="ok"), StreamChunk(is_final=True)]]
+        )
+
+        await collect_outputs(
+            agent,
+            turn_env,
+            UserTextSent(content="Hi", history=[UserTextSent(content="Hi")]),
+            context="You are helpful",
+        )
+
+        messages = mock_llm._recorded_messages[0]
+        system_msgs = [m for m in messages if m.role == "system"]
+        assert any(m.content == "You are helpful" for m in system_msgs)
+
+    async def test_list_context_appended(self, turn_env):
+        """List context events are appended to the LLM messages."""
+        agent, mock_llm = create_agent_with_mock(
+            [[StreamChunk(text="ok"), StreamChunk(is_final=True)]]
+        )
+
+        ctx = [CustomHistoryEntry(content="ctx1"), CustomHistoryEntry(content="ctx2")]
+        await collect_outputs(
+            agent,
+            turn_env,
+            UserTextSent(content="Hi", history=[UserTextSent(content="Hi")]),
+            context=ctx,
+        )
+
+        messages = mock_llm._recorded_messages[0]
+        system_msgs = [m for m in messages if m.role == "system"]
+        contents = [m.content for m in system_msgs]
+        assert "ctx1" in contents
+        assert "ctx2" in contents
+
+    async def test_context_not_visible_to_processor(self, turn_env):
+        """Processor does not see context (it's appended after)."""
+        agent, mock_llm = create_agent_with_mock(
+            [[StreamChunk(text="ok"), StreamChunk(is_final=True)]]
+        )
+
+        processor_received = []
+
+        def capture_processor(events):
+            processor_received.extend(events)
+            return events
+
+        agent.set_history_processor(capture_processor)
+
+        await collect_outputs(
+            agent,
+            turn_env,
+            UserTextSent(content="Hi", history=[UserTextSent(content="Hi")]),
+            context="secret context",
+        )
+
+        # Processor should not have seen the context
+        custom = [e for e in processor_received if isinstance(e, CustomHistoryEntry)]
+        assert not any(e.content == "secret context" for e in custom)
+
+    async def test_context_cleared_between_calls(self, turn_env):
+        """Context from one process() call doesn't leak into the next."""
+        agent, mock_llm = create_agent_with_mock(
+            [
+                [StreamChunk(text="first"), StreamChunk(is_final=True)],
+                [StreamChunk(text="second"), StreamChunk(is_final=True)],
+            ]
+        )
+
+        # First call with context
+        user0 = UserTextSent(content="Hi")
+        await collect_outputs(
+            agent,
+            turn_env,
+            UserTextSent(content="Hi", history=[user0]),
+            context="temp context",
+        )
+
+        # Second call without context
+        user1 = UserTextSent(content="Hello")
+        await collect_outputs(
+            agent,
+            turn_env,
+            UserTextSent(content="Hello", history=[user0, AgentTextSent(content="first"), user1]),
+        )
+
+        # Second call's messages should NOT contain "temp context"
+        second_messages = mock_llm._recorded_messages[1]
+        system_msgs = [m for m in second_messages if m.role == "system"]
+        assert not any(m.content == "temp context" for m in system_msgs)
+
+
+# =============================================================================
+# Tests: History.replace()
+# =============================================================================
+
+
+class TestHistoryReplace:
+    """Tests for History.replace()."""
+
+    async def test_replace_clears_local_history(self):
+        """replace() clears local history."""
+        h = History()
+        h.append("old")
+        assert len(h._local) == 1
+
+        h.replace([UserTextSent(content="New")])
+        assert len(h._local) == 0
+
+    async def test_new_canonical_events_appended_after_replace(self):
+        """New canonical events arriving after replace are auto-appended."""
+        h = History()
+        user0 = UserTextSent(content="Old")
+        h._sync([user0], user0.event_id)
+        h.replace([UserTextSent(content="Override")])
+
+        # New turn
+        user1 = UserTextSent(content="New")
+        h._sync([user0, user1], user1.event_id)
+
+        events = h.events
+        assert len(events) == 2
+        assert events[0].content == "Override"
+        assert events[1].content == "New"
+
+    async def test_tool_calls_after_replace_work(self, turn_env):
+        """Tool calls work after history has been replaced."""
+        agent, mock_llm = create_agent_with_mock([])
+
+        @loopback_tool
+        async def my_tool(ctx) -> str:
+            """A tool."""
+            return "result"
+
+        agent._tools = [my_tool]
+        agent._tool_map = {my_tool.name: my_tool}
+
+        # Replace history then verify build works
+        agent.history.replace([UserTextSent(content="Custom history")])
+
+        user0 = UserTextSent(content="New input")
+        agent.history._sync([user0], user0.event_id)
+
+        messages = await agent._build_messages()
+        assert len(messages) == 2
+        assert messages[0].content == "Custom history"
+        assert messages[1].content == "New input"
