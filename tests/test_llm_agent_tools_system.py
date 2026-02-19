@@ -9,8 +9,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from line.events import AgentSendDtmf, AgentSendText, AgentTransferCall
-from line.llm_agent.tools.system import send_dtmf, transfer_call
+from line.events import AgentEndCall, AgentSendDtmf, AgentSendText, AgentTransferCall
+from line.llm_agent.tools.system import EndCallTool, end_call, send_dtmf, transfer_call
+from line.llm_agent.tools.utils import ToolType
 
 # Use anyio for async test support with asyncio backend only
 pytestmark = [pytest.mark.anyio, pytest.mark.parametrize("anyio_backend", ["asyncio"])]
@@ -165,3 +166,76 @@ async def test_send_dtmf_hash(mock_ctx, anyio_backend):
     assert len(events) == 1
     assert isinstance(events[0], AgentSendDtmf)
     assert events[0].button == "#"
+
+
+# =============================================================================
+# Tests: end_call
+# =============================================================================
+
+
+async def test_end_call_default_eagerness(mock_ctx, anyio_backend):
+    """Test that default end_call has normal eagerness."""
+    assert end_call.eagerness == "normal"
+    assert "Say goodbye" in end_call.description
+
+
+async def test_end_call_yields_agent_end_call(mock_ctx, anyio_backend):
+    """Test that end_call yields AgentEndCall event."""
+    events = await collect_events(end_call.func(mock_ctx))
+
+    assert len(events) == 1
+    assert isinstance(events[0], AgentEndCall)
+
+
+async def test_end_call_low_eagerness(mock_ctx, anyio_backend):
+    """Test that low eagerness has cautious description."""
+    low_end_call = end_call(eagerness="low")
+
+    assert low_end_call.eagerness == "low"
+    assert "ONLY use after" in low_end_call.description
+    assert "Never end proactively" in low_end_call.description
+
+
+async def test_end_call_high_eagerness(mock_ctx, anyio_backend):
+    """Test that high eagerness has prompt description."""
+    high_end_call = end_call(eagerness="high")
+
+    assert high_end_call.eagerness == "high"
+    assert "promptly" in high_end_call.description
+
+
+async def test_end_call_custom_description(mock_ctx, anyio_backend):
+    """Test that custom description overrides eagerness-based description."""
+    custom_desc = "Only end when user says 'terminate'"
+    custom_end_call = end_call(description=custom_desc)
+
+    assert custom_end_call.description == custom_desc
+    # Eagerness defaults to normal but description is overridden
+    assert custom_end_call.eagerness == "normal"
+
+
+async def test_end_call_has_function_tool_attributes(mock_ctx, anyio_backend):
+    """Test that EndCallTool has all FunctionTool-compatible attributes."""
+    assert hasattr(end_call, "name")
+    assert hasattr(end_call, "description")
+    assert hasattr(end_call, "parameters")
+    assert hasattr(end_call, "tool_type")
+    assert hasattr(end_call, "is_background")
+    assert hasattr(end_call, "func")
+
+    assert end_call.name == "end_call"
+    assert end_call.tool_type == ToolType.PASSTHROUGH
+    assert end_call.is_background is False
+
+
+async def test_end_call_callable_returns_new_instance(mock_ctx, anyio_backend):
+    """Test that calling end_call() returns a new configured instance."""
+    configured = end_call(eagerness="low")
+
+    # Should be a new instance
+    assert configured is not end_call
+    assert isinstance(configured, EndCallTool)
+
+    # Original should be unchanged
+    assert end_call.eagerness == "normal"
+    assert configured.eagerness == "low"

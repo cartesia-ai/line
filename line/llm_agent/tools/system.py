@@ -135,10 +135,87 @@ class WebSearchTool:
 web_search = WebSearchTool()
 
 
-@passthrough_tool
-async def end_call(ctx: ToolEnv):
-    """End the call. Say goodbye in your response before calling this."""
-    yield AgentEndCall()
+class EndCallTool:
+    """
+    Configurable end_call tool with eagerness levels.
+
+    Controls how readily the LLM will end calls:
+    - "low": Very cautious, confirms multiple times before ending
+    - "normal": Standard behavior, ends when conversation is complete
+    - "high": Ends promptly when user indicates they're done
+
+    Usage:
+        # Default (normal eagerness)
+        LlmAgent(tools=[end_call])
+
+        # Custom eagerness
+        LlmAgent(tools=[end_call(eagerness="low")])
+
+        # Fully custom description
+        LlmAgent(tools=[end_call(description="Only end after user says 'goodbye'")])
+    """
+
+    _DESCRIPTIONS: Dict[str, str] = {
+        "low": (
+            "End the call. ONLY use after: (1) asking if there's anything else you can help with, "
+            "(2) receiving explicit confirmation the user is done, and (3) the user has said goodbye. "
+            "Never end proactively or assume the conversation is over."
+        ),
+        "normal": (
+            "End the call when the user says goodbye, thanks you, or confirms they're done. "
+            "You may briefly ask if there's anything else before ending. Say goodbye before calling."
+        ),
+        "high": (
+            "End the call promptly when the user indicates they're done. "
+            "Don't prolong with follow-up questions."
+        ),
+    }
+
+    def __init__(
+        self,
+        eagerness: Literal["low", "normal", "high"] = "normal",
+        description: Optional[str] = None,
+    ):
+        self.eagerness = eagerness
+        self._custom_description = description
+
+        # FunctionTool-compatible attributes
+        self.name = "end_call"
+        self.description = description if description else self._DESCRIPTIONS[eagerness]
+        self.parameters: Dict[str, Any] = {}  # No parameters (ctx is excluded)
+        self.tool_type = ToolType.PASSTHROUGH
+        self.is_background = False
+
+        # The actual implementation function
+        async def _end_call_impl(ctx: ToolEnv):
+            yield AgentEndCall()
+
+        self.func = _end_call_impl
+
+    def __call__(
+        self,
+        eagerness: Literal["low", "normal", "high"] = "normal",
+        description: Optional[str] = None,
+    ) -> "EndCallTool":
+        """Create a configured EndCallTool instance.
+
+        Args:
+            eagerness: How readily the agent should end calls.
+                - "low": Very cautious, multiple confirmations required
+                - "normal": Standard behavior (default)
+                - "high": Ends promptly when user seems done
+
+            description: Optional custom description that overrides eagerness-based text.
+
+        Returns:
+            A new EndCallTool instance with the specified configuration.
+        """
+        return EndCallTool(eagerness=eagerness, description=description)
+
+
+# Default instance - can be used directly or called to configure
+# Usage: end_call or end_call(eagerness="low")
+end_call = EndCallTool()
 
 
 @passthrough_tool
@@ -264,6 +341,7 @@ def _call_agent(agent: Agent, turn_env, event):
 
 __all__ = [
     "DtmfButton",
+    "EndCallTool",
     "WebSearchTool",
     "web_search",
     "end_call",

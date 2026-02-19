@@ -240,6 +240,47 @@ async def test_web_search(model: str, api_key: str, search_context_size: str = "
     print("✓ Web search test completed")
 
 
+async def test_end_call_eagerness(model: str, api_key: str):
+    """Test end_call tool with different eagerness levels.
+
+    Verifies that the end_call tool can be configured with different
+    eagerness levels that affect the tool description.
+    """
+    print(f"\n{'=' * 60}")
+    print(f"Testing end_call eagerness levels with {model}")
+    print("=" * 60)
+
+    # Test all three eagerness levels
+    for eagerness in ["low", "normal", "high"]:
+        configured_end_call = end_call(eagerness=eagerness)
+        print(f"\n  Eagerness: {eagerness}")
+        print(f"  Description: {configured_end_call.description[:80]}...")
+
+        agent = LlmAgent(
+            model=model,
+            api_key=api_key,
+            tools=[configured_end_call],
+            config=LlmConfig(
+                system_prompt=f"You are a helpful assistant. Eagerness level: {eagerness}",
+            ),
+        )
+
+        # Verify the tool is properly configured by checking resolved tools
+        resolved_tools, _ = agent._resolve_tools(agent._tools)
+        assert len(resolved_tools) == 1, f"Expected 1 tool, got {len(resolved_tools)}"
+        assert resolved_tools[0].name == "end_call", f"Expected 'end_call', got {resolved_tools[0].name}"
+        print(f"  ✓ Tool resolved correctly with eagerness={eagerness}")
+
+    # Test custom description override
+    custom_desc = "Only end after user explicitly says 'terminate session'"
+    custom_end_call = end_call(description=custom_desc)
+    assert custom_end_call.description == custom_desc
+    print(f"\n  Custom description: {custom_desc}")
+    print("  ✓ Custom description override works")
+
+    print("\n✓ end_call eagerness test passed")
+
+
 async def test_function_tools_with_web_search(model: str, api_key: str):
     """Test combining function calling tools with web search.
 
@@ -342,6 +383,7 @@ async def main():
             await test_streaming_text(model, api_key)
             await test_introduction(model, api_key)
             await test_tool_calling(model, api_key)
+            await test_end_call_eagerness(model, api_key)
             await test_web_search(model, api_key)
             await test_web_search(model, api_key, search_context_size="high")
             await test_function_tools_with_web_search(model, api_key)

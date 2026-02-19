@@ -55,7 +55,7 @@ from line.events import (
 from line.llm_agent.config import LlmConfig, _merge_configs, _normalize_config
 from line.llm_agent.provider import LLMProvider, Message, ToolCall
 from line.llm_agent.tools.decorators import loopback_tool
-from line.llm_agent.tools.system import WebSearchTool
+from line.llm_agent.tools.system import EndCallTool, WebSearchTool
 from line.llm_agent.tools.utils import FunctionTool, ToolEnv, ToolType, construct_function_tool
 
 T = TypeVar("T")
@@ -225,13 +225,15 @@ class LlmAgent:
         """Extract the name from a ToolSpec.
 
         Args:
-            tool: A ToolSpec (FunctionTool, WebSearchTool, or Callable)
+            tool: A ToolSpec (FunctionTool, WebSearchTool, EndCallTool, or Callable)
 
         Returns:
             The name of the tool
         """
         if isinstance(tool, WebSearchTool):
             return "web_search"
+        elif isinstance(tool, EndCallTool):
+            return tool.name
         elif isinstance(tool, FunctionTool):
             return tool.name
         else:  # Plain callable
@@ -283,7 +285,7 @@ class LlmAgent:
         for tool in tool_specs:
             if isinstance(tool, WebSearchTool):
                 web_search_tool = tool
-            elif isinstance(tool, FunctionTool):
+            elif isinstance(tool, (EndCallTool, FunctionTool)):
                 function_tools.append(tool)
             else:
                 function_tools.append(loopback_tool(tool))
