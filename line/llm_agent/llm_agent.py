@@ -7,6 +7,7 @@ See README.md for examples and documentation.
 import asyncio
 import inspect
 import json
+import time
 import traceback
 from typing import (
     Any,
@@ -281,6 +282,11 @@ class LlmAgent:
             if self._web_search_options:
                 chat_kwargs["web_search_options"] = self._web_search_options
 
+            # Timing metrics
+            request_start_time = time.perf_counter()
+            first_token_logged = False
+            first_agent_text_logged = False
+
             stream = self._llm.chat(
                 messages,
                 self._tools if self._tools else None,
@@ -288,9 +294,24 @@ class LlmAgent:
             )
             async with stream:
                 async for chunk in stream:
+                    # Track time to first chunk (text or tool call)
+                    if not first_token_logged and (chunk.text or chunk.tool_calls):
+                        first_chunk_ms = (time.perf_counter() - request_start_time) * 1000
+                        logger.info(f"Time to first chunk: {first_chunk_ms:.2f}ms")
+                        yield LogMetric(name="llm_first_chunk_ms", value=first_chunk_ms)
+                        first_token_logged = True
+
                     if chunk.text:
                         output = AgentSendText(text=chunk.text)
                         self._append_to_local_history(output)
+
+                        # Track time to first text
+                        if not first_agent_text_logged:
+                            first_text_ms = (time.perf_counter() - request_start_time) * 1000
+                            logger.info(f"Time to first text: {first_text_ms:.2f}ms")
+                            yield LogMetric(name="llm_first_text_ms", value=first_text_ms)
+                            first_agent_text_logged = True
+
                         yield output
 
                     if chunk.tool_calls:

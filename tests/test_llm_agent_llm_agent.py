@@ -23,6 +23,7 @@ from line.events import (
     CallStarted,
     CustomHistoryEntry,
     HistoryEvent,
+    LogMetric,
     OutputEvent,
     UserTextSent,
 )
@@ -140,10 +141,18 @@ def create_agent_with_mock(
 # =============================================================================
 
 
-async def collect_outputs(agent: LlmAgent, env: TurnEnv, event) -> List[OutputEvent]:
-    """Collect all outputs from agent.process()."""
+async def collect_outputs(
+    agent: LlmAgent, env: TurnEnv, event, include_metrics: bool = False
+) -> List[OutputEvent]:
+    """Collect all outputs from agent.process().
+
+    Args:
+        include_metrics: If False (default), filters out LogMetric events.
+    """
     outputs = []
     async for output in agent.process(env, event):
+        if not include_metrics and isinstance(output, LogMetric):
+            continue
         outputs.append(output)
     return outputs
 
@@ -192,6 +201,50 @@ async def test_simple_text_response(turn_env):
     assert len(mock_llm._recorded_messages[0]) == 1
     assert mock_llm._recorded_messages[0][0].role == "user"
     assert mock_llm._recorded_messages[0][0].content == "Hi"
+
+
+async def test_timing_metrics_emitted(turn_env):
+    """Test that TTFT and first AgentSendText timing metrics are emitted."""
+    responses = [
+        [
+            StreamChunk(text="Hello "),
+            StreamChunk(text="world!"),
+            StreamChunk(is_final=True),
+        ]
+    ]
+
+    agent, mock_llm = create_agent_with_mock(responses)
+
+    # Collect outputs including metrics
+    outputs = await collect_outputs(
+        agent,
+        turn_env,
+        UserTextSent(content="Hi", history=[UserTextSent(content="Hi")]),
+        include_metrics=True,
+    )
+
+    # Should have 4 events: 2 LogMetric + 2 AgentSendText
+    assert len(outputs) == 4
+
+    # First two should be LogMetric events
+    assert isinstance(outputs[0], LogMetric)
+    assert outputs[0].name == "llm_first_chunk_ms"
+    assert isinstance(outputs[0].value, float)
+    assert outputs[0].value >= 0
+
+    assert isinstance(outputs[1], LogMetric)
+    assert outputs[1].name == "llm_first_text_ms"
+    assert isinstance(outputs[1].value, float)
+    assert outputs[1].value >= 0
+
+    # First chunk should be <= first text time (or very close)
+    assert outputs[0].value <= outputs[1].value + 1  # Allow 1ms tolerance
+
+    # Last two should be AgentSendText events
+    assert isinstance(outputs[2], AgentSendText)
+    assert outputs[2].text == "Hello "
+    assert isinstance(outputs[3], AgentSendText)
+    assert outputs[3].text == "world!"
 
 
 # =============================================================================
