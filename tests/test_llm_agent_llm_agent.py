@@ -142,7 +142,7 @@ def create_agent_with_mock(
 
 
 async def collect_outputs(
-    agent: LlmAgent, env: TurnEnv, event, include_metrics: bool = False
+    agent: LlmAgent, env: TurnEnv, event, include_metrics: bool = False, **kwargs
 ) -> List[OutputEvent]:
     """Collect all outputs from agent.process().
 
@@ -150,7 +150,7 @@ async def collect_outputs(
         include_metrics: If False (default), filters out LogMetric events.
     """
     outputs = []
-    async for output in agent.process(env, event):
+    async for output in agent.process(env, event, **kwargs):
         if not include_metrics and isinstance(output, LogMetric):
             continue
         outputs.append(output)
@@ -884,7 +884,7 @@ async def test_loopback_tool_returns_bare_value(turn_env):
 
 
 async def test_plain_function_wrapped_as_loopback_tool():
-    """Test that plain functions passed to LlmAgent are wrapped as loopback tools."""
+    """Test that plain functions are wrapped as loopback tools when resolved."""
     from line.llm_agent.tools.utils import ToolType
 
     # Plain function without any decorator
@@ -892,11 +892,14 @@ async def test_plain_function_wrapped_as_loopback_tool():
         """Search for something."""
         return f"Results for: {query}"
 
-    agent = LlmAgent(model="gpt-4o", api_key="test-key", tools=[my_tool])
+    agent = LlmAgent(model="gpt-4o", api_key="test-key")
+
+    # Resolve tools - this is where wrapping happens
+    resolved_tools, _ = agent._resolve_tools([my_tool])
 
     # Verify the tool was wrapped
-    assert len(agent.tools) == 1
-    tool = agent.tools[0]
+    assert len(resolved_tools) == 1
+    tool = resolved_tools[0]
 
     # Should be a FunctionTool
     assert isinstance(tool, FunctionTool)
@@ -973,7 +976,7 @@ async def test_plain_function_works_as_loopback_tool(turn_env):
 
 
 async def test_mixed_decorated_and_plain_functions(turn_env):
-    """Test that decorated and plain functions can be mixed."""
+    """Test that decorated and plain functions can be mixed and both resolve to loopback tools."""
     from line.llm_agent.tools.utils import ToolType
 
     @loopback_tool
@@ -985,17 +988,20 @@ async def test_mixed_decorated_and_plain_functions(turn_env):
         """A plain tool."""
         return "plain"
 
-    agent = LlmAgent(model="gpt-4o", api_key="test-key", tools=[decorated_tool, plain_tool])
+    agent = LlmAgent(model="gpt-4o", api_key="test-key")
 
-    assert len(agent.tools) == 2
+    # Resolve tools - plain functions get wrapped here
+    resolved_tools, _ = agent._resolve_tools([decorated_tool, plain_tool])
 
-    # Both should be loopback tools
-    assert agent.tools[0].tool_type == ToolType.LOOPBACK
-    assert agent.tools[1].tool_type == ToolType.LOOPBACK
+    assert len(resolved_tools) == 2
+
+    # Both should be loopback tools after resolution
+    assert resolved_tools[0].tool_type == ToolType.LOOPBACK
+    assert resolved_tools[1].tool_type == ToolType.LOOPBACK
 
     # Names should be correct
-    assert agent.tools[0].name == "decorated_tool"
-    assert agent.tools[1].name == "plain_tool"
+    assert resolved_tools[0].name == "decorated_tool"
+    assert resolved_tools[1].name == "plain_tool"
 
 
 # =============================================================================
@@ -2196,3 +2202,68 @@ class TestSetHistoryProcessor:
         system_messages = [m for m in llm_messages if m.role == "system"]
         system_contents = [m.content for m in system_messages]
         assert "Remember: be concise" in system_contents
+
+
+# =============================================================================
+# Tests: Tool and Config Replacement in process()
+# =============================================================================
+
+
+async def test_process_replaces_tools_with_same_name(turn_env):
+    """Test that tools passed to process() replace tools with the same name in self._tools."""
+
+    # Define two versions of the same tool
+    @loopback_tool
+    async def get_weather(ctx, city: Annotated[str, "City name"]) -> str:
+        """Get weather - original version."""
+        return f"Original: 72°F in {city}"
+
+    @loopback_tool
+    async def get_weather_v2(ctx, city: Annotated[str, "City name"]) -> str:
+        """Get weather - override version."""
+        return f"Override: 85°F in {city}"
+
+    # Rename the second tool to match the first one's name
+    get_weather_v2.name = "get_weather"
+
+    # Create agent with the original tool
+    agent, mock_llm = create_agent_with_mock(
+        [
+            [
+                StreamChunk(
+                    tool_calls=[
+                        ToolCall(
+                            id="call_1",
+                            name="get_weather",
+                            arguments='{"city": "NYC"}',
+                            is_complete=True,
+                        )
+                    ]
+                ),
+                StreamChunk(is_final=True),
+            ],
+            [
+                StreamChunk(text="Got it!"),
+                StreamChunk(is_final=True),
+            ],
+        ],
+        tools=[get_weather],
+    )
+
+    # Call process with the override tool
+    outputs = await collect_outputs(
+        agent,
+        turn_env,
+        UserTextSent(
+            content="What's the weather?",
+            history=[UserTextSent(content="What's the weather?")],
+        ),
+        tools=[get_weather_v2],
+    )
+
+    # Find the tool result
+    tool_result = next((o for o in outputs if isinstance(o, AgentToolReturned)), None)
+    assert tool_result is not None
+    # Should use the override version, not the original
+    assert tool_result.result == "Override: 85°F in NYC"
+    assert "Original" not in tool_result.result

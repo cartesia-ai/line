@@ -1,48 +1,50 @@
 """LLM configuration. See README.md for examples."""
 
-from dataclasses import dataclass, field
+import dataclasses
+from dataclasses import dataclass
 from typing import Any, Dict, List, Literal, Optional
 
 from line.voice_agent_app import CallRequest
 
-# Fallback values used when CallRequest doesn't specify them
-FALLBACK_SYSTEM_PROMPT = (
-    "You are a friendly and helpful assistant. Have a natural conversation with the user."
-)
-FALLBACK_INTRODUCTION = "Hello! I'm your AI assistant. How can I help you today?"
+# Sentinel to distinguish "field not passed" from "field explicitly set to None/default".
+_UNSET: Any = object()
 
 
 @dataclass
 class LlmConfig:
     """
-    Configuration for LLM agents. Passed to LiteLLM.
+    Configuration for LLM agents.  Passed to LiteLLM.
+
+    All fields default to ``_UNSET``, meaning "not specified".  Use
+    :func:`_merge_configs` to layer an override config onto a base config and
+    resolve every sentinel to its real default value.
 
     See https://docs.litellm.ai/docs/completion/input for full documentation.
     """
 
     # Agent behavior
-    system_prompt: str = ""
-    introduction: Optional[str] = None  # Sent on CallStarted; None or "" = skip
+    system_prompt: str = _UNSET
+    introduction: Optional[str] = _UNSET  # Sent on CallStarted; None or "" = skip
 
     # Sampling
-    temperature: Optional[float] = None
-    max_tokens: Optional[int] = None
-    top_p: Optional[float] = None
-    stop: Optional[List[str]] = None
-    seed: Optional[int] = None
-    reasoning_effort: Optional[Literal["none", "low", "medium", "high"]] = None
+    temperature: Optional[float] = _UNSET
+    max_tokens: Optional[int] = _UNSET
+    top_p: Optional[float] = _UNSET
+    stop: Optional[List[str]] = _UNSET
+    seed: Optional[int] = _UNSET
+    reasoning_effort: Optional[Literal["none", "low", "medium", "high"]] = _UNSET
 
     # Penalties
-    presence_penalty: Optional[float] = None
-    frequency_penalty: Optional[float] = None
+    presence_penalty: Optional[float] = _UNSET
+    frequency_penalty: Optional[float] = _UNSET
 
     # Resilience
-    num_retries: int = 2
-    fallbacks: Optional[List[str]] = None
-    timeout: Optional[float] = None
+    num_retries: int = _UNSET
+    fallbacks: Optional[List[str]] = _UNSET
+    timeout: Optional[float] = _UNSET
 
     # Provider-specific pass-through
-    extra: Dict[str, Any] = field(default_factory=dict)
+    extra: Dict[str, Any] = _UNSET
 
     @classmethod
     def from_call_request(
@@ -104,3 +106,71 @@ class LlmConfig:
             introduction=introduction,
             **kwargs,
         )
+
+
+# Fallback values used when CallRequest doesn't specify them
+FALLBACK_SYSTEM_PROMPT = (
+    "You are a friendly and helpful assistant. Have a natural conversation with the user."
+)
+FALLBACK_INTRODUCTION = "Hello! I'm your AI assistant. How can I help you today?"
+
+# Real defaults for each LlmConfig field.  Callables (e.g. ``dict``) are
+# invoked to produce a fresh value each time so mutable defaults are safe.
+_FIELD_DEFAULTS: Dict[str, Any] = {
+    "system_prompt": "",
+    "introduction": None,
+    "temperature": None,
+    "max_tokens": None,
+    "top_p": None,
+    "stop": None,
+    "seed": None,
+    "reasoning_effort": None,
+    "presence_penalty": None,
+    "frequency_penalty": None,
+    "num_retries": 2,
+    "fallbacks": None,
+    "timeout": None,
+    "extra": dict,  # callable → invoked each time
+}
+
+
+def _field_default(name: str) -> Any:
+    """Return the real default for *name*, invoking factories as needed."""
+    val = _FIELD_DEFAULTS[name]
+    return val() if callable(val) else val
+
+
+def _merge_configs(base: LlmConfig, override: LlmConfig) -> LlmConfig:
+    """Create a fully-resolved LlmConfig by merging *override* onto *base*.
+
+    For each field the last non-``_UNSET`` value wins, checked in order:
+
+    1. The field's real default (from ``_FIELD_DEFAULTS``)
+    2. *base* value (if explicitly set)
+    3. *override* value (if explicitly set)
+
+    """
+    merged_kwargs = {}
+    for f in dataclasses.fields(LlmConfig):
+        override_val = getattr(override, f.name)
+        base_val = getattr(base, f.name)
+        default_val = _field_default(f.name)
+        if override_val is not _UNSET:
+            merged_kwargs[f.name] = override_val
+        elif base_val is not _UNSET:
+            merged_kwargs[f.name] = base_val
+        else:
+            merged_kwargs[f.name] = default_val
+    return LlmConfig(**merged_kwargs)
+
+
+def _normalize_config(config: LlmConfig) -> LlmConfig:
+    """Normalize an LlmConfig by replacing any remaining ``_UNSET`` with real defaults."""
+    normalized_kwargs = {}
+    for f in dataclasses.fields(LlmConfig):
+        val = getattr(config, f.name)
+        if val is _UNSET:
+            normalized_kwargs[f.name] = _field_default(f.name)
+        else:
+            normalized_kwargs[f.name] = val
+    return LlmConfig(**normalized_kwargs)

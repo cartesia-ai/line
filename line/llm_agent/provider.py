@@ -16,7 +16,7 @@ from typing import Any, AsyncIterator, Dict, List, Optional
 from litellm import acompletion, get_llm_provider, get_supported_openai_params
 from litellm.utils import get_optional_params
 
-from line.llm_agent.config import LlmConfig
+from line.llm_agent.config import LlmConfig, _normalize_config
 from line.llm_agent.schema_converter import function_tools_to_openai
 from line.llm_agent.tools.utils import FunctionTool
 
@@ -64,16 +64,10 @@ class LLMProvider:
         model: str,
         api_key: Optional[str] = None,
         config: Optional[LlmConfig] = None,
-        num_retries: int = 2,
-        fallbacks: Optional[List[str]] = None,
-        timeout: Optional[float] = None,
     ):
         self._model = model
         self._api_key = api_key
-        self._config = config or LlmConfig()
-        self._num_retries = num_retries
-        self._fallbacks = fallbacks
-        self._timeout = timeout
+        self._config = _normalize_config(config or LlmConfig())
 
         supported = get_supported_openai_params(model=model) or []
         self._supports_reasoning_effort = "reasoning_effort" in supported
@@ -95,45 +89,55 @@ class LLMProvider:
         self,
         messages: List[Message],
         tools: Optional[List[FunctionTool]] = None,
+        config: Optional[LlmConfig] = None,
         **kwargs,
     ) -> "_ChatStream":
-        """Start a streaming chat completion."""
-        llm_messages = self._build_messages(messages)
+        """Start a streaming chat completion.
+
+        Args:
+            messages: Conversation messages.
+            tools: Optional function tools available for this call.
+            config: Optional per-call config override. When provided, its values
+                are used for sampling/model parameters and system prompt instead
+                of the config passed at init time.
+        """
+        cfg = config or self._config
+        llm_messages = self._build_messages(messages, cfg)
 
         llm_kwargs: Dict[str, Any] = {
             "model": self._model,
             "messages": llm_messages,
             "stream": True,
-            "num_retries": self._num_retries,
+            "num_retries": cfg.num_retries,
         }
 
         if self._api_key:
             llm_kwargs["api_key"] = self._api_key
-        if self._fallbacks:
-            llm_kwargs["fallbacks"] = self._fallbacks
-        if self._timeout:
-            llm_kwargs["timeout"] = self._timeout
+        if cfg.fallbacks:
+            llm_kwargs["fallbacks"] = cfg.fallbacks
+        if cfg.timeout:
+            llm_kwargs["timeout"] = cfg.timeout
 
         # Add config parameters
-        if self._config.temperature is not None:
-            llm_kwargs["temperature"] = self._config.temperature
-        if self._config.max_tokens is not None:
-            llm_kwargs["max_tokens"] = self._config.max_tokens
-        if self._config.top_p is not None:
-            llm_kwargs["top_p"] = self._config.top_p
-        if self._config.stop:
-            llm_kwargs["stop"] = self._config.stop
-        if self._config.seed is not None:
-            llm_kwargs["seed"] = self._config.seed
-        if self._config.presence_penalty is not None:
-            llm_kwargs["presence_penalty"] = self._config.presence_penalty
-        if self._config.frequency_penalty is not None:
-            llm_kwargs["frequency_penalty"] = self._config.frequency_penalty
+        if cfg.temperature is not None:
+            llm_kwargs["temperature"] = cfg.temperature
+        if cfg.max_tokens is not None:
+            llm_kwargs["max_tokens"] = cfg.max_tokens
+        if cfg.top_p is not None:
+            llm_kwargs["top_p"] = cfg.top_p
+        if cfg.stop:
+            llm_kwargs["stop"] = cfg.stop
+        if cfg.seed is not None:
+            llm_kwargs["seed"] = cfg.seed
+        if cfg.presence_penalty is not None:
+            llm_kwargs["presence_penalty"] = cfg.presence_penalty
+        if cfg.frequency_penalty is not None:
+            llm_kwargs["frequency_penalty"] = cfg.frequency_penalty
         if self._supports_reasoning_effort:
-            llm_kwargs["reasoning_effort"] = self._config.reasoning_effort or self._default_reasoning_effort
+            llm_kwargs["reasoning_effort"] = cfg.reasoning_effort or self._default_reasoning_effort
 
-        if self._config.extra:
-            llm_kwargs.update(self._config.extra)
+        if cfg.extra:
+            llm_kwargs.update(cfg.extra)
 
         if tools:
             llm_kwargs["tools"] = function_tools_to_openai(tools, strict=False)
@@ -142,12 +146,15 @@ class LLMProvider:
 
         return _ChatStream(llm_kwargs)
 
-    def _build_messages(self, messages: List[Message]) -> List[Dict[str, Any]]:
+    def _build_messages(
+        self, messages: List[Message], config: Optional[LlmConfig] = None
+    ) -> List[Dict[str, Any]]:
         """Convert Message objects to LiteLLM format."""
+        cfg = config or self._config
         result = []
 
-        if self._config.system_prompt:
-            result.append({"role": "system", "content": self._config.system_prompt})
+        if cfg.system_prompt:
+            result.append({"role": "system", "content": cfg.system_prompt})
 
         for msg in messages:
             llm_msg: Dict[str, Any] = {"role": msg.role}
