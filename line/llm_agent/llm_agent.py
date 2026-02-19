@@ -559,12 +559,12 @@ class LlmAgent:
         Merges input_history (canonical) with local_history using the following rules:
         1. Input history is the source of truth for all events
         2. Local history events are interpolated based on which input event triggered them
-        3. Observable events are matched between local and input history
-        4. Unobservable events (tool calls, custom text) are interpolated relative to observables
+        3. Matchable events are matched between local and input history
+        4. Non-matchable events (tool calls, custom text) are interpolated relative to matchables
         5. Tool calls without matching results get a "pending" result
 
         The full_history contains HistoryEvent items:
-        - InputEvent for events from input_history (observable OutputEvents converted to InputEvent
+        - InputEvent for events from input_history (matchable OutputEvents converted to InputEvent
           counterparts)
         - AgentToolCalled/AgentToolReturned for tool interactions from local_history
         - CustomHistoryEntry for injected history entries from local_history
@@ -853,18 +853,25 @@ def _build_full_history(
     Returns:
         List of HistoryEvent items (InputEvent | AgentToolCalled | AgentToolReturned | CustomHistoryEntry).
 
-    For each input event, if it's a trigger (has responsive local events), load a queue
-    of those local events. Non-observable input events emit directly. Observable input
-    events are matched against the queue, with non-observable locals (tool calls, custom
-    entries) drained alongside their matched observable.
+    We have certain events that are "matchable". They show up in both input and local history, 
+    but the input version is considered "canonical" 
+    (it's what actually occured in the conversation)
 
     Invariants:
     1. Input history ordering is preserved exactly
-    2. Every local non-observable event appears exactly once in output
-    3. Non-observable locals appear after their triggering input event
-    4. Non-observable locals maintain their original relative order
-    5. Observable events use canonical (input) version
-    6. Unmatched local observables are dropped
+    2. Every local non-matchable event appears exactly once in output
+    3. Matchable locals appear after their triggering input event
+    4. Non-matchable locals maintain their original relative order
+    5. Matchable events use canonical (input) version
+    6. Unmatched local matchables are dropped
+
+    Algorithm:
+    1) For each input event, if it triggered any output events, load a queue
+    of those local output events. 
+    2) Unmatchable input events are output directly. 
+    3) Matchable input events are matched against the queue, with non-matchable locals (tool calls, custom
+    entries) drained alongside their matched matchable.
+
     """
     # Split local history into prior and current based on event_id
     prior_local = [(eid, e) for eid, e in local_history if eid != current_event_id]
@@ -882,18 +889,20 @@ def _build_full_history(
     queue: List[_LocalEvent] = []
 
     for input_evt in input_history:
-        # If this input event is a trigger, flush old queue and load new one
+        # If this input event generated any output events
+        # flush old output events (they are semantically "prior" to this input event)
+        # and load new queue of output events triggered by this input event
         if input_evt.event_id in local_by_event_id:
             result.extend(_flush_queue(queue))
             local_slice = local_by_event_id[input_evt.event_id]
             queue = _concat_contiguous_agent_send_text(local_slice)
 
-        if not _is_input_observable(input_evt):
-            # Non-observable input (UserTextSent, etc.) — emit directly
+        if not _is_input_matchable(input_evt):
+            # Non-matchable input (UserTextSent, etc.) — emit directly
             result.append(input_evt)
         else:
-            # Observable input — match against queue
-            emitted, queue = _match_observable(input_evt, queue)
+            # Matchable input — match against queue
+            emitted, queue = _match_matchable(input_evt, queue)
             result.extend(emitted)
 
     # Flush any remaining locals from the last trigger
@@ -902,40 +911,40 @@ def _build_full_history(
     # Append current-turn events (not yet observed, use local version)
     result.extend(current_local)
 
-    # Convert observable OutputEvents to InputEvent counterparts
+    # Convert matchable OutputEvents to InputEvent counterparts
     return [h for e in result if (h := _to_history_event(e)) is not None]
 
 
 def _flush_queue(queue: List[_LocalEvent]) -> List[_LocalEvent]:
-    """Return non-observable events from queue, discarding unmatched observables."""
-    return [e for e in queue if not _is_local_observable(e)]
+    """Return non-matchable events from queue, discarding unmatched matchables."""
+    return [e for e in queue if not _is_local_matchable(e)]
 
 
-def _split_leading_non_observables(
+def _split_leading_non_matchables(
     queue: List[_LocalEvent],
 ) -> tuple[List[_LocalEvent], List[_LocalEvent]]:
-    """Split queue into leading non-observables and the rest.
+    """Split queue into leading non-matchables and the rest.
 
     Returns:
-        (non_observables, remaining) where remaining starts at the first observable
+        (non_matchables, remaining) where remaining starts at the first matchable
         or is empty if none exist.
     """
     for i, event in enumerate(queue):
-        if _is_local_observable(event):
+        if _is_local_matchable(event):
             return queue[:i], queue[i:]
     return queue, []
 
 
-def _match_observable(
+def _match_matchable(
     input_evt: InputEvent,
     queue: List[_LocalEvent],
 ) -> tuple[List[Union[InputEvent, _LocalEvent]], List[_LocalEvent]]:
-    """Match an observable input event against the local queue.
+    """Match a matchable input event against the local queue.
 
-    Splits off leading non-observables, then tries to match the head observable.
-    On match, emits canonical input version and splits off trailing non-observables.
+    Splits off leading non-matchables, then tries to match the head matchable.
+    On match, emits canonical input version and splits off trailing non-matchables.
     On prefix match, also prepends the suffix to the remaining queue.
-    On no match, discards the local observable and retries.
+    On no match, discards the local matchable and retries.
     If queue exhausted with no match, emits input as-is.
 
     Returns:
@@ -945,7 +954,7 @@ def _match_observable(
     emitted: List[Union[InputEvent, _LocalEvent]] = []
 
     while remaining:
-        non_obs, rest = _split_leading_non_observables(remaining)
+        non_obs, rest = _split_leading_non_matchables(remaining)
         emitted.extend(non_obs)
 
         if not rest:
@@ -957,14 +966,14 @@ def _match_observable(
         if match_result is not None:
             matched_input, suffix_event = match_result
             emitted.append(matched_input)
-            # Split off non-observables that follow the matched observable
-            trailing_non_obs, after = _split_leading_non_observables(rest[1:])
+            # Split off non-matchables that follow the matched matchable
+            trailing_non_obs, after = _split_leading_non_matchables(rest[1:])
             emitted.extend(trailing_non_obs)
             # On prefix match, prepend suffix to remaining queue
             remaining = ([suffix_event] + after) if suffix_event is not None else after
             return emitted, remaining
 
-        # No match — discard this local observable and try next
+        # No match — discard this local matchable and try next
         remaining = rest[1:]
 
     # Queue exhausted with no match — emit input as-is
@@ -1014,12 +1023,12 @@ def _validate_processed_history(history: Any) -> List[HistoryEvent]:
 def _to_history_event(event: Any) -> Optional[HistoryEvent]:
     """Convert an event to a HistoryEvent.
 
-    Observable OutputEvents are converted to their InputEvent counterparts.
+    Matchable OutputEvents are converted to their InputEvent counterparts.
     Non-history OutputEvents (LogMetric, etc.) are filtered out (returns None).
     All other events (InputEvent, AgentToolCalled, AgentToolReturned, CustomHistoryEntry)
     pass through unchanged.
     """
-    # Observable OutputEvents → convert to InputEvent counterparts
+    # Matchable OutputEvents → convert to InputEvent counterparts
     if isinstance(event, AgentSendText):
         return AgentTextSent(content=event.text)
     elif isinstance(event, AgentSendDtmf):
@@ -1055,7 +1064,10 @@ def _to_history_event(event: Any) -> Optional[HistoryEvent]:
 
 
 def _concat_contiguous_agent_send_text(local_history: List[_LocalEvent]) -> List[_LocalEvent]:
-    """Concatenate contiguous AgentSendText events in local history."""
+    """
+    Since the LLM streams output, we likely will have many AgentSendText events that are part of the same logical "message" from the LLM.
+    This concats them into a single AgentSendText event for easier matching to the input history, which only has one AgentTextSent per LLM message.
+    """
     if not local_history:
         return []
     result: List[_LocalEvent] = []
@@ -1070,36 +1082,36 @@ def _concat_contiguous_agent_send_text(local_history: List[_LocalEvent]) -> List
     return result
 
 
-# Observable OutputEvent types - these can be matched between local and input history
+# Matchable OutputEvent types - these can be matched between local and input history
 # Corresponds to events that the external system tracks/observes
-OBSERVABLE_OUTPUT_EVENT_TYPES = (
+MATCHABLE_OUTPUT_EVENT_TYPES = (
     AgentSendDtmf,  # => AgentDtmfSent
     AgentSendText,  # => AgentTextSent
     AgentEndCall,  # => CallEnded
 )
 
 
-def _is_local_observable(event: _LocalEvent) -> bool:
-    """Check if a local event is observable (can be matched to input history)."""
-    return isinstance(event, OBSERVABLE_OUTPUT_EVENT_TYPES)
+def _is_local_matchable(event: _LocalEvent) -> bool:
+    """Check if a local event is matchable (can be matched to input history)."""
+    return isinstance(event, MATCHABLE_OUTPUT_EVENT_TYPES)
 
 
-OBSERVABLE_INPUT_EVENT_TYPES = (
+MATCHABLE_INPUT_EVENT_TYPES = (
     AgentDtmfSent,
     AgentTextSent,
     CallEnded,
 )
 
 
-def _is_input_observable(event: InputEvent) -> bool:
-    """Check if an InputEvent is observable (can be matched to local history)."""
-    return isinstance(event, OBSERVABLE_INPUT_EVENT_TYPES)
+def _is_input_matchable(event: InputEvent) -> bool:
+    """Check if an InputEvent is matchable (can be matched to local history)."""
+    return isinstance(event, MATCHABLE_INPUT_EVENT_TYPES)
 
 
 def _try_match_events(
     local: _LocalEvent, input_evt: InputEvent
 ) -> Optional[tuple[InputEvent, Optional[_LocalEvent]]]:
-    """Try to match a local observable event to an input observable event.
+    """Try to match a local matchable event to an input matchable event.
 
     Returns:
         None: No match
