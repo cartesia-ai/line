@@ -16,7 +16,7 @@ from typing import Any, AsyncIterator, Dict, List, Optional
 from litellm import acompletion, get_llm_provider, get_supported_openai_params
 from litellm.utils import get_optional_params
 
-from line.llm_agent.config import LlmConfig, _normalize_config  
+from line.llm_agent.config import LlmConfig, _normalize_config
 from line.llm_agent.schema_converter import function_tools_to_openai
 from line.llm_agent.tools.utils import FunctionTool
 
@@ -64,16 +64,10 @@ class LLMProvider:
         model: str,
         api_key: Optional[str] = None,
         config: Optional[LlmConfig] = None,
-        num_retries: int = 2,
-        fallbacks: Optional[List[str]] = None,
-        timeout: Optional[float] = None,
     ):
         self._model = model
         self._api_key = api_key
         self._config = _normalize_config(config or LlmConfig())
-        self._num_retries = num_retries
-        self._fallbacks = fallbacks
-        self._timeout = timeout
 
         supported = get_supported_openai_params(model=model) or []
         self._supports_reasoning_effort = "reasoning_effort" in supported
@@ -114,15 +108,15 @@ class LLMProvider:
             "model": self._model,
             "messages": llm_messages,
             "stream": True,
-            "num_retries": self._num_retries,
+            "num_retries": cfg.num_retries,
         }
 
         if self._api_key:
             llm_kwargs["api_key"] = self._api_key
-        if self._fallbacks:
-            llm_kwargs["fallbacks"] = self._fallbacks
-        if self._timeout:
-            llm_kwargs["timeout"] = self._timeout
+        if cfg.fallbacks:
+            llm_kwargs["fallbacks"] = cfg.fallbacks
+        if cfg.timeout:
+            llm_kwargs["timeout"] = cfg.timeout
 
         # Add config parameters
         if cfg.temperature is not None:

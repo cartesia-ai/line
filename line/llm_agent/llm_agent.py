@@ -117,9 +117,6 @@ class LlmAgent:
             model=self._model,
             api_key=self._api_key,
             config=self._config,
-            num_retries=self._config.num_retries,
-            fallbacks=self._config.fallbacks,
-            timeout=self._config.timeout,
         )
 
         self._introduction_sent = False

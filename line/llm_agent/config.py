@@ -163,6 +163,7 @@ def _merge_configs(base: LlmConfig, override: LlmConfig) -> LlmConfig:
             merged_kwargs[f.name] = default_val
     return LlmConfig(**merged_kwargs)
 
+
 def _normalize_config(config: LlmConfig) -> LlmConfig:
     """Normalize an LlmConfig by replacing any remaining ``_UNSET`` with real defaults."""
     normalized_kwargs = {}
