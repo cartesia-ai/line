@@ -14,6 +14,7 @@ from line.events import (
     AgentSendDtmf,
     AgentSendText,
     AgentTransferCall,
+    AgentUpdateCall,
     CallStarted,
 )
 from line.llm_agent.tools.decorators import passthrough_tool
@@ -21,6 +22,18 @@ from line.llm_agent.tools.utils import FunctionTool, ToolEnv, ToolType, construc
 
 # Valid DTMF buttons
 DtmfButton = Literal["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "*", "#"]
+
+
+@dataclass
+class UpdateCallConfig:
+    """Configuration for updating call settings during handoff.
+
+    Used with agent_as_handoff to change voice or other settings when
+    transferring to a new agent.
+    """
+
+    voice_id: Optional[str] = None
+    pronunciation_dict_id: Optional[str] = None
 
 
 @dataclass
@@ -180,6 +193,7 @@ def agent_as_handoff(
     agent: Agent,
     *,
     handoff_message: Optional[str] = None,
+    update_call: Optional[UpdateCallConfig] = None,
     name: Optional[str] = None,
     description: Optional[str] = None,
 ) -> FunctionTool:
@@ -192,6 +206,7 @@ def agent_as_handoff(
     Args:
         agent: The agent to hand off to. Can be an AgentCallable or AgentClass.
         handoff_message: Optional message to send before handoff (e.g., "Transferring you now...").
+        update_call: Optional config to update call settings (voice, pronunciation) before handoff.
         name: Tool name for LLM function calling. Defaults to agent class name or "transfer_to_agent".
         description: Tool description. Defaults to a generic handoff description.
 
@@ -210,6 +225,7 @@ def agent_as_handoff(
                 agent_as_handoff(
                     spanish_agent,
                     handoff_message="Transferring you to our Spanish-speaking agent...",
+                    update_call=UpdateCallConfig(voice_id="spanish-voice-id"),
                     name="transfer_to_spanish",
                     description="Transfer to a Spanish-speaking agent when requested.",
                 ),
@@ -233,6 +249,13 @@ def agent_as_handoff(
             # Send handoff message if provided
             if handoff_message:
                 yield AgentSendText(text=handoff_message)
+
+            # Update call settings (e.g., voice) if provided
+            if update_call is not None:
+                yield AgentUpdateCall(
+                    voice_id=update_call.voice_id,
+                    pronunciation_dict_id=update_call.pronunciation_dict_id,
+                )
 
             # Trigger the agent's introduction via CallStarted
             async for output in _call_agent(agent, ctx.turn_env, CallStarted()):
@@ -264,6 +287,7 @@ def _call_agent(agent: Agent, turn_env, event):
 
 __all__ = [
     "DtmfButton",
+    "UpdateCallConfig",
     "WebSearchTool",
     "web_search",
     "end_call",
