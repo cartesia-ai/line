@@ -156,6 +156,11 @@ class EndCallTool:
     """
     Configurable end_call tool with optional message and custom description.
 
+    Args:
+        description: Description that replaces the default. \
+            Use this to add additional instructions for when to end the call.
+        message: Farewell message to the user before ending the call.
+
     Usage:
         # Default behavior
         LlmAgent(tools=[end_call])
