@@ -4,6 +4,7 @@ Tests for built-in tools.
 uv run pytest tests/test_tools.py -v
 """
 
+import logging
 from typing import List
 from unittest.mock import MagicMock
 
@@ -249,3 +250,65 @@ async def test_end_call_callable_returns_new_instance(mock_ctx, anyio_backend):
     # Original should be unchanged
     assert end_call.eagerness == "normal"
     assert configured.eagerness == "low"
+
+
+async def test_end_call_invalid_eagerness_in_init(mock_ctx, anyio_backend, caplog):
+    """Test that __init__ logs warning and defaults to normal for invalid eagerness values."""
+    with caplog.at_level(logging.WARNING):
+        tool = EndCallTool(eagerness="medium")  # type: ignore
+
+    # Should log a warning
+    assert "Invalid eagerness value 'medium'" in caplog.text
+    assert "'low', 'normal', 'high'" in caplog.text
+    assert "Defaulting to 'normal'" in caplog.text
+
+    # Should default to normal
+    assert tool.eagerness == "normal"
+    assert tool.description == EndCallTool._DESCRIPTIONS["normal"]
+
+
+async def test_end_call_invalid_eagerness_in_call(mock_ctx, anyio_backend, caplog):
+    """Test that __call__ logs warning and defaults to normal for invalid eagerness values."""
+    with caplog.at_level(logging.WARNING):
+        tool = end_call(eagerness="super_high")  # type: ignore
+
+    # Should log a warning
+    assert "Invalid eagerness value 'super_high'" in caplog.text
+
+    # Should default to normal
+    assert tool.eagerness == "normal"
+    assert tool.description == EndCallTool._DESCRIPTIONS["normal"]
+
+
+async def test_end_call_typo_eagerness(mock_ctx, anyio_backend, caplog):
+    """Test that common typos in eagerness log warning and default to normal."""
+    with caplog.at_level(logging.WARNING):
+        tool = EndCallTool(eagerness="hgih")  # type: ignore (typo of "high")
+
+    # Should log a warning
+    assert "Invalid eagerness value 'hgih'" in caplog.text
+
+    # Should default to normal
+    assert tool.eagerness == "normal"
+
+
+async def test_end_call_valid_eagerness_with_custom_description(mock_ctx, anyio_backend):
+    """Test that validation passes when description overrides eagerness."""
+    # Even with valid eagerness, custom description should work
+    custom_tool = EndCallTool(eagerness="low", description="Custom end call behavior")
+    assert custom_tool.description == "Custom end call behavior"
+    assert custom_tool.eagerness == "low"
+
+
+async def test_end_call_invalid_eagerness_with_custom_description(mock_ctx, anyio_backend, caplog):
+    """Test that validation still warns even when custom description is provided."""
+    # Validation should happen before description is used
+    with caplog.at_level(logging.WARNING):
+        tool = EndCallTool(eagerness="invalid", description="Custom description")  # type: ignore
+
+    # Should log a warning
+    assert "Invalid eagerness value 'invalid'" in caplog.text
+
+    # Should use custom description but eagerness should be defaulted to normal
+    assert tool.description == "Custom description"
+    assert tool.eagerness == "normal"

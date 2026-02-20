@@ -5,6 +5,7 @@ Provides end_call, send_dtmf, transfer_call, and web_search tools.
 """
 
 from dataclasses import dataclass, field
+import logging
 from typing import Annotated, Any, Dict, Literal, Optional
 
 from line.agent import Agent
@@ -22,6 +23,9 @@ from line.llm_agent.tools.utils import FunctionTool, ToolEnv, ToolType, construc
 
 # Valid DTMF buttons
 DtmfButton = Literal["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "*", "#"]
+
+# Logger for system tools
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -190,6 +194,14 @@ class EndCallTool:
         eagerness: Literal["low", "normal", "high"] = "normal",
         description: Optional[str] = None,
     ):
+        # Validate eagerness parameter at runtime and default to "normal" if invalid
+        if eagerness not in self._DESCRIPTIONS:
+            valid_values = ", ".join(f"'{k}'" for k in self._DESCRIPTIONS.keys())
+            logger.warning(
+                f"Invalid eagerness value '{eagerness}'. Must be one of: {valid_values}. "
+                f"Defaulting to 'normal'."
+            )
+            eagerness = "normal"
         self.eagerness = eagerness
         self.description = description if description else self._DESCRIPTIONS[eagerness]
         self._function_tool = self._create_function_tool()
@@ -228,12 +240,14 @@ class EndCallTool:
                 - "low": Very cautious, multiple confirmations required
                 - "normal": Standard behavior (default)
                 - "high": Ends promptly when user seems done
+                If an invalid value is provided, a warning is logged and "normal" is used.
 
             description: Optional custom description that overrides eagerness-based text.
 
         Returns:
             A new EndCallTool instance with the specified configuration.
         """
+        # Validation happens in __init__
         return EndCallTool(eagerness=eagerness, description=description)
 
 
