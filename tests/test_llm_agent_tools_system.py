@@ -4,13 +4,15 @@ Tests for built-in tools.
 uv run pytest tests/test_tools.py -v
 """
 
+import logging
 from typing import List
 from unittest.mock import MagicMock
 
 import pytest
 
-from line.events import AgentSendDtmf, AgentSendText, AgentTransferCall
-from line.llm_agent.tools.system import send_dtmf, transfer_call
+from line.events import AgentEndCall, AgentSendDtmf, AgentSendText, AgentTransferCall
+from line.llm_agent.tools.system import EndCallTool, end_call, send_dtmf, transfer_call
+from line.llm_agent.tools.utils import ToolType
 
 # Use anyio for async test support with asyncio backend only
 pytestmark = [pytest.mark.anyio, pytest.mark.parametrize("anyio_backend", ["asyncio"])]
@@ -165,3 +167,148 @@ async def test_send_dtmf_hash(mock_ctx, anyio_backend):
     assert len(events) == 1
     assert isinstance(events[0], AgentSendDtmf)
     assert events[0].button == "#"
+
+
+# =============================================================================
+# Tests: end_call
+# =============================================================================
+
+
+async def test_end_call_default_eagerness(mock_ctx, anyio_backend):
+    """Test that default end_call has normal eagerness."""
+    assert end_call.eagerness == "normal"
+    assert "Say goodbye" in end_call.description
+
+
+async def test_end_call_yields_agent_end_call(mock_ctx, anyio_backend):
+    """Test that end_call yields AgentEndCall event."""
+    func_tool = end_call.as_function_tool()
+    events = await collect_events(func_tool.func(mock_ctx))
+
+    assert len(events) == 1
+    assert isinstance(events[0], AgentEndCall)
+
+
+async def test_end_call_low_eagerness(mock_ctx, anyio_backend):
+    """Test that low eagerness has cautious description."""
+    low_end_call = end_call(eagerness="low")
+
+    assert low_end_call.eagerness == "low"
+    assert "MUST first ask" in low_end_call.description
+    assert "Never assume" in low_end_call.description
+
+
+async def test_end_call_high_eagerness(mock_ctx, anyio_backend):
+    """Test that high eagerness has prompt description."""
+    high_end_call = end_call(eagerness="high")
+
+    assert high_end_call.eagerness == "high"
+    assert "promptly" in high_end_call.description
+    assert "Don't ask follow-up" in high_end_call.description
+
+
+async def test_end_call_custom_description(mock_ctx, anyio_backend):
+    """Test that custom description overrides eagerness-based description."""
+    custom_desc = "Only end when user says 'terminate'"
+    custom_end_call = end_call(description=custom_desc)
+
+    assert custom_end_call.description == custom_desc
+    # Eagerness defaults to normal but description is overridden
+    assert custom_end_call.eagerness == "normal"
+
+
+async def test_end_call_has_function_tool_attributes(mock_ctx, anyio_backend):
+    """Test that EndCallTool.as_function_tool() returns a proper FunctionTool."""
+    func_tool = end_call.as_function_tool()
+
+    # Check it's a real FunctionTool with all required attributes
+    assert hasattr(func_tool, "name")
+    assert hasattr(func_tool, "description")
+    assert hasattr(func_tool, "parameters")
+    assert hasattr(func_tool, "tool_type")
+    assert hasattr(func_tool, "is_background")
+    assert hasattr(func_tool, "func")
+
+    assert func_tool.name == "end_call"
+    assert func_tool.tool_type == ToolType.PASSTHROUGH
+    assert func_tool.is_background is False
+
+    # Verify it's actually a FunctionTool instance (not duck-typed)
+    from line.llm_agent.tools.utils import FunctionTool
+
+    assert isinstance(func_tool, FunctionTool)
+
+
+async def test_end_call_callable_returns_new_instance(mock_ctx, anyio_backend):
+    """Test that calling end_call() returns a new configured instance."""
+    configured = end_call(eagerness="low")
+
+    # Should be a new instance
+    assert configured is not end_call
+    assert isinstance(configured, EndCallTool)
+
+    # Original should be unchanged
+    assert end_call.eagerness == "normal"
+    assert configured.eagerness == "low"
+
+
+async def test_end_call_invalid_eagerness_in_init(mock_ctx, anyio_backend, caplog):
+    """Test that __init__ logs warning and defaults to normal for invalid eagerness values."""
+    with caplog.at_level(logging.WARNING):
+        tool = EndCallTool(eagerness="medium")  # type: ignore
+
+    # Should log a warning
+    assert "Invalid eagerness value 'medium'" in caplog.text
+    assert "'low', 'normal', 'high'" in caplog.text
+    assert "Defaulting to 'normal'" in caplog.text
+
+    # Should default to normal
+    assert tool.eagerness == "normal"
+    assert tool.description == EndCallTool._DESCRIPTIONS["normal"]
+
+
+async def test_end_call_invalid_eagerness_in_call(mock_ctx, anyio_backend, caplog):
+    """Test that __call__ logs warning and defaults to normal for invalid eagerness values."""
+    with caplog.at_level(logging.WARNING):
+        tool = end_call(eagerness="super_high")  # type: ignore
+
+    # Should log a warning
+    assert "Invalid eagerness value 'super_high'" in caplog.text
+
+    # Should default to normal
+    assert tool.eagerness == "normal"
+    assert tool.description == EndCallTool._DESCRIPTIONS["normal"]
+
+
+async def test_end_call_typo_eagerness(mock_ctx, anyio_backend, caplog):
+    """Test that common typos in eagerness log warning and default to normal."""
+    with caplog.at_level(logging.WARNING):
+        tool = EndCallTool(eagerness="hgih")  # type: ignore (typo of "high")
+
+    # Should log a warning
+    assert "Invalid eagerness value 'hgih'" in caplog.text
+
+    # Should default to normal
+    assert tool.eagerness == "normal"
+
+
+async def test_end_call_valid_eagerness_with_custom_description(mock_ctx, anyio_backend):
+    """Test that validation passes when description overrides eagerness."""
+    # Even with valid eagerness, custom description should work
+    custom_tool = EndCallTool(eagerness="low", description="Custom end call behavior")
+    assert custom_tool.description == "Custom end call behavior"
+    assert custom_tool.eagerness == "low"
+
+
+async def test_end_call_invalid_eagerness_with_custom_description(mock_ctx, anyio_backend, caplog):
+    """Test that validation still warns even when custom description is provided."""
+    # Validation should happen before description is used
+    with caplog.at_level(logging.WARNING):
+        tool = EndCallTool(eagerness="invalid", description="Custom description")  # type: ignore
+
+    # Should log a warning
+    assert "Invalid eagerness value 'invalid'" in caplog.text
+
+    # Should use custom description but eagerness should be defaulted to normal
+    assert tool.description == "Custom description"
+    assert tool.eagerness == "normal"

@@ -5,6 +5,7 @@ Provides end_call, send_dtmf, transfer_call, and web_search tools.
 """
 
 from dataclasses import dataclass, field
+import logging
 from typing import Annotated, Any, Dict, Literal, Optional
 
 from line.agent import Agent
@@ -22,6 +23,9 @@ from line.llm_agent.tools.utils import FunctionTool, ToolEnv, ToolType, construc
 
 # Valid DTMF buttons
 DtmfButton = Literal["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "*", "#"]
+
+# Logger for system tools
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -148,10 +152,108 @@ class WebSearchTool:
 web_search = WebSearchTool()
 
 
-@passthrough_tool
-async def end_call(ctx: ToolEnv):
-    """End the call. Say goodbye in your response before calling this."""
-    yield AgentEndCall()
+class EndCallTool:
+    """
+    Configurable end_call tool with eagerness levels.
+
+    Controls how readily the LLM will end calls:
+    - "low": Very cautious, confirms multiple times before ending
+    - "normal": Standard behavior, ends when conversation is complete
+    - "high": Ends promptly when user indicates they're done
+
+    Usage:
+        # Default (normal eagerness)
+        LlmAgent(tools=[end_call])
+
+        # Custom eagerness
+        LlmAgent(tools=[end_call(eagerness="low")])
+
+        # Fully custom description
+        LlmAgent(tools=[end_call(description="Only end after user says 'goodbye'")])
+    """
+
+    _DESCRIPTIONS: Dict[str, str] = {
+        "low": (
+            "End the call. Before ending, you MUST first ask 'Is there anything else I can help you with?' "
+            "and wait for the user to explicitly confirm they have no more questions. "
+            "Even if the user says goodbye, ask if there's anything else first. "
+            "Never assume the conversation is over."
+        ),
+        "normal": (
+            "End the call when the user says goodbye, thanks you, or confirms they're done. "
+            "Say goodbye before calling."
+        ),
+        "high": (
+            "End the call promptly when the user indicates they're done or says goodbye. "
+            "Say goodbye before calling. Don't ask follow-up questions like 'Is there anything else?'"
+        ),
+    }
+
+    def __init__(
+        self,
+        eagerness: Literal["low", "normal", "high"] = "normal",
+        description: Optional[str] = None,
+    ):
+        # Validate eagerness parameter at runtime and default to "normal" if invalid
+        if eagerness not in self._DESCRIPTIONS:
+            valid_values = ", ".join(f"'{k}'" for k in self._DESCRIPTIONS.keys())
+            logger.warning(
+                f"Invalid eagerness value '{eagerness}'. Must be one of: {valid_values}. "
+                f"Defaulting to 'normal'."
+            )
+            eagerness = "normal"
+        self.eagerness = eagerness
+        self.description = description if description else self._DESCRIPTIONS[eagerness]
+        self._function_tool = self._create_function_tool()
+
+    @property
+    def name(self) -> str:
+        """Return the tool name."""
+        return "end_call"
+
+    def _create_function_tool(self) -> FunctionTool:
+        """Create the underlying FunctionTool with the configured description."""
+
+        async def _end_call_impl(ctx: ToolEnv):
+            yield AgentEndCall()
+
+        return construct_function_tool(
+            _end_call_impl,
+            name="end_call",
+            description=self.description,
+            tool_type=ToolType.PASSTHROUGH,
+        )
+
+    def as_function_tool(self) -> FunctionTool:
+        """Return the underlying FunctionTool for use in tool resolution."""
+        return self._function_tool
+
+    def __call__(
+        self,
+        eagerness: Literal["low", "normal", "high"] = "normal",
+        description: Optional[str] = None,
+    ) -> "EndCallTool":
+        """Create a configured EndCallTool instance.
+
+        Args:
+            eagerness: How readily the agent should end calls.
+                - "low": Very cautious, multiple confirmations required
+                - "normal": Standard behavior (default)
+                - "high": Ends promptly when user seems done
+                If an invalid value is provided, a warning is logged and "normal" is used.
+
+            description: Optional custom description that overrides eagerness-based text.
+
+        Returns:
+            A new EndCallTool instance with the specified configuration.
+        """
+        # Validation happens in __init__
+        return EndCallTool(eagerness=eagerness, description=description)
+
+
+# Default instance - can be used directly or called to configure
+# Usage: end_call or end_call(eagerness="low")
+end_call = EndCallTool()
 
 
 @passthrough_tool
@@ -287,6 +389,7 @@ def _call_agent(agent: Agent, turn_env, event):
 
 __all__ = [
     "DtmfButton",
+    "EndCallTool",
     "UpdateCallConfig",
     "WebSearchTool",
     "web_search",
