@@ -29,6 +29,8 @@ from line._harness_types import (
     AgentSpeechInput,
     AgentStateInput,
     ConfigOutput,
+    CustomEventOutput,
+    CustomInput,
     DTMFInput,
     DTMFOutput,
     EndCallOutput,
@@ -48,6 +50,7 @@ from line.agent import Agent, AgentSpec, EventFilter, TurnEnv
 from line.events import (
     AgentDtmfSent,
     AgentEndCall,
+    AgentSendCustom,
     AgentSendDtmf,
     AgentSendText,
     AgentTextSent,
@@ -63,6 +66,7 @@ from line.events import (
     LogMessage,
     LogMetric,
     OutputEvent,
+    UserCustomSent,
     UserDtmfSent,
     UserTextSent,
     UserTurnEnded,
@@ -471,6 +475,9 @@ class ConversationRunner:
         elif isinstance(message, DTMFInput):
             return UserDtmfSent(button=message.button)
 
+        elif isinstance(message, CustomInput):
+            return UserCustomSent(metadata=message.metadata)
+
         raise ValueError(f"Unhandled input message type: {type(message).__name__}")
 
     def _turn_content(
@@ -541,6 +548,9 @@ class ConversationRunner:
         elif isinstance(processed_event, AgentTurnEnded):
             event = AgentTurnEnded(history=processed_history, **base_data)
             logger.info("-> 🤖🔇 Agent stopped speaking")
+        elif isinstance(processed_event, UserCustomSent):
+            event = UserCustomSent(history=processed_history, **base_data)
+            logger.debug(f"-> 📦 Custom event with metadata: {event.metadata}")
         else:
             raise ValueError(f"Unknown event type: {type(processed_event).__name__}")
 
@@ -587,6 +597,9 @@ class ConversationRunner:
                     pronunciation_dict_id=event.pronunciation_dict_id,
                 ),
             )
+        if isinstance(event, AgentSendCustom):
+            logger.debug(f"<- 📦 Custom event with metadata: {event.metadata}")
+            return CustomEventOutput(metadata=event.metadata)
 
         return ErrorOutput(content=f"Unhandled output event type: {type(event).__name__}")
 

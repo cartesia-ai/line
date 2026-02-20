@@ -72,6 +72,11 @@ class AgentUpdateCall(BaseModel):
     pronunciation_dict_id: Optional[str] = None
 
 
+class AgentSendCustom(BaseModel):
+    type: Literal["agent_send_custom"] = "agent_send_custom"
+    metadata: Dict[str, Any]
+
+
 OutputEvent = Union[
     AgentSendText,
     AgentSendDtmf,
@@ -82,6 +87,7 @@ OutputEvent = Union[
     LogMetric,
     LogMessage,
     AgentUpdateCall,
+    AgentSendCustom,
 ]
 
 
@@ -188,12 +194,20 @@ class AgentTurnEnded(BaseModel):
     history: Optional[List["InputEvent"]] = None
 
 
+class UserCustomSent(BaseModel):
+    type: Literal["user_custom_sent"] = "user_custom_sent"
+    metadata: Dict[str, Any]
+    event_id: str = Field(default_factory=_generate_event_id)
+    history: Optional[List["InputEvent"]] = None
+
+
 InputEvent = Union[
     CallStarted,
     UserTurnStarted,
     UserDtmfSent,
     UserTextSent,
     UserTurnEnded,
+    UserCustomSent,
     AgentTurnStarted,
     AgentTextSent,
     AgentDtmfSent,
@@ -227,6 +241,7 @@ __all__ = [
     "LogMetric",
     "LogMessage",
     "AgentUpdateCall",
+    "AgentSendCustom",
     "OutputEvent",
     # Custom
     "CustomHistoryEntry",
@@ -241,6 +256,7 @@ __all__ = [
     "AgentTextSent",
     "AgentDtmfSent",
     "AgentTurnEnded",
+    "UserCustomSent",
     "InputEvent",
     # History
     "HistoryEvent",
