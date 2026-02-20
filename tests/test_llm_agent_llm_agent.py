@@ -1660,6 +1660,56 @@ class TestBuildFullHistory:
         assert isinstance(result[3], AgentToolReturned)
         assert isinstance(result[4], UserTextSent)
 
+    async def test_tool_call_after_text_not_orphaned_by_subsequent_user_messages(self):
+        """Tool calls after text in the same generation stay grouped with the text.
+
+        Regression test: when agent generates text + tool call in the same turn,
+        and user sends messages afterward, the tool call events should appear right
+        after the agent's text, not pushed to the end after the user's messages.
+
+        Reproduces the bug where end_call tool was orphaned from the "goodbye!" message:
+          assistant: "goodbye!"
+          user: "bye"
+          user: "bye"
+          assistant: end_call    <-- wrong, should be right after "goodbye!"
+          tool: success
+        """
+        user0 = UserTextSent(content="Nope")
+        input_history = [
+            user0,
+            AgentTextSent(content="Thanks for choosing Flighty, goodbye!"),
+            UserTextSent(content="All right, bye."),
+            UserTextSent(content="Bye."),
+        ]
+        local_history = self._annotate(
+            [
+                AgentSendText(text="Thanks for choosing Flighty, goodbye!"),
+                AgentToolCalled(tool_call_id="call_end", tool_name="end_call", tool_args={}),
+                AgentToolReturned(
+                    tool_call_id="call_end", tool_name="end_call", tool_args={}, result="success"
+                ),
+            ],
+            event_id=user0.event_id,
+        )
+
+        result = _build_full_history(input_history, local_history, current_event_id="current")
+
+        # Expected order: User, Goodbye text, ToolCalled, ToolReturned, User1, User2
+        # NOT: User, Goodbye text, User1, User2, ToolCalled, ToolReturned
+        assert len(result) == 6
+        assert isinstance(result[0], UserTextSent)
+        assert result[0].content == "Nope"
+        assert isinstance(result[1], AgentTextSent)
+        assert result[1].content == "Thanks for choosing Flighty, goodbye!"
+        assert isinstance(result[2], AgentToolCalled)
+        assert result[2].tool_name == "end_call"
+        assert isinstance(result[3], AgentToolReturned)
+        assert result[3].tool_name == "end_call"
+        assert isinstance(result[4], UserTextSent)
+        assert result[4].content == "All right, bye."
+        assert isinstance(result[5], UserTextSent)
+        assert result[5].content == "Bye."
+
 
 # =============================================================================
 # Tests: _build_messages - Pending Tool Results
