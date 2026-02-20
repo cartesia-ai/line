@@ -200,14 +200,12 @@ async def test_end_call_with_configured_message(mock_ctx, anyio_backend):
     assert isinstance(events[1], AgentEndCall)
 
 
-async def test_end_call_custom_reason(mock_ctx, anyio_backend):
-    """Test that custom reason is appended to the default description."""
-    reason = "Only end when user says 'terminate'"
-    custom_end_call = end_call(reason=reason)
+async def test_end_call_custom_description(mock_ctx, anyio_backend):
+    """Test that custom description replaces the default."""
+    custom_desc = "Only end when user says 'terminate'"
+    custom_end_call = end_call(description=custom_desc)
 
-    # Reason should be appended to default description
-    assert custom_end_call.description.startswith(EndCallTool.DEFAULT_DESCRIPTION)
-    assert reason in custom_end_call.description
+    assert custom_end_call.description == custom_desc
 
 
 async def test_end_call_has_function_tool_attributes(mock_ctx, anyio_backend):
@@ -234,8 +232,8 @@ async def test_end_call_has_function_tool_attributes(mock_ctx, anyio_backend):
 
 async def test_end_call_callable_returns_new_instance(mock_ctx, anyio_backend):
     """Test that calling end_call() returns a new configured instance."""
-    custom_reason = "Custom reason for test"
-    configured = end_call(reason=custom_reason)
+    custom_desc = "Custom description for test"
+    configured = end_call(description=custom_desc)
 
     # Should be a new instance
     assert configured is not end_call
@@ -243,5 +241,5 @@ async def test_end_call_callable_returns_new_instance(mock_ctx, anyio_backend):
 
     # Original should be unchanged
     assert end_call.description == EndCallTool.DEFAULT_DESCRIPTION
-    # Configured should have reason appended
-    assert custom_reason in configured.description
+    # Configured should have custom description
+    assert configured.description == custom_desc

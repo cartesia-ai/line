@@ -154,14 +154,14 @@ web_search = WebSearchTool()
 
 class EndCallTool:
     """
-    Configurable end_call tool with optional message and custom reason.
+    Configurable end_call tool with optional message and custom description.
 
     Usage:
         # Default behavior
         LlmAgent(tools=[end_call])
 
-        # Custom reason for when to end (appended to default description)
-        LlmAgent(tools=[end_call(reason="Only end after user says 'goodbye'")])
+        # Custom description (fully replaces default)
+        LlmAgent(tools=[end_call(description="Only end after user says 'goodbye'")])
 
         # With a default farewell message
         LlmAgent(tools=[end_call(message="Goodbye, have a great day!")])
@@ -174,14 +174,10 @@ class EndCallTool:
 
     def __init__(
         self,
-        reason: Optional[str] = None,
+        description: Optional[str] = None,
         message: Optional[str] = None,
     ):
-        # reason is appended to the default description to provide additional context
-        if reason:
-            self.description = f"{self.DEFAULT_DESCRIPTION} {reason}"
-        else:
-            self.description = self.DEFAULT_DESCRIPTION
+        self.description = description if description else self.DEFAULT_DESCRIPTION
         self.message = message
         self._function_tool = self._create_function_tool()
 
@@ -192,11 +188,10 @@ class EndCallTool:
 
     def _create_function_tool(self) -> FunctionTool:
         """Create the underlying FunctionTool with the configured description."""
-        default_message = self.message
 
         async def _end_call_impl(ctx: ToolEnv):
-            if default_message:
-                yield AgentSendText(text=default_message)
+            if self.message:
+                yield AgentSendText(text=self.message)
             yield AgentEndCall()
 
         return construct_function_tool(
@@ -212,24 +207,23 @@ class EndCallTool:
 
     def __call__(
         self,
-        reason: Optional[str] = None,
+        description: Optional[str] = None,
         message: Optional[str] = None,
     ) -> "EndCallTool":
         """Create a configured EndCallTool instance.
 
         Args:
-            reason: Additional instructions for when to end the call,
-                appended to the default description.
+            description: Custom description that replaces the default.
             message: Default farewell message to the user before ending the call.
 
         Returns:
             A new EndCallTool instance with the specified configuration.
         """
-        return EndCallTool(reason=reason, message=message)
+        return EndCallTool(description=description, message=message)
 
 
 # Default instance - can be used directly or called to configure
-# Usage: end_call or end_call(reason="Only end after explicit goodbye")
+# Usage: end_call or end_call(description="Only end after explicit goodbye")
 end_call = EndCallTool()
 
 
