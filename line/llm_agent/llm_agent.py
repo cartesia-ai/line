@@ -35,6 +35,7 @@ from line.events import (
     CallEnded,
     CallStarted,
     CustomHistoryEntry,
+    HistoryEvent,
     InputEvent,
     LogMetric,
     OutputEvent,
@@ -141,6 +142,8 @@ class LlmAgent:
         *,
         config: Optional[LlmConfig] = None,
         tools: Optional[List[ToolSpec]] = None,
+        context: Union[str, List[HistoryEvent], None] = None,
+        history: Optional[List[HistoryEvent]] = None,
     ) -> AsyncIterable[OutputEvent]:
         """Process an input event and yield output events.
 
@@ -150,6 +153,12 @@ class LlmAgent:
             config: Optional LlmConfig to merge with self._config for this call.
             tools: Optional tools to use for this call. Tools with matching names replace
                 those in self._tools; other tools from self._tools are preserved.
+            context: Extra context for this call only. If a string, converted to a
+                system CustomHistoryEntry. If a list of HistoryEvents, used as-is.
+                Appended to the end of history for message building. Not persisted.
+            history: Override the managed history for this call only. When provided,
+                _build_messages uses this list instead of self.history. The managed
+                self.history still receives _set_input and _append_local as usual.
         """
         # Track the event_id of the triggering input event
         # The triggering event is the last element in event.history
@@ -181,7 +190,9 @@ class LlmAgent:
             await self.cleanup()
             return
 
-        async for output in self._generate_response(env, event, effective_tools, effective_config):
+        async for output in self._generate_response(
+            env, event, effective_tools, effective_config, context=context, history=history
+        ):
             yield output
 
     def _get_tool_name(self, tool: ToolSpec) -> str:
@@ -270,14 +281,19 @@ class LlmAgent:
         event: InputEvent,
         tool_specs: List[ToolSpec],
         config: LlmConfig,
+        *,
+        context: Union[str, List[HistoryEvent], None] = None,
+        history: Optional[List[HistoryEvent]] = None,
     ) -> AsyncIterable[OutputEvent]:
         """Generate a response using the LLM.
 
         Args:
             env: The turn environment.
             event: The input event to process.
-            extra_tools: Additional ToolSpecs to concatenate with self._tools for this call.
+            tool_specs: ToolSpecs to use for this call.
             config: The effective LlmConfig for this call.
+            context: Extra context to append to history for this call only.
+            history: Override history for this call only.
         """
         tools, web_search_options = self._resolve_tools(tool_specs)
         tool_map: Dict[str, FunctionTool] = {t.name: t for t in tools}
@@ -310,7 +326,7 @@ class LlmAgent:
             # ==== END LOOPBACK MANAGMENT ==== #
 
             # ==== GENERATION CALL ==== #
-            messages = await self._build_messages()
+            messages = await self._build_messages(context=context, history=history)
             tool_calls_dict: Dict[str, ToolCall] = {}
 
             # Build kwargs for LLM chat, including web_search_options if available
@@ -514,7 +530,12 @@ class LlmAgent:
             if not (should_loopback or has_background_events or has_background_tasks):
                 break
 
-    async def _build_messages(self) -> List[Message]:
+    async def _build_messages(
+        self,
+        *,
+        context: Union[str, List[HistoryEvent], None] = None,
+        history: Optional[List[HistoryEvent]] = None,
+    ) -> List[Message]:
         """Build LLM messages from conversation history.
 
         Uses self.history to get the merged history, then converts to LLM messages.
@@ -524,8 +545,23 @@ class LlmAgent:
           counterparts)
         - AgentToolCalled/AgentToolReturned for tool interactions from local_history
         - CustomHistoryEntry for injected history entries from local_history
+
+        Args:
+            context: Extra context to append to history for this call only.
+                If a string, converted to a system CustomHistoryEntry.
+                If a list of HistoryEvents, appended as-is.
+            history: Override the managed history for this call only.
         """
-        full_history = list(self.history)
+        if history is not None:
+            full_history = list(history)
+        else:
+            full_history = list(self.history)
+
+        if context is not None:
+            if isinstance(context, str):
+                full_history.append(CustomHistoryEntry(content=context))
+            else:
+                full_history.extend(context)
 
         # First pass: collect all tool_call_ids that have matching AgentToolReturned
         returned_tool_call_ids: set[str] = set()

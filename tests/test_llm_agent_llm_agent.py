@@ -1577,3 +1577,227 @@ async def test_process_replaces_config(turn_env):
     assert agent._config.max_tokens == 100
 
 
+# =============================================================================
+# Tests: context and history params in process()
+# =============================================================================
+
+
+async def test_process_with_context_string(turn_env):
+    """Test that context string appears as system message at end of history."""
+    responses = [
+        [
+            StreamChunk(text="Got it!"),
+            StreamChunk(is_final=True),
+        ]
+    ]
+
+    agent, mock_llm = create_agent_with_mock(responses)
+
+    await collect_outputs(
+        agent,
+        turn_env,
+        UserTextSent(content="Hi", history=[UserTextSent(content="Hi")]),
+        context="You are a helpful assistant.",
+    )
+
+    # Check messages sent to LLM
+    messages = mock_llm._recorded_messages[0]
+
+    # Should have: user message, then system context at end
+    assert len(messages) == 2
+    assert messages[0].role == "user"
+    assert messages[0].content == "Hi"
+    assert messages[1].role == "system"
+    assert messages[1].content == "You are a helpful assistant."
+
+
+async def test_process_with_context_list(turn_env):
+    """Test that context list events appear at end of history."""
+    responses = [
+        [
+            StreamChunk(text="Got it!"),
+            StreamChunk(is_final=True),
+        ]
+    ]
+
+    agent, mock_llm = create_agent_with_mock(responses)
+
+    context_events = [
+        UserTextSent(content="Extra user context"),
+        AgentTextSent(content="Extra agent context"),
+    ]
+
+    await collect_outputs(
+        agent,
+        turn_env,
+        UserTextSent(content="Hi", history=[UserTextSent(content="Hi")]),
+        context=context_events,
+    )
+
+    messages = mock_llm._recorded_messages[0]
+
+    # Should have: user message from history, then context events at end
+    assert len(messages) == 3
+    assert messages[0].role == "user"
+    assert messages[0].content == "Hi"
+    assert messages[1].role == "user"
+    assert messages[1].content == "Extra user context"
+    assert messages[2].role == "assistant"
+    assert messages[2].content == "Extra agent context"
+
+
+async def test_process_with_history_override(turn_env):
+    """Test that history override replaces managed history for LLM messages."""
+    responses = [
+        [
+            StreamChunk(text="Response"),
+            StreamChunk(is_final=True),
+        ]
+    ]
+
+    agent, mock_llm = create_agent_with_mock(responses)
+
+    override_history = [
+        UserTextSent(content="Override message 1"),
+        AgentTextSent(content="Override response 1"),
+        UserTextSent(content="Override message 2"),
+    ]
+
+    await collect_outputs(
+        agent,
+        turn_env,
+        UserTextSent(content="Real message", history=[UserTextSent(content="Real message")]),
+        history=override_history,
+    )
+
+    messages = mock_llm._recorded_messages[0]
+
+    # Should use override history, not the managed history
+    assert len(messages) == 3
+    assert messages[0].role == "user"
+    assert messages[0].content == "Override message 1"
+    assert messages[1].role == "assistant"
+    assert messages[1].content == "Override response 1"
+    assert messages[2].role == "user"
+    assert messages[2].content == "Override message 2"
+
+
+async def test_process_with_history_and_context(turn_env):
+    """Test that context is appended to the history override."""
+    responses = [
+        [
+            StreamChunk(text="Response"),
+            StreamChunk(is_final=True),
+        ]
+    ]
+
+    agent, mock_llm = create_agent_with_mock(responses)
+
+    override_history = [
+        UserTextSent(content="Override message"),
+    ]
+
+    await collect_outputs(
+        agent,
+        turn_env,
+        UserTextSent(content="Real message", history=[UserTextSent(content="Real message")]),
+        history=override_history,
+        context="Extra system context",
+    )
+
+    messages = mock_llm._recorded_messages[0]
+
+    # Should use override history with context appended
+    assert len(messages) == 2
+    assert messages[0].role == "user"
+    assert messages[0].content == "Override message"
+    assert messages[1].role == "system"
+    assert messages[1].content == "Extra system context"
+
+
+async def test_context_does_not_persist(turn_env):
+    """Test that context from one process() call does not leak into the next."""
+    responses = [
+        [
+            StreamChunk(text="First response"),
+            StreamChunk(is_final=True),
+        ],
+        [
+            StreamChunk(text="Second response"),
+            StreamChunk(is_final=True),
+        ],
+    ]
+
+    agent, mock_llm = create_agent_with_mock(responses)
+
+    # First call with context
+    await collect_outputs(
+        agent,
+        turn_env,
+        UserTextSent(content="Hi", history=[UserTextSent(content="Hi")]),
+        context="Temporary context",
+    )
+
+    # Second call without context
+    user1 = UserTextSent(content="Hi")
+    agent1 = AgentTextSent(content="First response")
+    user2 = UserTextSent(content="Follow up")
+    await collect_outputs(
+        agent,
+        turn_env,
+        UserTextSent(content="Follow up", history=[user1, agent1, user2]),
+    )
+
+    # Second call should NOT have the context from the first call
+    second_messages = mock_llm._recorded_messages[1]
+    system_messages = [m for m in second_messages if m.role == "system"]
+    assert len(system_messages) == 0
+
+
+async def test_history_override_does_not_affect_managed(turn_env):
+    """Test that history override does not mutate self.history."""
+    responses = [
+        [
+            StreamChunk(text="First response"),
+            StreamChunk(is_final=True),
+        ],
+        [
+            StreamChunk(text="Second response"),
+            StreamChunk(is_final=True),
+        ],
+    ]
+
+    agent, mock_llm = create_agent_with_mock(responses)
+
+    # First call with history override
+    override_history = [
+        UserTextSent(content="Override only"),
+    ]
+    await collect_outputs(
+        agent,
+        turn_env,
+        UserTextSent(content="Real message", history=[UserTextSent(content="Real message")]),
+        history=override_history,
+    )
+
+    # First call LLM should see override history
+    first_messages = mock_llm._recorded_messages[0]
+    assert len(first_messages) == 1
+    assert first_messages[0].content == "Override only"
+
+    # Second call without override - should see managed history (with first call's events)
+    user1 = UserTextSent(content="Real message")
+    agent1 = AgentTextSent(content="First response")
+    user2 = UserTextSent(content="Second message")
+    await collect_outputs(
+        agent,
+        turn_env,
+        UserTextSent(content="Second message", history=[user1, agent1, user2]),
+    )
+
+    second_messages = mock_llm._recorded_messages[1]
+    # Should see the managed history, not the override
+    assert any(m.content == "Real message" for m in second_messages)
+    assert not any(m.content == "Override only" for m in second_messages)
+
+
