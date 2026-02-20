@@ -246,16 +246,16 @@ def agent_as_handoff(
 
     async def _handoff_fn(ctx: ToolEnv, event):
         if isinstance(event, AgentHandedOff):
+            # Send handoff message if provided
+            if handoff_message:
+                yield AgentSendText(text=handoff_message)
+
             # Update call settings (e.g., voice) if provided
             if update_call is not None:
                 yield AgentUpdateCall(
                     voice_id=update_call.voice_id,
                     pronunciation_dict_id=update_call.pronunciation_dict_id,
                 )
-
-            # Send handoff message if provided
-            if handoff_message:
-                yield AgentSendText(text=handoff_message)
 
             # Trigger the agent's introduction via CallStarted
             async for output in _call_agent(agent, ctx.turn_env, CallStarted()):
