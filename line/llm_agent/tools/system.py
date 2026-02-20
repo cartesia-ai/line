@@ -154,56 +154,35 @@ web_search = WebSearchTool()
 
 class EndCallTool:
     """
-    Configurable end_call tool with eagerness levels.
-
-    Controls how readily the LLM will end calls:
-    - "low": Very cautious, confirms multiple times before ending
-    - "normal": Standard behavior, ends when conversation is complete
-    - "high": Ends promptly when user indicates they're done
+    Configurable end_call tool with optional message and custom reason.
 
     Usage:
-        # Default (normal eagerness)
+        # Default behavior
         LlmAgent(tools=[end_call])
 
-        # Custom eagerness
-        LlmAgent(tools=[end_call(eagerness="low")])
+        # Custom reason for when to end (appended to default description)
+        LlmAgent(tools=[end_call(reason="Only end after user says 'goodbye'")])
 
-        # Fully custom description
-        LlmAgent(tools=[end_call(description="Only end after user says 'goodbye'")])
+        # With a default farewell message
+        LlmAgent(tools=[end_call(message="Goodbye, have a great day!")])
     """
 
-    _DESCRIPTIONS: Dict[str, str] = {
-        "low": (
-            "End the call. Before ending, you MUST first ask 'Is there anything else I can help you with?' "
-            "and wait for the user to explicitly confirm they have no more questions. "
-            "Even if the user says goodbye, ask if there's anything else first. "
-            "Never assume the conversation is over."
-        ),
-        "normal": (
-            "End the call when the user says goodbye, thanks you, or confirms they're done. "
-            "Say goodbye before calling."
-        ),
-        "high": (
-            "End the call promptly when the user indicates they're done or says goodbye. "
-            "Say goodbye before calling. Don't ask follow-up questions like 'Is there anything else?'"
-        ),
-    }
+    DEFAULT_DESCRIPTION = (
+        "End the call when the user says goodbye, thanks you, or confirms they're done. "
+        # "Say goodbye before calling."
+    )
 
     def __init__(
         self,
-        eagerness: Literal["low", "normal", "high"] = "normal",
-        description: Optional[str] = None,
+        reason: Optional[str] = None,
+        message: Optional[str] = None,
     ):
-        # Validate eagerness parameter at runtime and default to "normal" if invalid
-        if eagerness not in self._DESCRIPTIONS:
-            valid_values = ", ".join(f"'{k}'" for k in self._DESCRIPTIONS.keys())
-            logger.warning(
-                f"Invalid eagerness value '{eagerness}'. Must be one of: {valid_values}. "
-                f"Defaulting to 'normal'."
-            )
-            eagerness = "normal"
-        self.eagerness = eagerness
-        self.description = description if description else self._DESCRIPTIONS[eagerness]
+        # reason is appended to the default description to provide additional context
+        if reason:
+            self.description = f"{self.DEFAULT_DESCRIPTION} {reason}"
+        else:
+            self.description = self.DEFAULT_DESCRIPTION
+        self.message = message
         self._function_tool = self._create_function_tool()
 
     @property
@@ -213,8 +192,18 @@ class EndCallTool:
 
     def _create_function_tool(self) -> FunctionTool:
         """Create the underlying FunctionTool with the configured description."""
+        default_message = self.message
 
-        async def _end_call_impl(ctx: ToolEnv):
+        async def _end_call_impl(
+            ctx: ToolEnv,
+            message: Annotated[
+                Optional[str], "Optional farewell message to send before ending the call"
+            ] = None,
+        ):
+            # Use LLM-provided message, fall back to configured default, or no message
+            final_message = message if message is not None else default_message
+            if final_message:
+                yield AgentSendText(text=final_message)
             yield AgentEndCall()
 
         return construct_function_tool(
@@ -230,29 +219,24 @@ class EndCallTool:
 
     def __call__(
         self,
-        eagerness: Literal["low", "normal", "high"] = "normal",
-        description: Optional[str] = None,
+        reason: Optional[str] = None,
+        message: Optional[str] = None,
     ) -> "EndCallTool":
         """Create a configured EndCallTool instance.
 
         Args:
-            eagerness: How readily the agent should end calls.
-                - "low": Very cautious, multiple confirmations required
-                - "normal": Standard behavior (default)
-                - "high": Ends promptly when user seems done
-                If an invalid value is provided, a warning is logged and "normal" is used.
-
-            description: Optional custom description that overrides eagerness-based text.
+            reason: Additional instructions for when to end the call,
+                appended to the default description.
+            message: Default farewell message to send before ending the call.
 
         Returns:
             A new EndCallTool instance with the specified configuration.
         """
-        # Validation happens in __init__
-        return EndCallTool(eagerness=eagerness, description=description)
+        return EndCallTool(reason=reason, message=message)
 
 
 # Default instance - can be used directly or called to configure
-# Usage: end_call or end_call(eagerness="low")
+# Usage: end_call or end_call(reason="Only end after explicit goodbye")
 end_call = EndCallTool()
 
 

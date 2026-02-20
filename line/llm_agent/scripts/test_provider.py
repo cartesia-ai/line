@@ -260,20 +260,36 @@ async def test_web_search(model: str, api_key: str, search_context_size: str = "
     print("✓ Web search test completed")
 
 
+# End call reasons for different behavior styles (appended to default description)
+END_CALL_REASONS = {
+    "low": (
+        "Before ending, you MUST first ask 'Is there anything else I can help you with?' "
+        "and wait for the user to explicitly confirm they have no more questions. "
+        "Even if the user says goodbye, ask if there's anything else first. "
+        "Never assume the conversation is over."
+    ),
+    "normal": None,  # Uses default description only
+    "high": (
+        "End promptly when the user indicates they're done. "
+        "Don't ask follow-up questions like 'Is there anything else?'"
+    ),
+}
+
+
 async def test_end_call_eagerness(model: str, api_key: str):
-    """Test end_call tool with different eagerness levels.
+    """Test end_call tool with different custom reasons.
 
     Verifies that the end_call tool can be configured with different
-    eagerness levels that affect the tool description.
+    custom reasons that affect behavior.
     """
     print("\n" + "=" * 60)
-    print(f"Testing end_call eagerness levels with {model}")
+    print(f"Testing end_call custom reasons with {model}")
     print("=" * 60)
 
-    # Test all three eagerness levels
-    for eagerness in ["low", "normal", "high"]:
-        configured_end_call = end_call(eagerness=eagerness)
-        print(f"\n  Eagerness: {eagerness}")
+    # Test all three reason styles
+    for style, reason in END_CALL_REASONS.items():
+        configured_end_call = end_call(reason=reason)
+        print(f"\n  Style: {style}")
         print(f"  Description: {configured_end_call.description[:80]}...")
 
         agent = LlmAgent(
@@ -281,7 +297,7 @@ async def test_end_call_eagerness(model: str, api_key: str):
             api_key=api_key,
             tools=[configured_end_call],
             config=LlmConfig(
-                system_prompt=f"You are a helpful assistant. Eagerness level: {eagerness}",
+                system_prompt=f"You are a helpful assistant. End call style: {style}",
             ),
         )
 
@@ -289,23 +305,23 @@ async def test_end_call_eagerness(model: str, api_key: str):
         resolved_tools, _ = agent._resolve_tools(agent._tools)
         assert len(resolved_tools) == 1, f"Expected 1 tool, got {len(resolved_tools)}"
         assert resolved_tools[0].name == "end_call", f"Expected 'end_call', got {resolved_tools[0].name}"
-        print(f"  ✓ Tool resolved correctly with eagerness={eagerness}")
+        print(f"  ✓ Tool resolved correctly with style={style}")
 
-    # Test custom description override
-    custom_desc = "Only end after user explicitly says 'terminate session'"
-    custom_end_call = end_call(description=custom_desc)
-    assert custom_end_call.description == custom_desc
-    print(f"\n  Custom description: {custom_desc}")
-    print("  ✓ Custom description override works")
+    # Test custom reason
+    custom_reason = "Only end after user explicitly says 'terminate session'"
+    custom_end_call = end_call(reason=custom_reason)
+    assert custom_reason in custom_end_call.description
+    print(f"\n  Custom reason: {custom_reason}")
+    print("  ✓ Custom reason works")
 
-    print("\n✓ end_call eagerness test passed")
+    print("\n✓ end_call custom reason test passed")
 
 
 async def eval_end_call_behavior(model: str, api_key: str, n_runs: int = 3):
-    """Evaluate that end_call eagerness levels actually affect LLM behavior.
+    """Evaluate that end_call custom descriptions actually affect LLM behavior.
 
     Runs test scenarios multiple times to statistically measure how different
-    eagerness levels influence the LLM's decision to call end_call.
+    description styles influence the LLM's decision to call end_call.
 
     Test scenarios:
     - "clear_goodbye": Explicit farewell - all levels should end (high/normal immediately)
@@ -365,8 +381,8 @@ async def eval_end_call_behavior(model: str, api_key: str, n_runs: int = 3):
         ),
     ]
 
-    # Expected end_call rates by eagerness level (approximate thresholds)
-    # Format: {category: {eagerness: (min_rate, max_rate)}}
+    # Expected end_call rates by description style (approximate thresholds)
+    # Format: {category: {style: (min_rate, max_rate)}}
     # Key differentiator: "low" should ask follow-up before ending, so rates should be near 0
     expected_rates = {
         "clear_goodbye": {"high": (0.8, 1.0), "normal": (0.5, 1.0), "low": (0.0, 0.3)},
@@ -375,9 +391,7 @@ async def eval_end_call_behavior(model: str, api_key: str, n_runs: int = 3):
         "continue": {"high": (0.0, 0.2), "normal": (0.0, 0.1), "low": (0.0, 0.1)},
     }
 
-    results = {
-        eagerness: {cat: [] for cat in expected_rates.keys()} for eagerness in ["low", "normal", "high"]
-    }
+    results = {style: {cat: [] for cat in expected_rates.keys()} for style in ["low", "normal", "high"]}
 
     async def check_end_call_invoked(agent: LlmAgent, user_message: str, context: list) -> bool:
         """Run a single conversation and check if end_call was invoked."""
@@ -412,7 +426,8 @@ async def eval_end_call_behavior(model: str, api_key: str, n_runs: int = 3):
     total_runs = len(["high", "normal", "low"]) * len(scenarios) * n_runs
     current_run = 0
 
-    for eagerness in ["high", "normal", "low"]:
+    for style in ["high", "normal", "low"]:
+        reason = END_CALL_REASONS[style]
         for _s_idx, (category, user_message, context) in enumerate(scenarios):
             end_count = 0
             for _run_idx in range(n_runs):
@@ -423,7 +438,7 @@ async def eval_end_call_behavior(model: str, api_key: str, n_runs: int = 3):
                 agent = LlmAgent(
                     model=model,
                     api_key=api_key,
-                    tools=[end_call(eagerness=eagerness)],
+                    tools=[end_call(reason=reason)],
                     config=LlmConfig(
                         system_prompt=(
                             "You are a phone assistant. Use the end_call tool to end conversations "
@@ -439,7 +454,7 @@ async def eval_end_call_behavior(model: str, api_key: str, n_runs: int = 3):
                     print(f"\n  ⚠ Error: {e}")
 
             rate = end_count / n_runs
-            results[eagerness][category].append((user_message[:30], rate))
+            results[style][category].append((user_message[:30], rate))
 
     print()  # Newline after progress
 
@@ -508,22 +523,22 @@ async def eval_end_call_behavior(model: str, api_key: str, n_runs: int = 3):
 
 
 async def eval_form_completion_behavior(model: str, api_key: str, n_runs: int = 3):
-    """Evaluate end_call eagerness during a multi-turn form completion task.
+    """Evaluate end_call behavior during a multi-turn form completion task.
 
     Simulates a realistic form-filling scenario where the agent collects
-    name and phone number. Tests how different eagerness levels affect
+    name and phone number. Tests how different description styles affect
     behavior after form completion:
 
     - High: May end promptly after form is complete, minimal follow-up
     - Normal: Asks if there's anything else, then ends appropriately
     - Low: Continues engaging, confirms multiple times before ending
 
-    This test validates that eagerness descriptions meaningfully influence
+    This test validates that custom descriptions meaningfully influence
     LLM behavior in realistic multi-turn conversations.
     """
     print("\n" + "=" * 60)
     print(f"Evaluating form completion behavior with {model}")
-    print(f"Running {n_runs} iterations per eagerness level")
+    print(f"Running {n_runs} iterations per description style")
     print("=" * 60)
 
     # Define a tool for recording form data
@@ -551,16 +566,15 @@ Ask for their name first, then their phone number. Once you have both, use the t
     ]
 
     # Track: ended_by_turn_N means end_call was invoked at or before turn N
-    results = {
-        eagerness: {"ended_by_form": [], "ended_by_thanks": []} for eagerness in ["high", "normal", "low"]
-    }
+    results = {style: {"ended_by_form": [], "ended_by_thanks": []} for style in ["high", "normal", "low"]}
 
-    async def run_conversation(eagerness: str) -> dict:
+    async def run_conversation(style: str) -> dict:
         """Run the full conversation and track end_call invocations."""
+        reason = END_CALL_REASONS[style]
         agent = LlmAgent(
             model=model,
             api_key=api_key,
-            tools=[end_call(eagerness=eagerness), record_contact],
+            tools=[end_call(reason=reason), record_contact],
             config=LlmConfig(system_prompt=system_prompt),
         )
 
@@ -613,23 +627,23 @@ Ask for their name first, then their phone number. Once you have both, use the t
 
         return result
 
-    # Run evaluations for each eagerness level
-    eagerness_levels = ["high", "normal", "low"]
-    total_runs = len(eagerness_levels) * n_runs
+    # Run evaluations for each description style
+    styles = ["high", "normal", "low"]
+    total_runs = len(styles) * n_runs
     current_run = 0
 
-    for eagerness in eagerness_levels:
+    for style in styles:
         for _run_num in range(n_runs):
             current_run += 1
             print(f"\r  Progress: {current_run}/{total_runs}", end="", flush=True)
             try:
-                result = await run_conversation(eagerness)
-                results[eagerness]["ended_by_form"].append(result["ended_by_form"])
-                results[eagerness]["ended_by_thanks"].append(result["ended_by_thanks"])
+                result = await run_conversation(style)
+                results[style]["ended_by_form"].append(result["ended_by_form"])
+                results[style]["ended_by_thanks"].append(result["ended_by_thanks"])
             except Exception as e:
                 print(f"\n  ⚠ Error: {e}")
-                results[eagerness]["ended_by_form"].append(False)
-                results[eagerness]["ended_by_thanks"].append(False)
+                results[style]["ended_by_form"].append(False)
+                results[style]["ended_by_thanks"].append(False)
 
     print()  # Newline after progress
 
@@ -678,7 +692,7 @@ Ask for their name first, then their phone number. Once you have both, use the t
         print("\n✓ Form completion behavior evaluation passed")
     else:
         print("\n⚠ Form completion evaluation completed with some deviations")
-        print("  (LLM behavior varies - check if eagerness descriptions need tuning)")
+        print("  (LLM behavior varies - check if description styles need tuning)")
 
 
 async def test_function_tools_with_web_search(model: str, api_key: str):
