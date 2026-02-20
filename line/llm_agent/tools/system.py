@@ -172,7 +172,8 @@ class EndCallTool:
         "low": (
             "End the call. Before ending, you MUST first ask 'Is there anything else I can help you with?' "
             "and wait for the user to explicitly confirm they have no more questions. "
-            "Even if the user says goodbye, ask if there's anything else first. Never assume the conversation is over."
+            "Even if the user says goodbye, ask if there's anything else first. "
+            "Never assume the conversation is over."
         ),
         "normal": (
             "End the call when the user says goodbye, thanks you, or confirms they're done. "

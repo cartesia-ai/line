@@ -329,12 +329,18 @@ async def eval_end_call_behavior(model: str, api_key: str, n_runs: int = 3):
         (
             "clear_goodbye",
             "Thanks for your help, bye!",
-            [("user", "How do I make coffee?"), ("assistant", "Boil water, add coffee grounds, let it steep, then filter.")],
+            [
+                ("user", "How do I make coffee?"),
+                ("assistant", "Boil water, add coffee grounds, let it steep, then filter."),
+            ],
         ),
         (
             "thanks_done",
             "That's all I needed, thanks!",
-            [("user", "What time is it in Tokyo?"), ("assistant", "It's currently evening in Tokyo, around 9 PM JST.")],
+            [
+                ("user", "What time is it in Tokyo?"),
+                ("assistant", "It's currently evening in Tokyo, around 9 PM JST."),
+            ],
         ),
         (
             "ambiguous",
@@ -344,12 +350,18 @@ async def eval_end_call_behavior(model: str, api_key: str, n_runs: int = 3):
         (
             "ambiguous",
             "Alright.",
-            [("user", "Tell me a joke."), ("assistant", "Why did the scarecrow win an award? Because he was outstanding in his field!")],
+            [
+                ("user", "Tell me a joke."),
+                ("assistant", "Why did the scarecrow win an award? Because he was outstanding in his field!"),
+            ],
         ),
         (
             "continue",
             "That's helpful. Now tell me about Python.",
-            [("user", "What's JavaScript?"), ("assistant", "JavaScript is a programming language for web development.")],
+            [
+                ("user", "What's JavaScript?"),
+                ("assistant", "JavaScript is a programming language for web development."),
+            ],
         ),
     ]
 
@@ -363,7 +375,9 @@ async def eval_end_call_behavior(model: str, api_key: str, n_runs: int = 3):
         "continue": {"high": (0.0, 0.2), "normal": (0.0, 0.1), "low": (0.0, 0.1)},
     }
 
-    results = {eagerness: {cat: [] for cat in expected_rates.keys()} for eagerness in ["low", "normal", "high"]}
+    results = {
+        eagerness: {cat: [] for cat in expected_rates.keys()} for eagerness in ["low", "normal", "high"]
+    }
 
     async def check_end_call_invoked(agent: LlmAgent, user_message: str, context: list) -> bool:
         """Run a single conversation and check if end_call was invoked."""
@@ -399,9 +413,9 @@ async def eval_end_call_behavior(model: str, api_key: str, n_runs: int = 3):
     current_run = 0
 
     for eagerness in ["high", "normal", "low"]:
-        for s_idx, (category, user_message, context) in enumerate(scenarios):
+        for _s_idx, (category, user_message, context) in enumerate(scenarios):
             end_count = 0
-            for run_idx in range(n_runs):
+            for _run_idx in range(n_runs):
                 current_run += 1
                 print(f"\r  Progress: {current_run}/{total_runs}", end="", flush=True)
 
@@ -413,7 +427,7 @@ async def eval_end_call_behavior(model: str, api_key: str, n_runs: int = 3):
                     config=LlmConfig(
                         system_prompt=(
                             "You are a phone assistant. Use the end_call tool to end conversations "
-                            "according to the tool's description. When ending a call, invoke the end_call tool."
+                            "according to the tool's description. When ending a call, invoke the tool."
                         ),
                     ),
                 )
@@ -431,7 +445,7 @@ async def eval_end_call_behavior(model: str, api_key: str, n_runs: int = 3):
 
     # Print results table
     print("\n  " + "=" * 70)
-    print(f"  Results Summary (end_call invocation rate)")
+    print("  Results Summary (end_call invocation rate)")
     print("  " + "=" * 70)
     print(f"  {'Category':<15} {'Scenario':<25} {'High':<8} {'Normal':<8} {'Low':<8}")
     print("  " + "-" * 70)
@@ -445,7 +459,9 @@ async def eval_end_call_behavior(model: str, api_key: str, n_runs: int = 3):
 
             # Check if rates are within expected ranges
             high_ok = expected_rates[category]["high"][0] <= high_rate <= expected_rates[category]["high"][1]
-            normal_ok = expected_rates[category]["normal"][0] <= normal_rate <= expected_rates[category]["normal"][1]
+            normal_ok = (
+                expected_rates[category]["normal"][0] <= normal_rate <= expected_rates[category]["normal"][1]
+            )
             low_ok = expected_rates[category]["low"][0] <= low_rate <= expected_rates[category]["low"][1]
 
             high_str = f"{high_rate:.0%}" + ("" if high_ok else "*")
@@ -458,22 +474,26 @@ async def eval_end_call_behavior(model: str, api_key: str, n_runs: int = 3):
             print(f"  {category:<15} {scenario_name:<25} {high_str:<8} {normal_str:<8} {low_str:<8}")
 
     print("  " + "-" * 70)
-    print(f"  * = outside expected range")
+    print("  * = outside expected range")
 
     # Verify key differentiators
-    print(f"\n  Key behavioral checks:")
+    print("\n  Key behavioral checks:")
 
     # Check 1: High should end more often than low on ambiguous
     high_ambig = sum(r for _, r in results["high"]["ambiguous"]) / len(results["high"]["ambiguous"])
     low_ambig = sum(r for _, r in results["low"]["ambiguous"]) / len(results["low"]["ambiguous"])
     check1 = high_ambig >= low_ambig
-    print(f"  {'✓' if check1 else '✗'} High ends more on ambiguous than Low ({high_ambig:.0%} >= {low_ambig:.0%})")
+    mark1 = "✓" if check1 else "✗"
+    print(f"  {mark1} High ends more on ambiguous than Low ({high_ambig:.0%} >= {low_ambig:.0%})")
 
     # Check 2: Normal should end more than low on clear_goodbye
-    normal_goodbye = sum(r for _, r in results["normal"]["clear_goodbye"]) / len(results["normal"]["clear_goodbye"])
+    normal_goodbye = sum(r for _, r in results["normal"]["clear_goodbye"]) / len(
+        results["normal"]["clear_goodbye"]
+    )
     low_goodbye = sum(r for _, r in results["low"]["clear_goodbye"]) / len(results["low"]["clear_goodbye"])
     check2 = normal_goodbye >= low_goodbye
-    print(f"  {'✓' if check2 else '✗'} Normal ends more on goodbye than Low ({normal_goodbye:.0%} >= {low_goodbye:.0%})")
+    mark2 = "✓" if check2 else "✗"
+    print(f"  {mark2} Normal ends more on goodbye than Low ({normal_goodbye:.0%} >= {low_goodbye:.0%})")
 
     # Check 3: None should end frequently on "continue" scenarios
     high_continue = sum(r for _, r in results["high"]["continue"]) / len(results["high"]["continue"])
@@ -519,7 +539,7 @@ async def eval_form_completion_behavior(model: str, api_key: str, n_runs: int = 
     system_prompt = """You are a helpful assistant collecting contact information.
 Your task is to collect the caller's name and phone number, then record it using the record_contact tool.
 
-Ask for their name first, then their phone number. Once you have both, use the record_contact tool to save it."""
+Ask for their name first, then their phone number. Once you have both, use the tool to save it."""
 
     # Multi-turn conversation simulating form completion
     # Format: list of (user_message, check_end_call_after_this_turn)
@@ -531,7 +551,9 @@ Ask for their name first, then their phone number. Once you have both, use the r
     ]
 
     # Track: ended_by_turn_N means end_call was invoked at or before turn N
-    results = {eagerness: {"ended_by_form": [], "ended_by_thanks": []} for eagerness in ["high", "normal", "low"]}
+    results = {
+        eagerness: {"ended_by_form": [], "ended_by_thanks": []} for eagerness in ["high", "normal", "low"]
+    }
 
     async def run_conversation(eagerness: str) -> dict:
         """Run the full conversation and track end_call invocations."""
@@ -597,7 +619,7 @@ Ask for their name first, then their phone number. Once you have both, use the r
     current_run = 0
 
     for eagerness in eagerness_levels:
-        for run_num in range(n_runs):
+        for _run_num in range(n_runs):
             current_run += 1
             print(f"\r  Progress: {current_run}/{total_runs}", end="", flush=True)
             try:
@@ -629,8 +651,9 @@ Ask for their name first, then their phone number. Once you have both, use the r
     normal_thanks = calc_rate(results["normal"]["ended_by_thanks"])
     low_thanks = calc_rate(results["low"]["ended_by_thanks"])
 
-    print(f"  {'Ended by form (turn 3)':<25} {f'{high_form:.0%}':<12} {f'{normal_form:.0%}':<12} {f'{low_form:.0%}':<12}")
-    print(f"  {'Ended by thanks (turn 4)':<25} {f'{high_thanks:.0%}':<12} {f'{normal_thanks:.0%}':<12} {f'{low_thanks:.0%}':<12}")
+    label1, label2 = "Ended by form (turn 3)", "Ended by thanks (turn 4)"
+    print(f"  {label1:<25} {high_form:.0%:<10} {normal_form:.0%:<10} {low_form:.0%:<10}")
+    print(f"  {label2:<25} {high_thanks:.0%:<10} {normal_thanks:.0%:<10} {low_thanks:.0%:<10}")
 
     # Key behavioral checks
     print("\n  Key behavioral checks:")
@@ -716,12 +739,12 @@ MODELS = [
 
 # Available test names
 AVAILABLE_TESTS = [
-    "streaming",      # test_streaming_text
-    "introduction",   # test_introduction
-    "tools",          # test_tool_calling
-    "end_call",       # test_end_call_eagerness
-    "end_call_form_eval", # test_end_call_form_eval
-    "web_search",     # test_web_search
+    "streaming",  # test_streaming_text
+    "introduction",  # test_introduction
+    "tools",  # test_tool_calling
+    "end_call",  # test_end_call_eagerness
+    "end_call_form_eval",  # test_end_call_form_eval
+    "web_search",  # test_web_search
     "web_search_fn",  # test_function_tools_with_web_search
 ]
 
@@ -736,7 +759,7 @@ def parse_args():
         "--tests",
         type=str,
         default="all",
-        help=f"Comma-separated list of tests to run. Available: {', '.join(AVAILABLE_TESTS)}, all (default: all)",
+        help=f"Comma-separated tests. Available: {', '.join(AVAILABLE_TESTS)}, all",
     )
     parser.add_argument(
         "--runs",
@@ -761,7 +784,7 @@ async def main(args):
     if args.tests == "all":
         tests_to_run = set(AVAILABLE_TESTS)
     else:
-        tests_to_run = set(t.strip() for t in args.tests.split(","))
+        tests_to_run = {t.strip() for t in args.tests.split(",")}
         invalid_tests = tests_to_run - set(AVAILABLE_TESTS)
         if invalid_tests:
             print(f"⚠ Unknown tests: {', '.join(invalid_tests)}")

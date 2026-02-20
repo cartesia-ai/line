@@ -234,6 +234,7 @@ async def test_end_call_has_function_tool_attributes(mock_ctx, anyio_backend):
 
     # Verify it's actually a FunctionTool instance (not duck-typed)
     from line.llm_agent.tools.utils import FunctionTool
+
     assert isinstance(func_tool, FunctionTool)
 
 
