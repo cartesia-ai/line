@@ -5,7 +5,6 @@ See README.md for examples and documentation.
 """
 
 import asyncio
-from collections import defaultdict
 import inspect
 import json
 import time
@@ -28,32 +27,21 @@ from loguru import logger
 
 from line.agent import AgentCallable, TurnEnv
 from line.events import (
-    AgentDtmfSent,
-    AgentEndCall,
     AgentHandedOff,
-    AgentSendDtmf,
     AgentSendText,
     AgentTextSent,
     AgentToolCalled,
     AgentToolReturned,
-    AgentTransferCall,
-    AgentTurnEnded,
-    AgentTurnStarted,
-    AgentUpdateCall,
     CallEnded,
     CallStarted,
     CustomHistoryEntry,
-    HistoryEvent,
     InputEvent,
-    LogMessage,
     LogMetric,
     OutputEvent,
-    UserDtmfSent,
     UserTextSent,
-    UserTurnEnded,
-    UserTurnStarted,
 )
 from line.llm_agent.config import LlmConfig, _merge_configs, _normalize_config
+from line.llm_agent.history import History
 from line.llm_agent.provider import LLMProvider, Message, ToolCall
 from line.llm_agent.tools.decorators import loopback_tool
 from line.llm_agent.tools.system import EndCallTool, WebSearchTool
@@ -64,13 +52,6 @@ T = TypeVar("T")
 # Type alias for tools that can be passed to LlmAgent
 # Plain callables are automatically wrapped as loopback tools
 ToolSpec = Union[FunctionTool, WebSearchTool, EndCallTool, Callable]
-
-# Type for events stored in local history (OutputEvent or CustomHistoryEntry)
-_LocalEvent = Union[OutputEvent, CustomHistoryEntry]
-
-# Sentinel event_id used before the first process() call.
-# _build_full_history prepends entries tagged with this ID at the start of the history.
-_INIT_EVENT_ID = "__init__"
 
 
 class LlmAgent:
@@ -121,11 +102,7 @@ class LlmAgent:
         )
 
         self._introduction_sent = False
-        # Local history annotated with (triggering_event_id, event)
-        # The event_id is the stable UUID of the triggering input event
-        self._local_history: List[tuple[str, _LocalEvent]] = []
-        # Event ID of the current triggering input event (set on each process() call)
-        self._current_event_id: str = _INIT_EVENT_ID
+        self.history = History()
         self._handoff_target: Optional[AgentCallable] = None  # Normalized process function
         # Background task for backgrounded tools - None means no pending work
         self._background_task: Optional[asyncio.Task[None]] = None
@@ -136,10 +113,6 @@ class LlmAgent:
         # Cache for thought signatures (Gemini 3+ models)
         # Maps tool_call_id -> thought_signature
         self._tool_signatures: Dict[str, str] = {}
-        # Registered history transform (called in _build_messages after _build_full_history)
-        self._process_history_fn: Optional[
-            Callable[[List[HistoryEvent]], Union[List[HistoryEvent], Awaitable[List[HistoryEvent]]]]
-        ] = None
 
         resolved_tools, web_seach_options = self._resolve_tools(self._tools)
         tool_names = [t.name for t in resolved_tools] + (["web_search"] if web_seach_options else [])
@@ -153,25 +126,13 @@ class LlmAgent:
         """Replace the agent's config."""
         self._config = _normalize_config(config)
 
-    def set_history_processor(
-        self,
-        fn: Callable[[List[HistoryEvent]], Union[List[HistoryEvent], Awaitable[List[HistoryEvent]]]],
-    ) -> None:
-        """Register a transform that processes the history before message building.
-
-        The transform is called on the history before it's passed to the LLM
-        It receives the original history and can filter, reorder, or inject events.
-        """
-        self._process_history_fn = fn
-
     def add_history_entry(self, content: str, role: Literal["system", "user"] = "system") -> None:
         """Insert a CustomHistoryEntry event into local history.
 
         The entry appears as a message with the given role ("system" by default) in the
         LLM conversation
         """
-        event = CustomHistoryEntry(content=content, role=role)
-        self._append_to_local_history(event)
+        self.history.add_entry(content, role)
 
     async def process(
         self,
@@ -192,7 +153,8 @@ class LlmAgent:
         """
         # Track the event_id of the triggering input event
         # The triggering event is the last element in event.history
-        self._current_event_id = event.history[-1].event_id if event.history else ""
+        current_event_id = event.history[-1].event_id if event.history else ""
+        self.history._set_input(event.history or [], current_event_id)
 
         # Compute effective config and tools for this call
         effective_config = _merge_configs(self._config, config) if config else self._config
@@ -201,7 +163,7 @@ class LlmAgent:
         # If handoff is active, call the handed-off process function
         if self._handoff_target is not None:
             async for output in self._handoff_target(env, event):
-                self._append_to_local_history(output)
+                self.history._append_local(output)
                 yield output
             return
 
@@ -209,7 +171,7 @@ class LlmAgent:
         if isinstance(event, CallStarted):
             if effective_config.introduction and not self._introduction_sent:
                 output = AgentSendText(text=effective_config.introduction)
-                self._append_to_local_history(output)
+                self.history._append_local(output)
                 self._introduction_sent = True
                 yield output
             return
@@ -348,7 +310,7 @@ class LlmAgent:
             # ==== END LOOPBACK MANAGMENT ==== #
 
             # ==== GENERATION CALL ==== #
-            messages = await self._build_messages(event.history, self._local_history, self._current_event_id)
+            messages = await self._build_messages()
             tool_calls_dict: Dict[str, ToolCall] = {}
 
             # Build kwargs for LLM chat, including web_search_options if available
@@ -378,7 +340,7 @@ class LlmAgent:
 
                     if chunk.text:
                         output = AgentSendText(text=chunk.text)
-                        self._append_to_local_history(output)
+                        self.history._append_local(output)
 
                         # Track time to first text
                         if not first_agent_text_logged:
@@ -437,8 +399,8 @@ class LlmAgent:
                             tool_called_output, tool_returned_output = _construct_tool_events(
                                 call_id, tc.name, tool_args, value
                             )
-                            self._append_to_local_history(tool_called_output)
-                            self._append_to_local_history(tool_returned_output)
+                            self.history._append_local(tool_called_output)
+                            self.history._append_local(tool_returned_output)
                             yield tool_called_output
                             yield tool_returned_output
                             n += 1
@@ -448,8 +410,8 @@ class LlmAgent:
                         tool_called_output, tool_returned_output = _construct_tool_events(
                             f"{tc.id}-{n}", tc.name, tool_args, f"error: {e}"
                         )
-                        self._append_to_local_history(tool_called_output)
-                        self._append_to_local_history(tool_returned_output)
+                        self.history._append_local(tool_called_output)
+                        self.history._append_local(tool_returned_output)
                         yield tool_called_output
                         yield tool_returned_output
 
@@ -460,12 +422,12 @@ class LlmAgent:
                         tool_name=tc.name,
                         tool_args=tool_args,
                     )
-                    self._append_to_local_history(tool_called_output)
+                    self.history._append_local(tool_called_output)
                     yield tool_called_output
 
                     try:
                         async for evt in normalized_func(ctx, **tool_args):
-                            self._append_to_local_history(evt)
+                            self.history._append_local(evt)
                             yield evt
                         # Emit AgentToolReturned after successful completion
                         tool_returned_output = AgentToolReturned(
@@ -474,7 +436,7 @@ class LlmAgent:
                             tool_args=tool_args,
                             result="success",
                         )
-                        self._append_to_local_history(tool_returned_output)
+                        self.history._append_local(tool_returned_output)
                         yield tool_returned_output
                     except Exception as e:
                         # Use negative limit to show last 10 frames (most relevant)
@@ -486,7 +448,7 @@ class LlmAgent:
                             tool_args=tool_args,
                             result=f"error: {e}",
                         )
-                        self._append_to_local_history(tool_returned_output)
+                        self.history._append_local(tool_returned_output)
                         yield tool_returned_output
 
                 elif tool.tool_type == ToolType.HANDOFF:
@@ -496,7 +458,7 @@ class LlmAgent:
                         tool_name=tc.name,
                         tool_args=tool_args,
                     )
-                    self._append_to_local_history(tool_called_output)
+                    self.history._append_local(tool_called_output)
                     yield tool_called_output
 
                     # AgentHandedOff input event is passed to the handoff target to execute the tool
@@ -505,10 +467,10 @@ class LlmAgent:
                         history=event.history + [handed_off_event],
                         **{k: v for k, v in handed_off_event.model_dump().items() if k != "history"},
                     )
-                    self._append_to_local_history(event)
+                    self.history._append_local(event)
                     try:
                         async for item in normalized_func(ctx, **tool_args, event=event):
-                            self._append_to_local_history(item)
+                            self.history._append_local(item)
                             yield item
                         # Emit AgentToolReturned after successful completion
                         tool_returned_output = AgentToolReturned(
@@ -517,7 +479,7 @@ class LlmAgent:
                             tool_args=tool_args,
                             result="success",
                         )
-                        self._append_to_local_history(tool_returned_output)
+                        self.history._append_local(tool_returned_output)
                         yield tool_returned_output
 
                         # Format the handoff target to be called on all future events
@@ -542,7 +504,7 @@ class LlmAgent:
                             tool_args=tool_args,
                             result=f"error: {e}",
                         )
-                        self._append_to_local_history(tool_returned_output)
+                        self.history._append_local(tool_returned_output)
                         yield tool_returned_output
 
             # ==== END TOOL CALLS ==== #
@@ -552,20 +514,10 @@ class LlmAgent:
             if not (should_loopback or has_background_events or has_background_tasks):
                 break
 
-    async def _build_messages(
-        self,
-        input_history: List[InputEvent],
-        local_history: List[tuple[str, _LocalEvent]],
-        current_event_id: str,
-    ) -> List[Message]:
+    async def _build_messages(self) -> List[Message]:
         """Build LLM messages from conversation history.
 
-        Merges input_history (canonical) with local_history using the following rules:
-        1. Input history is the source of truth for all events
-        2. Local history events are interpolated based on which input event triggered them
-        3. Matchable events are matched between local and input history
-        4. Non-matchable events (tool calls, custom text) are interpolated relative to matchables
-        5. Tool calls without matching results get a "pending" result
+        Uses self.history to get the merged history, then converts to LLM messages.
 
         The full_history contains HistoryEvent items:
         - InputEvent for events from input_history (matchable OutputEvents converted to InputEvent
@@ -573,20 +525,7 @@ class LlmAgent:
         - AgentToolCalled/AgentToolReturned for tool interactions from local_history
         - CustomHistoryEntry for injected history entries from local_history
         """
-        full_history = _build_full_history(input_history, local_history, current_event_id)
-
-        # Apply registered history transform
-        if self._process_history_fn is not None:
-            try:
-                result = self._process_history_fn(full_history)
-                if inspect.isawaitable(result):
-                    result = await result
-                full_history = _validate_processed_history(result)
-            except Exception:
-                logger.error(
-                    f"History processor failed, using unprocessed history:\n{traceback.format_exc(limit=-10)}"
-                )
-                # full_history is unchanged — fall back to unprocessed version
+        full_history = list(self.history)
 
         # First pass: collect all tool_call_ids that have matching AgentToolReturned
         returned_tool_call_ids: set[str] = set()
@@ -674,7 +613,7 @@ class LlmAgent:
         for processing on the next process() call.
         """
         # Capture the event_id at the start - this is the triggering event
-        triggering_event_id = self._current_event_id
+        triggering_event_id = self.history._current_event_id
 
         async def generate_events() -> None:
             n = 0
@@ -684,8 +623,8 @@ class LlmAgent:
                     called, returned = _construct_tool_events(call_id, tc_name, tool_args, value)
 
                     # Add to local history with the triggering event_id
-                    self._local_history.append((triggering_event_id, called))
-                    self._local_history.append((triggering_event_id, returned))
+                    self.history._append_local_with_event_id(called, triggering_event_id)
+                    self.history._append_local_with_event_id(returned, triggering_event_id)
                     # Add to queue for loopback processing
                     await self._background_event_queue.put((called, returned))
                     n += 1
@@ -694,8 +633,8 @@ class LlmAgent:
                 logger.error(f"Error in Tool Call {tc_name}: {e}\n{traceback.format_exc(limit=-10)}")
                 called, returned = _construct_tool_events(f"{tc_id}-{n}", tc_name, tool_args, f"error: {e}")
                 # Add to local history with the triggering event_id
-                self._local_history.append((triggering_event_id, called))
-                self._local_history.append((triggering_event_id, returned))
+                self.history._append_local_with_event_id(called, triggering_event_id)
+                self.history._append_local_with_event_id(returned, triggering_event_id)
                 # Add to queue for loopback processing
                 await self._background_event_queue.put((called, returned))
 
@@ -710,10 +649,6 @@ class LlmAgent:
             await future
 
         self._background_task = asyncio.ensure_future(_new_background_task())
-
-    def _append_to_local_history(self, event: _LocalEvent) -> None:
-        """Append an event to local history, annotated with the triggering event_id."""
-        self._local_history.append((self._current_event_id, event))
 
     async def _maybe_await_background_event(self) -> Union[None, tuple[AgentToolCalled, AgentToolReturned]]:
         """Wait for either a background event or background task completion.
@@ -841,323 +776,3 @@ def _construct_tool_events(
     return called, returned
 
 
-def _build_full_history(
-    input_history: List[InputEvent],
-    local_history: List[tuple[str, _LocalEvent]],
-    current_event_id: str,
-) -> List[HistoryEvent]:
-    """
-    We have a split brain situation, where "input_history" (maintained by the external harness) is the source
-    of truth for what actually happened in the conversation, but "local_history" (maintained by the agent)
-    contains additional events that we want to include in the history (tool calls, custom entries). we need
-    to merge them together in a coherent way before building messages for the LLM.
-
-    To that end, we have certain events that are "matchable". They show up in both input and local history,
-    but the input version is considered "canonical"
-    (it's what actually occured in the conversation)
-
-    Invariants:
-    1. Input history ordering is preserved exactly
-    2. Every local non-matchable event appears exactly once in output
-    3. Matchable locals appear after their triggering input event
-    4. Non-matchable locals maintain their original relative order
-    5. Matchable events use canonical (input) version
-    6. Unmatched local matchables are dropped
-
-    Algorithm:
-    1) For each input event, if it triggered any output events, load a queue
-    of those local output events.
-    2) Unmatchable input events are output directly.
-    3) Matchable input events are matched against the queue, with non-matchable locals (tool calls, custom
-    entries) drained alongside their matched matchable.
-
-    Examples:
-
-    1) Simple turn with a tool call:
-
-        input_history:  [UserTextSent("hi", id=A), AgentTextSent("hello", id=B)]
-        local_history:  [(A, AgentToolCalled(...)), (A, AgentToolReturned(...)), (A, AgentSendText("hello"))]
-
-        result: [UserTextSent("hi"), AgentToolCalled(...), AgentToolReturned(...), AgentTextSent("hello")]
-
-        UserTextSent is non-matchable so it's emitted directly. AgentTextSent is matchable and matches
-        the local AgentSendText("hello"), so the canonical input version is used. The non-matchable tool
-        events are drained alongside it.
-
-    2) Multi-turn with interleaved tool calls:
-
-        input_history:  [UserTextSent("weather?", id=A), AgentTextSent("It's sunny", id=B),
-                         UserTextSent("thanks", id=C), AgentTextSent("You're welcome", id=D)]
-        local_history:  [(A, AgentToolCalled(weather)), (A, AgentToolReturned(weather)),
-                         (A, AgentSendText("It's sunny")),
-                         (C, AgentSendText("You're welcome"))]
-
-        result: [UserTextSent("weather?"), AgentToolCalled(weather), AgentToolReturned(weather),
-                 AgentTextSent("It's sunny"), UserTextSent("thanks"), AgentTextSent("You're welcome")]
-
-        When we reach UserTextSent("thanks", id=C), its id is in local_by_event_id so we flush the
-        remaining queue from the previous trigger (nothing left) and load the new queue. The tool events
-        from the first turn are properly interleaved before the matched AgentTextSent.
-
-    """
-    # Split local history into prior and current based on event_id
-    prior_local = [(eid, e) for eid, e in local_history if eid != current_event_id]
-    current_local = [e for eid, e in local_history if eid == current_event_id]
-
-    # Build map from event_id to list of responsive local events
-    local_by_event_id: dict[str, List[_LocalEvent]] = defaultdict(list)
-    for eid, event in prior_local:
-        local_by_event_id[eid].append(event)
-
-    # Prepend init entries (added before the first process() call)
-    init_events = local_by_event_id.pop(_INIT_EVENT_ID, [])
-
-    result: List[Union[InputEvent, _LocalEvent]] = list(init_events)
-    queue: List[_LocalEvent] = []
-
-    for input_evt in input_history:
-        # If this input event generated any output events
-        # flush old output events (they are semantically "prior" to this input event)
-        # and load new queue of output events triggered by this input event
-        if input_evt.event_id in local_by_event_id:
-            result.extend(_flush_queue(queue))
-            local_slice = local_by_event_id[input_evt.event_id]
-            queue = _concat_contiguous_agent_send_text(local_slice)
-
-        if not _is_input_matchable(input_evt):
-            # Non-matchable input (UserTextSent, etc.) — emit directly
-            result.append(input_evt)
-        else:
-            # Matchable input — match against queue
-            emitted, queue = _match_matchable(input_evt, queue)
-            result.extend(emitted)
-
-    # Flush any remaining locals from the last trigger
-    result.extend(_flush_queue(queue))
-
-    # Append current-turn events (not yet observed, use local version)
-    result.extend(current_local)
-
-    # Convert matchable OutputEvents to InputEvent counterparts
-    return [h for e in result if (h := _to_history_event(e)) is not None]
-
-
-def _flush_queue(queue: List[_LocalEvent]) -> List[_LocalEvent]:
-    """Return non-matchable events from queue, discarding unmatched matchables."""
-    return [e for e in queue if not _is_local_matchable(e)]
-
-
-def _split_leading_non_matchables(
-    queue: List[_LocalEvent],
-) -> tuple[List[_LocalEvent], List[_LocalEvent]]:
-    """Split queue into leading non-matchables and the rest.
-
-    Returns:
-        (non_matchables, remaining) where remaining starts at the first matchable
-        or is empty if none exist.
-    """
-    for i, event in enumerate(queue):
-        if _is_local_matchable(event):
-            return queue[:i], queue[i:]
-    return queue, []
-
-
-def _match_matchable(
-    input_evt: InputEvent,
-    queue: List[_LocalEvent],
-) -> tuple[List[Union[InputEvent, _LocalEvent]], List[_LocalEvent]]:
-    """Match a matchable input event against the local queue.
-
-    Splits off leading non-matchables, then tries to match the head matchable.
-    On match, emits canonical input version and splits off trailing non-matchables.
-    On prefix match, also prepends the suffix to the remaining queue.
-    On no match, discards the local matchable and retries.
-    If queue exhausted with no match, emits input as-is.
-
-    Returns:
-        (emitted_events, remaining_queue)
-    """
-    remaining = queue
-    emitted: List[Union[InputEvent, _LocalEvent]] = []
-
-    while remaining:
-        non_obs, rest = _split_leading_non_matchables(remaining)
-        emitted.extend(non_obs)
-
-        if not rest:
-            break
-
-        head_local = rest[0]
-        match_result = _try_match_events(head_local, input_evt)
-
-        if match_result is not None:
-            matched_input, suffix_event = match_result
-            emitted.append(matched_input)
-            # Split off non-matchables that follow the matched matchable
-            trailing_non_obs, after = _split_leading_non_matchables(rest[1:])
-            emitted.extend(trailing_non_obs)
-            # On prefix match, prepend suffix to remaining queue
-            remaining = ([suffix_event] + after) if suffix_event is not None else after
-            return emitted, remaining
-
-        # No match — discard this local matchable and try next
-        remaining = rest[1:]
-
-    # Queue exhausted with no match — emit input as-is
-    emitted.append(input_evt)
-    return emitted, []
-
-
-_HISTORY_EVENT_TYPES = (
-    # InputEvent types
-    CallStarted,
-    CallEnded,
-    AgentHandedOff,
-    UserTurnStarted,
-    UserDtmfSent,
-    UserTextSent,
-    UserTurnEnded,
-    AgentTurnStarted,
-    AgentTextSent,
-    AgentDtmfSent,
-    AgentTurnEnded,
-    # Tool events
-    AgentToolCalled,
-    AgentToolReturned,
-    # Custom entries
-    CustomHistoryEntry,
-)
-
-
-def _validate_processed_history(history: Any) -> List[HistoryEvent]:
-    """Validate that set_history_processor returned a List[HistoryEvent].
-
-    Raises TypeError if the return value is not a list or contains non-HistoryEvent items.
-    """
-    if not isinstance(history, list):
-        raise TypeError(
-            f"set_history_processor callback must return List[HistoryEvent], got {type(history).__name__}"
-        )
-    for i, event in enumerate(history):
-        if not isinstance(event, _HISTORY_EVENT_TYPES):
-            raise TypeError(
-                f"set_history_processor callback returned invalid event at index {i}: "
-                f"expected HistoryEvent, got {type(event).__name__}"
-            )
-    return history
-
-
-def _to_history_event(event: Any) -> Optional[HistoryEvent]:
-    """Convert an event to a HistoryEvent.
-
-    Matchable OutputEvents are converted to their InputEvent counterparts.
-    Non-history OutputEvents (LogMetric, etc.) are filtered out (returns None).
-    All other events (InputEvent, AgentToolCalled, AgentToolReturned, CustomHistoryEntry)
-    pass through unchanged.
-    """
-    # Matchable OutputEvents → convert to InputEvent counterparts
-    if isinstance(event, AgentSendText):
-        return AgentTextSent(content=event.text)
-    elif isinstance(event, AgentSendDtmf):
-        return AgentDtmfSent(button=event.button)
-    elif isinstance(event, AgentEndCall):
-        return CallEnded()
-    # HistoryEvent pass-through (tool events, custom entries)
-    elif isinstance(event, (AgentToolCalled, AgentToolReturned, CustomHistoryEntry)):
-        return event
-    # InputEvent types pass through
-    elif isinstance(
-        event,
-        (
-            CallStarted,
-            CallEnded,
-            AgentHandedOff,
-            UserTurnStarted,
-            UserDtmfSent,
-            UserTextSent,
-            UserTurnEnded,
-            AgentTurnStarted,
-            AgentTextSent,
-            AgentDtmfSent,
-            AgentTurnEnded,
-        ),
-    ):
-        return event
-    # Non-history OutputEvents are filtered out
-    elif isinstance(event, (AgentTransferCall, LogMetric, LogMessage, AgentUpdateCall)):
-        return None
-    else:
-        raise ValueError(f"Unknown event type in history: {type(event).__name__}")
-
-
-def _concat_contiguous_agent_send_text(local_history: List[_LocalEvent]) -> List[_LocalEvent]:
-    """
-    Since the LLM streams output, we likely will have many AgentSendText events that are part of the same
-    logical "message" from the LLM. This concats them into a single AgentSendText event for easier matching
-    to the input history, which only has one AgentTextSent per LLM message.
-    """
-    if not local_history:
-        return []
-    result: List[_LocalEvent] = []
-    current = local_history[0]
-    for event in local_history[1:]:
-        if isinstance(current, AgentSendText) and isinstance(event, AgentSendText):
-            current = AgentSendText(text=current.text + event.text)
-        else:
-            result.append(current)
-            current = event
-    result.append(current)
-    return result
-
-
-# Matchable OutputEvent types - these can be matched between local and input history
-# Corresponds to events that the external system tracks/observes
-MATCHABLE_OUTPUT_EVENT_TYPES = (
-    AgentSendDtmf,  # => AgentDtmfSent
-    AgentSendText,  # => AgentTextSent
-    AgentEndCall,  # => CallEnded
-)
-
-
-def _is_local_matchable(event: _LocalEvent) -> bool:
-    """Check if a local event is matchable (can be matched to input history)."""
-    return isinstance(event, MATCHABLE_OUTPUT_EVENT_TYPES)
-
-
-MATCHABLE_INPUT_EVENT_TYPES = (
-    AgentDtmfSent,
-    AgentTextSent,
-    CallEnded,
-)
-
-
-def _is_input_matchable(event: InputEvent) -> bool:
-    """Check if an InputEvent is matchable (can be matched to local history)."""
-    return isinstance(event, MATCHABLE_INPUT_EVENT_TYPES)
-
-
-def _try_match_events(
-    local: _LocalEvent, input_evt: InputEvent
-) -> Optional[tuple[InputEvent, Optional[_LocalEvent]]]:
-    """Try to match a local matchable event to an input matchable event.
-
-    Returns:
-        None: No match
-        (input_evt, None): Exact match - use input_evt as canonical
-        (input_evt, suffix_event): Prefix match - use input_evt and carry forward suffix_event
-
-    For text events, supports prefix matching (input is prefix of local).
-    For DTMF and EndCall events, only exact matching is supported.
-    """
-    if isinstance(local, AgentSendText) and isinstance(input_evt, AgentTextSent):
-        if local.text == input_evt.content:
-            return (input_evt, None)
-        if local.text.startswith(input_evt.content):
-            suffix = local.text[len(input_evt.content) :]
-            return (input_evt, AgentSendText(text=suffix))
-    elif isinstance(local, AgentSendDtmf) and isinstance(input_evt, AgentDtmfSent):
-        if local.button == input_evt.button:
-            return (input_evt, None)
-    elif isinstance(local, AgentEndCall) and isinstance(input_evt, CallEnded):
-        return (input_evt, None)
-    return None
