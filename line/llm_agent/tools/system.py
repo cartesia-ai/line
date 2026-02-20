@@ -193,6 +193,11 @@ class EndCallTool:
         self.description = description if description else self._DESCRIPTIONS[eagerness]
         self._function_tool = self._create_function_tool()
 
+    @property
+    def name(self) -> str:
+        """Return the tool name."""
+        return "end_call"
+
     def _create_function_tool(self) -> FunctionTool:
         """Create the underlying FunctionTool with the configured description."""
 
