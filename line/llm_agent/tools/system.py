@@ -200,8 +200,8 @@ class EndCallTool:
                 Optional[str], "Optional farewell message to send before ending the call"
             ] = None,
         ):
-            # Use LLM-provided message, fall back to configured default, or no message
-            final_message = message if message is not None else default_message
+            # Configured default takes priority (acts as override), then LLM message, then none
+            final_message = default_message if default_message is not None else message
             if final_message:
                 yield AgentSendText(text=final_message)
             yield AgentEndCall()
