@@ -169,7 +169,7 @@ class EndCallTool:
 
     DEFAULT_DESCRIPTION = (
         "End the call when the user says goodbye, thanks you, or confirms they're done. "
-        # "Say goodbye before calling."
+        "Say a natural goodbye before calling this tool."
     )
 
     def __init__(
@@ -194,16 +194,9 @@ class EndCallTool:
         """Create the underlying FunctionTool with the configured description."""
         default_message = self.message
 
-        async def _end_call_impl(
-            ctx: ToolEnv,
-            message: Annotated[
-                Optional[str], "Optional farewell message to send before ending the call"
-            ] = None,
-        ):
-            # Configured default takes priority (acts as override), then LLM message, then none
-            final_message = default_message if default_message is not None else message
-            if final_message:
-                yield AgentSendText(text=final_message)
+        async def _end_call_impl(ctx: ToolEnv):
+            if default_message:
+                yield AgentSendText(text=default_message)
             yield AgentEndCall()
 
         return construct_function_tool(
@@ -227,7 +220,7 @@ class EndCallTool:
         Args:
             reason: Additional instructions for when to end the call,
                 appended to the default description.
-            message: Default farewell message to send before ending the call.
+            message: Default farewell message to the user before ending the call.
 
         Returns:
             A new EndCallTool instance with the specified configuration.

@@ -189,7 +189,7 @@ async def test_end_call_yields_agent_end_call(mock_ctx, anyio_backend):
 
 
 async def test_end_call_with_configured_message(mock_ctx, anyio_backend):
-    """Test that end_call configured with default message sends AgentSendText before AgentEndCall."""
+    """Test that end_call configured with message sends AgentSendText before AgentEndCall."""
     configured_end_call = end_call(message="Goodbye, have a great day!")
     func_tool = configured_end_call.as_function_tool()
     events = await collect_events(func_tool.func(mock_ctx))
@@ -197,29 +197,6 @@ async def test_end_call_with_configured_message(mock_ctx, anyio_backend):
     assert len(events) == 2
     assert isinstance(events[0], AgentSendText)
     assert events[0].text == "Goodbye, have a great day!"
-    assert isinstance(events[1], AgentEndCall)
-
-
-async def test_end_call_with_llm_message(mock_ctx, anyio_backend):
-    """Test that LLM can pass a message when calling end_call."""
-    func_tool = end_call.as_function_tool()
-    events = await collect_events(func_tool.func(mock_ctx, message="LLM says goodbye!"))
-
-    assert len(events) == 2
-    assert isinstance(events[0], AgentSendText)
-    assert events[0].text == "LLM says goodbye!"
-    assert isinstance(events[1], AgentEndCall)
-
-
-async def test_end_call_configured_message_overrides_llm(mock_ctx, anyio_backend):
-    """Test that configured default message takes priority over LLM message."""
-    configured_end_call = end_call(message="Configured override")
-    func_tool = configured_end_call.as_function_tool()
-    events = await collect_events(func_tool.func(mock_ctx, message="LLM message"))
-
-    assert len(events) == 2
-    assert isinstance(events[0], AgentSendText)
-    assert events[0].text == "Configured override"  # Configured message wins
     assert isinstance(events[1], AgentEndCall)
 
 
