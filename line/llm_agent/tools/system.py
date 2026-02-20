@@ -157,17 +157,17 @@ class EndCallTool:
 
     _DESCRIPTIONS: Dict[str, str] = {
         "low": (
-            "End the call. ONLY use after: (1) asking if there's anything else you can help with, "
-            "(2) receiving explicit confirmation the user is done, and (3) the user has said goodbye. "
-            "Never end proactively or assume the conversation is over."
+            "End the call. Before ending, you MUST first ask 'Is there anything else I can help you with?' "
+            "and wait for the user to explicitly confirm they have no more questions. "
+            "Even if the user says goodbye, ask if there's anything else first. Never assume the conversation is over."
         ),
         "normal": (
             "End the call when the user says goodbye, thanks you, or confirms they're done. "
-            "You may briefly ask if there's anything else before ending. Say goodbye before calling."
+            "Say goodbye before calling."
         ),
         "high": (
-            "End the call promptly when the user indicates they're done. "
-            "Don't prolong with follow-up questions."
+            "End the call promptly when the user indicates they're done or says goodbye. "
+            "Say goodbye before calling. Don't ask follow-up questions like 'Is there anything else?'"
         ),
     }
 
@@ -177,20 +177,25 @@ class EndCallTool:
         description: Optional[str] = None,
     ):
         self.eagerness = eagerness
-        self._custom_description = description
-
-        # FunctionTool-compatible attributes
-        self.name = "end_call"
         self.description = description if description else self._DESCRIPTIONS[eagerness]
-        self.parameters: Dict[str, Any] = {}  # No parameters (ctx is excluded)
-        self.tool_type = ToolType.PASSTHROUGH
-        self.is_background = False
+        self._function_tool = self._create_function_tool()
 
-        # The actual implementation function
+    def _create_function_tool(self) -> FunctionTool:
+        """Create the underlying FunctionTool with the configured description."""
+
         async def _end_call_impl(ctx: ToolEnv):
             yield AgentEndCall()
 
-        self.func = _end_call_impl
+        return construct_function_tool(
+            _end_call_impl,
+            name="end_call",
+            description=self.description,
+            tool_type=ToolType.PASSTHROUGH,
+        )
+
+    def as_function_tool(self) -> FunctionTool:
+        """Return the underlying FunctionTool for use in tool resolution."""
+        return self._function_tool
 
     def __call__(
         self,

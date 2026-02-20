@@ -181,7 +181,8 @@ async def test_end_call_default_eagerness(mock_ctx, anyio_backend):
 
 async def test_end_call_yields_agent_end_call(mock_ctx, anyio_backend):
     """Test that end_call yields AgentEndCall event."""
-    events = await collect_events(end_call.func(mock_ctx))
+    func_tool = end_call.as_function_tool()
+    events = await collect_events(func_tool.func(mock_ctx))
 
     assert len(events) == 1
     assert isinstance(events[0], AgentEndCall)
@@ -192,8 +193,8 @@ async def test_end_call_low_eagerness(mock_ctx, anyio_backend):
     low_end_call = end_call(eagerness="low")
 
     assert low_end_call.eagerness == "low"
-    assert "ONLY use after" in low_end_call.description
-    assert "Never end proactively" in low_end_call.description
+    assert "MUST first ask" in low_end_call.description
+    assert "Never assume" in low_end_call.description
 
 
 async def test_end_call_high_eagerness(mock_ctx, anyio_backend):
@@ -202,6 +203,7 @@ async def test_end_call_high_eagerness(mock_ctx, anyio_backend):
 
     assert high_end_call.eagerness == "high"
     assert "promptly" in high_end_call.description
+    assert "Don't ask follow-up" in high_end_call.description
 
 
 async def test_end_call_custom_description(mock_ctx, anyio_backend):
@@ -215,17 +217,24 @@ async def test_end_call_custom_description(mock_ctx, anyio_backend):
 
 
 async def test_end_call_has_function_tool_attributes(mock_ctx, anyio_backend):
-    """Test that EndCallTool has all FunctionTool-compatible attributes."""
-    assert hasattr(end_call, "name")
-    assert hasattr(end_call, "description")
-    assert hasattr(end_call, "parameters")
-    assert hasattr(end_call, "tool_type")
-    assert hasattr(end_call, "is_background")
-    assert hasattr(end_call, "func")
+    """Test that EndCallTool.as_function_tool() returns a proper FunctionTool."""
+    func_tool = end_call.as_function_tool()
 
-    assert end_call.name == "end_call"
-    assert end_call.tool_type == ToolType.PASSTHROUGH
-    assert end_call.is_background is False
+    # Check it's a real FunctionTool with all required attributes
+    assert hasattr(func_tool, "name")
+    assert hasattr(func_tool, "description")
+    assert hasattr(func_tool, "parameters")
+    assert hasattr(func_tool, "tool_type")
+    assert hasattr(func_tool, "is_background")
+    assert hasattr(func_tool, "func")
+
+    assert func_tool.name == "end_call"
+    assert func_tool.tool_type == ToolType.PASSTHROUGH
+    assert func_tool.is_background is False
+
+    # Verify it's actually a FunctionTool instance (not duck-typed)
+    from line.llm_agent.tools.utils import FunctionTool
+    assert isinstance(func_tool, FunctionTool)
 
 
 async def test_end_call_callable_returns_new_instance(mock_ctx, anyio_backend):

@@ -62,7 +62,7 @@ T = TypeVar("T")
 
 # Type alias for tools that can be passed to LlmAgent
 # Plain callables are automatically wrapped as loopback tools
-ToolSpec = Union[FunctionTool, WebSearchTool, Callable]
+ToolSpec = Union[FunctionTool, WebSearchTool, EndCallTool, Callable]
 
 # Type for events stored in local history (OutputEvent or CustomHistoryEntry)
 _LocalEvent = Union[OutputEvent, CustomHistoryEntry]
@@ -285,7 +285,9 @@ class LlmAgent:
         for tool in tool_specs:
             if isinstance(tool, WebSearchTool):
                 web_search_tool = tool
-            elif isinstance(tool, (EndCallTool, FunctionTool)):
+            elif isinstance(tool, EndCallTool):
+                function_tools.append(tool.as_function_tool())
+            elif isinstance(tool, FunctionTool):
                 function_tools.append(tool)
             else:
                 function_tools.append(loopback_tool(tool))
