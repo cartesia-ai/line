@@ -810,5 +810,3 @@ def _construct_tool_events(
         result=result,
     )
     return called, returned
-
-

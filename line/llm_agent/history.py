@@ -15,6 +15,7 @@ from line.events import (
     AgentTextSent,
     AgentToolCalled,
     AgentToolReturned,
+    AgentTransferCall,
     AgentTurnEnded,
     AgentTurnStarted,
     AgentUpdateCall,
@@ -25,7 +26,6 @@ from line.events import (
     InputEvent,
     LogMessage,
     LogMetric,
-    AgentTransferCall,
     OutputEvent,
     UserDtmfSent,
     UserTextSent,
@@ -45,12 +45,16 @@ _INIT_EVENT_ID = "__init__"
 # Sentinels for sequence boundaries
 # ---------------------------------------------------------------------------
 
+
 class _SequenceBoundary:
     """Sentinel for start/end of the event sequence."""
+
     def __init__(self, name: str) -> None:
         self._name = name
+
     def __repr__(self) -> str:
         return self._name
+
 
 _SEQUENCE_START = _SequenceBoundary("_SEQUENCE_START")
 
@@ -62,9 +66,11 @@ _Anchor = Union[HistoryEvent, _SequenceBoundary]
 # Mutation types (internal, stored in History._mutations)
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class _InsertEntry:
     """Insert a CustomHistoryEntry before or after an anchor event."""
+
     entry: CustomHistoryEntry
     anchor: _Anchor
     position: Literal["before", "after"]
@@ -73,6 +79,7 @@ class _InsertEntry:
 @dataclass
 class _ReplaceSegment:
     """Replace a segment [start..end] inclusive with new events."""
+
     events: List[HistoryEvent]
     start: _Anchor
     end: _Anchor
@@ -84,6 +91,7 @@ _Mutation = Union[_InsertEntry, _ReplaceSegment]
 # ---------------------------------------------------------------------------
 # History class
 # ---------------------------------------------------------------------------
+
 
 class History:
     """Manages conversation history with lazy merge and mutation support.
@@ -191,7 +199,9 @@ class History:
                 raise ValueError(f"End event not found in history: {resolved_end}")
 
         # Check ordering when both are real events
-        if not isinstance(resolved_start, _SequenceBoundary) and not isinstance(resolved_end, _SequenceBoundary):
+        if not isinstance(resolved_start, _SequenceBoundary) and not isinstance(
+            resolved_end, _SequenceBoundary
+        ):
             start_idx = merged.index(resolved_start)
             end_idx = merged.index(resolved_end)
             if end_idx < start_idx:
@@ -237,9 +247,7 @@ class History:
         if self._cache is not None:
             return self._cache
 
-        result = _build_full_history(
-            self._input_history, self._local_history, self._current_event_id
-        )
+        result = _build_full_history(self._input_history, self._local_history, self._current_event_id)
 
         for mutation in self._mutations:
             if isinstance(mutation, _InsertEntry):
@@ -265,6 +273,7 @@ class History:
 # ---------------------------------------------------------------------------
 # Merge algorithm (moved from llm_agent.py)
 # ---------------------------------------------------------------------------
+
 
 def _build_full_history(
     input_history: List[InputEvent],
@@ -560,7 +569,7 @@ def _try_match_events(
         if local.text == input_evt.content:
             return (input_evt, None)
         if local.text.startswith(input_evt.content):
-            suffix = local.text[len(input_evt.content):]
+            suffix = local.text[len(input_evt.content) :]
             return (input_evt, AgentSendText(text=suffix))
     elif isinstance(local, AgentSendDtmf) and isinstance(input_evt, AgentDtmfSent):
         if local.button == input_evt.button:

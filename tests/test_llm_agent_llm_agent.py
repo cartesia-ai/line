@@ -26,7 +26,6 @@ from line.events import (
     UserTextSent,
 )
 from line.llm_agent.config import LlmConfig
-
 from line.llm_agent.llm_agent import LlmAgent
 from line.llm_agent.provider import Message, StreamChunk, ToolCall
 from line.llm_agent.tools.decorators import handoff_tool, loopback_tool, passthrough_tool
@@ -1799,5 +1798,3 @@ async def test_history_override_does_not_affect_managed(turn_env):
     # Should see the managed history, not the override
     assert any(m.content == "Real message" for m in second_messages)
     assert not any(m.content == "Override only" for m in second_messages)
-
-

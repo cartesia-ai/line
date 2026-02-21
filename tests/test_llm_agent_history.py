@@ -897,10 +897,12 @@ class TestHistory:
     # ------------------------------------------------------------------
 
     async def test_update_prefixes_history(self):
-        h = self._make_history([
-            UserTextSent(content="a"),
-            AgentTextSent(content="b"),
-        ])
+        h = self._make_history(
+            [
+                UserTextSent(content="a"),
+                AgentTextSent(content="b"),
+            ]
+        )
         _ = list(h)  # populate
 
         h.update([UserTextSent(content="x")])
@@ -1041,17 +1043,17 @@ class TestHistory:
         h.add_entry("after-a", after=merged[0])
         result = list(h)
 
-        contents = [
-            e.content for e in result
-        ]
+        contents = [e.content for e in result]
         assert contents == ["a", "after-a", "before-b", "b"]
 
     async def test_add_entry_then_update(self):
-        h = self._make_history([
-            UserTextSent(content="a"),
-            AgentTextSent(content="b"),
-            UserTextSent(content="c"),
-        ])
+        h = self._make_history(
+            [
+                UserTextSent(content="a"),
+                AgentTextSent(content="b"),
+                UserTextSent(content="c"),
+            ]
+        )
         merged = list(h)
 
         # First add an entry after "a"
