@@ -10,6 +10,9 @@ See README.md for examples and detailed documentation.
 # Configuration
 from line.llm_agent.config import FALLBACK_INTRODUCTION, FALLBACK_SYSTEM_PROMPT, LlmConfig
 
+# History
+from line.llm_agent.history import History
+
 # LLM Agent
 from line.llm_agent.llm_agent import LlmAgent
 
@@ -31,6 +34,8 @@ from line.llm_agent.tools.utils import (
 )
 
 __all__ = [
+    # History
+    "History",
     # LLM Agent
     "LlmAgent",
     # Configuration
