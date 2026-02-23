@@ -59,6 +59,7 @@ from line.events import (
     AgentTurnEnded,
     AgentTurnStarted,
     AgentUpdateCall,
+    AgentUpdateTTS,
     CallEnded,
     CallStarted,
     InputEvent,
@@ -582,6 +583,10 @@ class ConversationRunner:
         if isinstance(event, AgentEnableMultilingualSTT):
             logger.info("<- ⚙️ Enable multilingual STT")
             return ConfigOutput(stt=STTConfig(language=None))
+        # Temporary: until general multilingual language config is available
+        if isinstance(event, AgentUpdateTTS):
+            logger.info(f"<- ⚙️ Update TTS: voice_id={event.voice_id}, language={event.language}")
+            return ConfigOutput(tts=TTSConfig(voice_id=event.voice_id, language=event.language))
         if isinstance(event, AgentUpdateCall):
             # "multilingual" is a special sentinel: STT gets None (auto-detect),
             # TTS gets None (use voice default language).

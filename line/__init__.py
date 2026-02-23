@@ -25,6 +25,7 @@ from line.events import (
     AgentTurnEnded,
     AgentTurnStarted,
     AgentUpdateCall,
+    AgentUpdateTTS,
     CallEnded,
     # Input events
     CallStarted,
@@ -75,6 +76,7 @@ __all__ = [
     "LogMessage",
     "AgentUpdateCall",
     "AgentEnableMultilingualSTT",
+    "AgentUpdateTTS",
     "OutputEvent",
     # Input events
     "CallStarted",
