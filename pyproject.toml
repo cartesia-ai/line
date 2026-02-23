@@ -42,6 +42,7 @@ dependencies = [
     "ddgs>=9.8.0",
     "phonenumbers>=9.0.22",
     "build>=1.4.0",
+    "mcp>=1.0.0; python_version >= '3.10'",
 ]
 
 [project.optional-dependencies]

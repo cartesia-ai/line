@@ -11,13 +11,13 @@ Model naming:
 """
 
 from dataclasses import dataclass, field
-from typing import Any, AsyncIterator, Dict, List, Optional
+from typing import Any, AsyncIterator, Dict, List, NamedTuple, Optional
 
 from litellm import acompletion, get_llm_provider, get_supported_openai_params
 from litellm.utils import get_optional_params
 
 from line.llm_agent.config import LlmConfig, _normalize_config
-from line.llm_agent.schema_converter import function_tools_to_openai
+from line.llm_agent.schema_converter import tools_to_litellm
 from line.llm_agent.tools.utils import FunctionTool
 
 
@@ -96,7 +96,8 @@ class LLMProvider:
 
         Args:
             messages: Conversation messages.
-            tools: Optional function tools available for this call.
+            tools: Optional FunctionTools available for this call (converted
+                to OpenAI function-calling format).
             config: Optional per-call config override. When provided, its values
                 are used for sampling/model parameters and system prompt instead
                 of the config passed at init time.
@@ -140,7 +141,7 @@ class LLMProvider:
             llm_kwargs.update(cfg.extra)
 
         if tools:
-            llm_kwargs["tools"] = function_tools_to_openai(tools, strict=False)
+            llm_kwargs["tools"] = tools_to_litellm(tools)
 
         llm_kwargs.update(kwargs)
 
@@ -213,6 +214,7 @@ class _ChatStream:
             raise RuntimeError("Stream not started. Use 'async with' context manager.")
 
         tool_calls: Dict[int, ToolCall] = {}
+        arg_states: Dict[int, _ArgState] = {}
 
         async for chunk in self._response:
             text = None
@@ -237,18 +239,8 @@ class _ChatStream:
                                 tool_calls[idx].name = tc.function.name
 
                         if tc.function and tc.function.arguments:
-                            # Providers stream tool args differently:
-                            # - OpenAI: incremental chunks ("{\"ci", "ty\":", ...") - must concat
-                            # - Anthropic: incremental chunks like OpenAI - must concat
-                            # - Gemini: complete args repeated each chunk - must dedupe
-                            # Detect by checking if existing args look complete (ends with "}")
-                            existing = tool_calls[idx].arguments
-                            new_args = tc.function.arguments
-                            if not existing:
-                                tool_calls[idx].arguments = new_args
-                            elif not existing.endswith("}"):
-                                tool_calls[idx].arguments += new_args  # Incremental
-                            # else: complete args, skip duplicate
+                            arg_states[idx] = _feed_tool_args(arg_states.get(idx), tc.function.arguments)
+                            tool_calls[idx].arguments = arg_states[idx].args
 
                         # Capture thought_signature for Gemini 3+ models
                         # LiteLLM stores it in provider_specific_fields
@@ -271,3 +263,50 @@ class _ChatStream:
                 tool_calls=list(tool_calls.values()) if tool_calls else [],
                 is_final=finish_reason is not None,
             )
+
+
+class _ArgState(NamedTuple):
+    """Immutable state for incremental JSON argument accumulation."""
+
+    args: str
+    depth: int
+    in_string: bool
+    escape_next: bool
+
+
+def _feed_tool_args(state: Optional[_ArgState], fragment: str) -> _ArgState:
+    """Accumulate a streamed tool-call argument fragment.
+
+    Providers stream tool call arguments differently:
+    - OpenAI/Anthropic send incremental fragments that must be concatenated.
+    - Gemini sends complete args repeated each chunk that should replace.
+
+    We distinguish these by tracking unquoted brace depth. When depth reaches 0
+    the JSON object is complete; any subsequent fragment is a Gemini-style resend
+    and replaces rather than concatenates.
+    """
+    if state is None or (state.depth == 0 and state.args):
+        # First fragment, or previous args were complete (Gemini resend)
+        args = fragment
+        depth, in_str, esc = 0, False, False
+    else:
+        args = state.args + fragment
+        depth, in_str, esc = state.depth, state.in_string, state.escape_next
+
+    for ch in fragment:
+        if esc:
+            esc = False
+            continue
+        if ch == "\\" and in_str:
+            esc = True
+            continue
+        if ch == '"':
+            in_str = not in_str
+            continue
+        if not in_str:
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+
+    return _ArgState(args, depth, in_str, esc)
