@@ -597,11 +597,12 @@ class ConversationRunner:
             return LogMetricOutput(name=event.name, value=event.value)
         if isinstance(event, LogMessage):
             logger.debug(f"<- 🪵 Log message: {event.name} [{event.level}] {event.message}")
-            metadata = {"level": event.level, "message": event.message, "metadata": event.metadata}
-            return LogEventOutput(
-                event=event.name,
-                metadata=self._truncate_dict_for_ws(metadata),
-            )
+            metadata = {
+                "level": event.level,
+                "message": event.message,
+                "metadata": self._truncate_dict_for_ws(event.metadata),
+            }
+            return LogEventOutput(event=event.name, metadata=metadata)
         if isinstance(event, AgentToolCalled):
             logger.info(f"<- 🔧 Tool called: {event.tool_name}({event.tool_args})")
             return ToolCallOutput(name=event.tool_name, arguments=self._truncate_dict_for_ws(event.tool_args))

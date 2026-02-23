@@ -694,12 +694,16 @@ class TestEventMessageTruncation:
         assert output.arguments["_truncated"] is True
 
     def test_large_log_metadata_truncated(self):
-        """LogMessage with large metadata gets a sentinel dict."""
+        """LogMessage with large metadata truncates only the inner metadata key."""
         large_metadata = {"blob": "z" * 40_000}
         event = LogMessage(name="test", level="info", message="hi", metadata=large_metadata)
         output = self._map(event)
-        assert output.metadata["_truncated"] is True
-        assert "_preview" in output.metadata
+        assert output.metadata["level"] == "info"
+        assert output.metadata["message"] == "hi"
+        inner = output.metadata["metadata"]
+        assert isinstance(inner, dict)
+        assert inner["_truncated"] is True
+        assert "_preview" in inner
 
     def test_small_log_metadata_not_truncated(self):
         """LogMessage with small metadata passes through with original values."""
