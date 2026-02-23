@@ -112,11 +112,18 @@ class LogMetricOutput(BaseModel):
 class TTSConfig(BaseModel):
     voice_id: Optional[str] = None
     pronunciation_dict_id: Optional[str] = None
+    language: Optional[str] = None
+
+
+class STTConfig(BaseModel):
+    language: Optional[str] = None
 
 
 class ConfigOutput(BaseModel):
     type: Literal["config"] = "config"
     tts: Optional[TTSConfig] = None
+    stt: Optional[STTConfig] = None
+    language: Optional[str] = None
 
 
 OutputMessage = Union[
