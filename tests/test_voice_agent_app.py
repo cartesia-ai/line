@@ -19,6 +19,7 @@ from line.agent import TurnEnv
 from line.events import (
     AgentSendText,
     AgentTextSent,
+    AgentUpdateCall,
     CallEnded,
     CallStarted,
     InputEvent,
@@ -561,3 +562,39 @@ class TestParseCommitted:
         assert committed == "Hello world"
         assert remaining_committed == ""
         assert remaining == ""
+
+
+# ============================================================
+# AgentUpdateCall -> ConfigOutput mapping tests
+# ============================================================
+
+
+class TestUpdateCallMapping:
+    """Tests for _map_output_event handling of AgentUpdateCall language mapping."""
+
+    def _map(self, event):
+        """Helper to call _map_output_event on a ConversationRunner."""
+        ws = create_mock_websocket()
+        runner = ConversationRunner(ws, noop_agent, env)
+        return runner._map_output_event(event)
+
+    def test_language_sets_both(self):
+        """language='fr' sets TTS language and STT config (backward compat)."""
+        result = self._map(AgentUpdateCall(language="fr"))
+        assert result.tts.language == "fr"
+        assert result.stt is not None
+        assert result.stt.language == "fr"
+
+    def test_multilingual_sets_both_to_none(self):
+        """language='multilingual' maps to None for both STT and TTS."""
+        result = self._map(AgentUpdateCall(language="multilingual"))
+        assert result.tts.language is None
+        assert result.stt is not None
+        assert result.stt.language is None
+        assert result.language is None
+
+    def test_all_none_defaults(self):
+        """No fields set -> TTS language None, STT config None (no change)."""
+        result = self._map(AgentUpdateCall())
+        assert result.tts.language is None
+        assert result.stt is None

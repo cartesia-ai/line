@@ -578,6 +578,11 @@ class ConversationRunner:
             result_str = str(event.result) if event.result is not None else None
             return ToolCallOutput(name=event.tool_name, arguments=event.tool_args, result=result_str)
         if isinstance(event, AgentUpdateCall):
+            # "multilingual" is a special sentinel: STT gets None (auto-detect),
+            # TTS gets None (use voice default language).
+            is_multilingual = event.language == "multilingual"
+            effective_language = None if is_multilingual else event.language
+
             logger.info(
                 f"<- ⚙️ Update call: voice_id={event.voice_id}, "
                 f"pronunciation_dict_id={event.pronunciation_dict_id}, "
@@ -587,10 +592,10 @@ class ConversationRunner:
                 tts=TTSConfig(
                     voice_id=event.voice_id,
                     pronunciation_dict_id=event.pronunciation_dict_id,
-                    language=event.language,
+                    language=effective_language,
                 ),
-                stt=STTConfig(language=event.language) if event.language is not None else None,
-                language=event.language,
+                stt=STTConfig(language=effective_language) if event.language is not None else None,
+                language=effective_language,
             )
 
         return ErrorOutput(content=f"Unhandled output event type: {type(event).__name__}")
