@@ -113,6 +113,25 @@ from line.llm_agent import end_call, send_dtmf, transfer_call, web_search, agent
 | `web_search` | loopback | Web search with native LLM support or DuckDuckGo fallback |
 | `agent_as_handoff` | handoff | Create a handoff tool from another agent |
 
+### End Call
+
+Hangs up the call. Use `description` to instruct when and how the agent should end the call.
+
+```python
+from line.llm_agent import LlmAgent, end_call
+
+# Default behavior (conservative - only ends on explicit goodbye)
+agent = LlmAgent(model="gpt-4o", tools=[end_call])
+
+# Custom description (fully replaces default)
+agent = LlmAgent(model="gpt-4o", tools=[
+    end_call(description="End when the customer confirms their order is complete.")
+])
+```
+
+The default description is conservative: *"ONLY end the call if the user explicitly says
+goodbye or indicates they are done."*
+
 ### Web Search
 
 Uses native LLM web search when available, falls back to DuckDuckGo:
