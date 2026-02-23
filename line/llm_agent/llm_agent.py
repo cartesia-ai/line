@@ -150,13 +150,13 @@ class LlmAgent:
         Args:
             env: The turn environment.
             event: The input event to process.
-            config: Optional LlmConfig to merge with self._config for this call.
-            tools: Optional tools to use for this call. Tools with matching names replace
+            config: Optional LlmConfig to merge with self._config for this #process invocation
+            tools: Optional tools to use for this #process invocation. Tools with matching names replace
                 those in self._tools; other tools from self._tools are preserved.
-            context: Extra context for this call only. If a string, converted to a
+            context: Extra context for this #process invocation only. If a string, converted to a
                 system CustomHistoryEntry. If a list of HistoryEvents, used as-is.
                 Appended to the end of history for message building. Not persisted.
-            history: Override the managed history for this call only. When provided,
+            history: Override the managed history for this #process invocation only. When provided,
                 _build_messages uses this list instead of self.history. The managed
                 self.history still receives _set_input and _append_local as usual.
         """
@@ -165,7 +165,7 @@ class LlmAgent:
         current_event_id = event.history[-1].event_id if event.history else ""
         self.history._set_input(event.history or [], current_event_id)
 
-        # Compute effective config and tools for this call
+        # Compute effective config and tools for this #process invocation
         effective_config = _merge_configs(self._config, config) if config else self._config
         effective_tools = self._merge_tools(self._tools, tools) if tools else self._tools
 

@@ -46,21 +46,16 @@ _INIT_EVENT_ID = "__init__"
 # ---------------------------------------------------------------------------
 
 
-class _SequenceBoundary:
-    """Sentinel for start/end of the event sequence."""
+class _SequenceStart:
+    """Sentinel for start of the history sequence"""
 
-    def __init__(self, name: str) -> None:
-        self._name = name
-
-    def __repr__(self) -> str:
-        return self._name
+    pass
 
 
-_SEQUENCE_START = _SequenceBoundary("_SEQUENCE_START")
+_SEQUENCE_START = _SequenceStart()
 
 # Union type for anchors: either a real event or a boundary sentinel
-_Anchor = Union[HistoryEvent, _SequenceBoundary]
-
+_Anchor = Union[HistoryEvent, _SequenceStart]
 
 # ---------------------------------------------------------------------------
 # Mutation types (internal, stored in History._mutations)
@@ -112,7 +107,11 @@ class History:
         self._input_history: List[InputEvent] = []
         self._local_history: List[tuple[str, _LocalEvent]] = []
         self._current_event_id: str = _INIT_EVENT_ID
+        # Cache for the merged history with mutations applied. Invalidated on new input or mutations.
         self._cache: Optional[List[HistoryEvent]] = None
+        # The "persistent" changes to history (ie, add_entry or set_history) are stored as mutations that
+        # we lazy apply on top of the merged input/local history when we need to produce the final history
+        # see self._ensure_merged()
         self._mutations: List[_Mutation] = []
 
     # ------------------------------------------------------------------
@@ -153,7 +152,7 @@ class History:
             position = "after"
 
         # Validate real anchors exist in the current history
-        if not isinstance(anchor, _SequenceBoundary):
+        if anchor is not _SEQUENCE_START:
             if anchor not in merged:
                 raise ValueError(f"Anchor event not found in history: {anchor}")
 
@@ -191,17 +190,15 @@ class History:
 
         # Validate real anchors exist in the current history
         merged = self._ensure_merged()
-        if not isinstance(resolved_start, _SequenceBoundary):
+        if resolved_start is not _SEQUENCE_START:
             if resolved_start not in merged:
                 raise ValueError(f"Start event not found in history: {resolved_start}")
-        if not isinstance(resolved_end, _SequenceBoundary):
+        if resolved_end is not _SEQUENCE_START:
             if resolved_end not in merged:
                 raise ValueError(f"End event not found in history: {resolved_end}")
 
         # Check ordering when both are real events
-        if not isinstance(resolved_start, _SequenceBoundary) and not isinstance(
-            resolved_end, _SequenceBoundary
-        ):
+        if resolved_start is not _SEQUENCE_START and resolved_end is not _SEQUENCE_START:
             start_idx = merged.index(resolved_start)
             end_idx = merged.index(resolved_end)
             if end_idx < start_idx:
@@ -242,6 +239,8 @@ class History:
     # Internal: lazy rebuild
     # ------------------------------------------------------------------
 
+    # The "persistent" changes to the history are stored as mutations that we lazy apply on top of the
+    # merged input/local history when we need to produce the final history
     def _ensure_merged(self) -> List[HistoryEvent]:
         """Build or return cached merged history with mutations applied."""
         if self._cache is not None:
