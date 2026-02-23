@@ -157,19 +157,28 @@ class EndCallTool:
     Configurable end_call tool with optional message and custom description.
 
     Args:
-        description: Description that replaces the default. \
-            Use this to add additional instructions for when to end the call.
-        message: Farewell message to the user before ending the call.
+        description: Description that replaces the default. Use this to customize
+            when the LLM should end the call.
+        message: Farewell message spoken to the user before ending the call.
+            Use this to ensure users always hear a consistent goodbye.
+
+    Note:
+        If using `message`, also provide a custom `description` that does NOT
+        instruct the LLM to say goodbye (the default does). Otherwise, the LLM
+        may say goodbye twice - once naturally, then again via the message.
 
     Usage:
-        # Default behavior
+        # Default behavior (LLM says goodbye naturally)
         LlmAgent(tools=[end_call])
 
-        # Custom description (fully replaces default)
+        # Custom description only
         LlmAgent(tools=[end_call(description="Only end after user says 'goodbye'")])
 
-        # With a default farewell message
-        LlmAgent(tools=[end_call(message="Goodbye, have a great day!")])
+        # With farewell message - provide description WITHOUT "say goodbye" instruction
+        LlmAgent(tools=[end_call(
+            description="End the call when the user confirms they're done.",
+            message="Thanks for calling! Have a great day.",
+        )])
     """
 
     DEFAULT_DESCRIPTION = (
@@ -218,8 +227,13 @@ class EndCallTool:
         """Create a configured EndCallTool instance.
 
         Args:
-            description: Custom description that replaces the default.
-            message: Default farewell message to the user before ending the call.
+            description: Description that replaces the default. Use this to customize
+                when the LLM should end the call.
+            message: Farewell message spoken to the user before ending the call.
+
+        Note:
+            If using `message`, also provide a custom `description` that does NOT
+            instruct the LLM to say goodbye. Otherwise, double goodbye may occur.
 
         Returns:
             A new EndCallTool instance with the specified configuration.
@@ -228,7 +242,10 @@ class EndCallTool:
 
 
 # Default instance - can be used directly or called to configure
-# Usage: end_call or end_call(description="Only end after explicit goodbye")
+# Examples:
+#   end_call                                              # Use default behavior
+#   end_call(description="Only end after explicit goodbye")  # Custom instructions
+#   end_call(message="Thanks for calling!")               # Guaranteed farewell message
 end_call = EndCallTool()
 
 
