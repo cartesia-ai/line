@@ -70,6 +70,12 @@ class AgentUpdateCall(BaseModel):
     type: Literal["update_call"] = "update_call"
     voice_id: Optional[str] = None
     pronunciation_dict_id: Optional[str] = None
+    language: Optional[str] = None
+
+
+# Temporary: short-term event until general multilingual language config is available
+class AgentEnableMultilingualSTT(BaseModel):
+    type: Literal["enable_multilingual_stt"] = "enable_multilingual_stt"
 
 
 OutputEvent = Union[
@@ -82,6 +88,7 @@ OutputEvent = Union[
     LogMetric,
     LogMessage,
     AgentUpdateCall,
+    AgentEnableMultilingualSTT,
 ]
 
 
@@ -227,6 +234,7 @@ __all__ = [
     "LogMetric",
     "LogMessage",
     "AgentUpdateCall",
+    "AgentEnableMultilingualSTT",
     "OutputEvent",
     # Custom
     "CustomHistoryEntry",
