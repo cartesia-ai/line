@@ -589,9 +589,7 @@ class ConversationRunner:
                     pronunciation_dict_id=event.pronunciation_dict_id,
                     language=event.language,
                 ),
-                stt=STTConfig(
-                    language=event.language,
-                ),
+                stt=STTConfig(language=event.language) if event.language is not None else None,
                 language=event.language,
             )
 
