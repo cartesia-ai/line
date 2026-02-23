@@ -38,6 +38,7 @@ from line._harness_types import (
     LogMetricOutput,
     MessageOutput,
     OutputMessage,
+    STTConfig,
     ToolCallOutput,
     TranscriptionInput,
     TransferOutput,
@@ -47,6 +48,7 @@ from line._harness_types import (
 from line.agent import Agent, AgentSpec, EventFilter, TurnEnv
 from line.events import (
     AgentDtmfSent,
+    AgentEnableMultilingualSTT,
     AgentEndCall,
     AgentSendDtmf,
     AgentSendText,
@@ -576,16 +578,29 @@ class ConversationRunner:
             logger.info(f"<- 🔧 Tool returned: {event.tool_name}({event.tool_args}) -> {event.result}")
             result_str = str(event.result) if event.result is not None else None
             return ToolCallOutput(name=event.tool_name, arguments=event.tool_args, result=result_str)
+        # Temporary: until Audio Harness changes for top-level language=multilingual are deployed
+        if isinstance(event, AgentEnableMultilingualSTT):
+            logger.info("<- ⚙️ Enable multilingual STT")
+            return ConfigOutput(stt=STTConfig(language=None))
         if isinstance(event, AgentUpdateCall):
+            # "multilingual" is a special sentinel: STT gets None (auto-detect),
+            # TTS gets None (use voice default language).
+            is_multilingual = event.language == "multilingual"
+            effective_language = None if is_multilingual else event.language
+
             logger.info(
                 f"<- ⚙️ Update call: voice_id={event.voice_id}, "
-                f"pronunciation_dict_id={event.pronunciation_dict_id}"
+                f"pronunciation_dict_id={event.pronunciation_dict_id}, "
+                f"language={event.language}"
             )
             return ConfigOutput(
                 tts=TTSConfig(
                     voice_id=event.voice_id,
                     pronunciation_dict_id=event.pronunciation_dict_id,
+                    language=effective_language,
                 ),
+                stt=STTConfig(language=effective_language) if event.language is not None else None,
+                language=effective_language,
             )
 
         return ErrorOutput(content=f"Unhandled output event type: {type(event).__name__}")
