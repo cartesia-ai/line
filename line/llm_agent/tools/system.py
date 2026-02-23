@@ -154,45 +154,33 @@ web_search = WebSearchTool()
 
 class EndCallTool:
     """
-    Configurable end_call tool with optional message and custom description.
+    Configurable end_call tool with custom description.
+
+    The LLM must provide a reason when calling this tool, which encourages
+    deliberate decision-making before ending the call.
 
     Args:
         description: Description that replaces the default. Use this to customize
             when the LLM should end the call.
-        message: Farewell message spoken to the user before ending the call.
-            Use this to ensure users always hear a consistent goodbye.
-
-    Note:
-        If using `message`, also provide a custom `description` that does NOT
-        instruct the LLM to say goodbye (the default does). Otherwise, the LLM
-        may say goodbye twice - once naturally, then again via the message.
 
     Usage:
-        # Default behavior (LLM says goodbye naturally)
+        # Default behavior (conservative - only ends on explicit goodbye)
         LlmAgent(tools=[end_call])
 
-        # Custom description only
-        LlmAgent(tools=[end_call(description="Only end after user says 'goodbye'")])
-
-        # With farewell message - provide description WITHOUT "say goodbye" instruction
-        LlmAgent(tools=[end_call(
-            description="End the call when the user confirms they're done.",
-            message="Thanks for calling! Have a great day.",
-        )])
+        # Custom description
+        LlmAgent(tools=[end_call(description="End when the customer confirms their order.")])
     """
 
     DEFAULT_DESCRIPTION = (
-        "End the call when the user says goodbye, thanks you, or confirms they're done. "
+        "ONLY end the call if the user explicitly says goodbye or indicates they are done. "
         "Say a natural goodbye before calling this tool."
     )
 
     def __init__(
         self,
         description: Optional[str] = None,
-        message: Optional[str] = None,
     ):
         self.description = description if description else self.DEFAULT_DESCRIPTION
-        self.message = message
         self._function_tool = self._create_function_tool()
 
     @property
@@ -203,9 +191,10 @@ class EndCallTool:
     def _create_function_tool(self) -> FunctionTool:
         """Create the underlying FunctionTool with the configured description."""
 
-        async def _end_call_impl(ctx: ToolEnv):
-            if self.message:
-                yield AgentSendText(text=self.message)
+        async def _end_call_impl(
+            ctx: ToolEnv,
+            reason: Annotated[str, "The reason for ending the call"],
+        ):
             yield AgentEndCall()
 
         return construct_function_tool(
@@ -222,30 +211,23 @@ class EndCallTool:
     def __call__(
         self,
         description: Optional[str] = None,
-        message: Optional[str] = None,
     ) -> "EndCallTool":
         """Create a configured EndCallTool instance.
 
         Args:
             description: Description that replaces the default. Use this to customize
                 when the LLM should end the call.
-            message: Farewell message spoken to the user before ending the call.
-
-        Note:
-            If using `message`, also provide a custom `description` that does NOT
-            instruct the LLM to say goodbye. Otherwise, double goodbye may occur.
 
         Returns:
             A new EndCallTool instance with the specified configuration.
         """
-        return EndCallTool(description=description, message=message)
+        return EndCallTool(description=description)
 
 
 # Default instance - can be used directly or called to configure
 # Examples:
 #   end_call                                              # Use default behavior
 #   end_call(description="Only end after explicit goodbye")  # Custom instructions
-#   end_call(message="Thanks for calling!")               # Guaranteed farewell message
 end_call = EndCallTool()
 
 

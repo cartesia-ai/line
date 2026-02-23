@@ -115,29 +115,22 @@ from line.llm_agent import end_call, send_dtmf, transfer_call, web_search, agent
 
 ### End Call
 
-Configurable tool to end the call with optional custom description and farewell message:
+Hangs up the call. Use `description` to instruct when and how the agent should end the call.
 
 ```python
 from line.llm_agent import LlmAgent, end_call
 
-# Default behavior (LLM says goodbye naturally before ending)
+# Default behavior (conservative - only ends on explicit goodbye)
 agent = LlmAgent(model="gpt-4o", tools=[end_call])
 
 # Custom description (fully replaces default)
 agent = LlmAgent(model="gpt-4o", tools=[
-    end_call(description="Only end the call after the user explicitly says goodbye.")
-])
-
-# With farewell message - always provide custom description too!
-# The default description tells the LLM to say goodbye, which would cause
-# a double goodbye if combined with a message.
-agent = LlmAgent(model="gpt-4o", tools=[
-    end_call(
-        description="End the call when the customer confirms they're done.",
-        message="Thanks for calling! Have a great day.",
-    )
+    end_call(description="End when the customer confirms their order is complete.")
 ])
 ```
+
+The default description is conservative: *"ONLY end the call if the user explicitly says
+goodbye or indicates they are done."*
 
 ### Web Search
 

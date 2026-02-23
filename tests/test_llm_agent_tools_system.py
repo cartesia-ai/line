@@ -174,30 +174,28 @@ async def test_send_dtmf_hash(mock_ctx, anyio_backend):
 
 
 async def test_end_call_default_description(mock_ctx, anyio_backend):
-    """Test that default end_call has the default description."""
+    """Test that default end_call has a conservative default description."""
     assert end_call.description == EndCallTool.DEFAULT_DESCRIPTION
-    assert "End the call" in end_call.description
+    assert "ONLY end" in end_call.description
 
 
 async def test_end_call_yields_agent_end_call(mock_ctx, anyio_backend):
     """Test that end_call yields AgentEndCall event."""
     func_tool = end_call.as_function_tool()
-    events = await collect_events(func_tool.func(mock_ctx))
+    # LLM must provide a reason when calling end_call
+    events = await collect_events(func_tool.func(mock_ctx, reason="user said goodbye"))
 
     assert len(events) == 1
     assert isinstance(events[0], AgentEndCall)
 
 
-async def test_end_call_with_configured_message(mock_ctx, anyio_backend):
-    """Test that end_call configured with message sends AgentSendText before AgentEndCall."""
-    configured_end_call = end_call(message="Goodbye, have a great day!")
-    func_tool = configured_end_call.as_function_tool()
-    events = await collect_events(func_tool.func(mock_ctx))
+async def test_end_call_requires_reason_parameter(mock_ctx, anyio_backend):
+    """Test that the end_call tool schema requires a reason parameter."""
+    func_tool = end_call.as_function_tool()
 
-    assert len(events) == 2
-    assert isinstance(events[0], AgentSendText)
-    assert events[0].text == "Goodbye, have a great day!"
-    assert isinstance(events[1], AgentEndCall)
+    # Check that 'reason' is in the parameters and is required
+    assert "reason" in func_tool.parameters
+    assert func_tool.parameters["reason"].required is True
 
 
 async def test_end_call_custom_description(mock_ctx, anyio_backend):
