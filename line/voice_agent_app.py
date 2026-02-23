@@ -38,11 +38,11 @@ from line._harness_types import (
     LogMetricOutput,
     MessageOutput,
     OutputMessage,
+    STTConfig,
     ToolCallOutput,
     TranscriptionInput,
     TransferOutput,
     TTSConfig,
-    STTConfig,
     UserStateInput,
 )
 from line.agent import Agent, AgentSpec, EventFilter, TurnEnv
