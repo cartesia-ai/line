@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cartesia-line"
-version = "0.2.3alpha4"
+version = "0.2.3alpha5"
 description = "Cartesia Voice Agents SDK"
 readme = "README.md"
 requires-python = ">=3.9"
