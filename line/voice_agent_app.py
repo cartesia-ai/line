@@ -579,13 +579,16 @@ class ConversationRunner:
         if isinstance(event, AgentUpdateCall):
             logger.info(
                 f"<- ⚙️ Update call: voice_id={event.voice_id}, "
-                f"pronunciation_dict_id={event.pronunciation_dict_id}"
+                f"pronunciation_dict_id={event.pronunciation_dict_id}, "
+                f"language={event.language}"
             )
             return ConfigOutput(
                 tts=TTSConfig(
                     voice_id=event.voice_id,
                     pronunciation_dict_id=event.pronunciation_dict_id,
+                    language=event.language,
                 ),
+                language=event.language,
             )
 
         return ErrorOutput(content=f"Unhandled output event type: {type(event).__name__}")
