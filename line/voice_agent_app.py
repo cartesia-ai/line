@@ -42,6 +42,7 @@ from line._harness_types import (
     TranscriptionInput,
     TransferOutput,
     TTSConfig,
+    STTConfig,
     UserStateInput,
 )
 from line.agent import Agent, AgentSpec, EventFilter, TurnEnv
@@ -586,6 +587,9 @@ class ConversationRunner:
                 tts=TTSConfig(
                     voice_id=event.voice_id,
                     pronunciation_dict_id=event.pronunciation_dict_id,
+                    language=event.language,
+                ),
+                stt=STTConfig(
                     language=event.language,
                 ),
                 language=event.language,
