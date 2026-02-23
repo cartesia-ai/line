@@ -549,6 +549,35 @@ class ConversationRunner:
 
         return event, raw_history
 
+    @staticmethod
+    def _truncate_for_ws(value: Any, max_chars: int = 30000) -> str:
+        """Convert a value to string and truncate if over the limit.
+
+        Used to avoid sending large payloads over the WebSocket for logging.
+        The full data is still sent to the LLM via the agent path; this only
+        affects the observability payload.
+        """
+        s = json.dumps(value, default=str) if isinstance(value, (dict, list)) else str(value)
+        if len(s) > max_chars:
+            return s[:max_chars] + "... [truncated]"
+        return s
+
+    @staticmethod
+    def _truncate_dict_for_ws(
+        value: Optional[Dict[str, Any]], max_chars: int = 30000
+    ) -> Optional[Dict[str, Any]]:
+        """Truncate a dict if its JSON serialization exceeds the limit.
+
+        Returns the original dict if under the limit, or a sentinel dict with
+        a preview if over.
+        """
+        if value is None:
+            return None
+        serialized = json.dumps(value, default=str)
+        if len(serialized) > max_chars:
+            return {"_truncated": True, "_preview": serialized[:200]}
+        return value
+
     def _map_output_event(self, event: OutputEvent) -> OutputMessage:
         """Convert OutputEvent to websocket OutputMessage."""
         if isinstance(event, AgentSendText):
@@ -568,17 +597,23 @@ class ConversationRunner:
             return LogMetricOutput(name=event.name, value=event.value)
         if isinstance(event, LogMessage):
             logger.debug(f"<- 🪵 Log message: {event.name} [{event.level}] {event.message}")
-            return LogEventOutput(
-                event=event.name,
-                metadata={"level": event.level, "message": event.message, "metadata": event.metadata},
-            )
+            metadata = {
+                "level": event.level,
+                "message": event.message,
+                "metadata": self._truncate_dict_for_ws(event.metadata),
+            }
+            return LogEventOutput(event=event.name, metadata=metadata)
         if isinstance(event, AgentToolCalled):
             logger.info(f"<- 🔧 Tool called: {event.tool_name}({event.tool_args})")
-            return ToolCallOutput(name=event.tool_name, arguments=event.tool_args)
+            return ToolCallOutput(name=event.tool_name, arguments=self._truncate_dict_for_ws(event.tool_args))
         if isinstance(event, AgentToolReturned):
             logger.info(f"<- 🔧 Tool returned: {event.tool_name}({event.tool_args}) -> {event.result}")
-            result_str = str(event.result) if event.result is not None else None
-            return ToolCallOutput(name=event.tool_name, arguments=event.tool_args, result=result_str)
+            result_str = self._truncate_for_ws(event.result) if event.result is not None else None
+            return ToolCallOutput(
+                name=event.tool_name,
+                arguments=self._truncate_dict_for_ws(event.tool_args),
+                result=result_str,
+            )
         # Temporary: until Audio Harness changes for top-level language=multilingual are deployed
         if isinstance(event, AgentEnableMultilingualSTT):
             logger.info("<- ⚙️ Enable multilingual STT")

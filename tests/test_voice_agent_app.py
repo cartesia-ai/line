@@ -9,6 +9,7 @@ Focuses on:
 """
 
 import asyncio
+from datetime import datetime
 from typing import AsyncIterator, List
 from unittest.mock import AsyncMock, MagicMock
 
@@ -20,11 +21,14 @@ from line.events import (
     AgentEnableMultilingualSTT,
     AgentSendText,
     AgentTextSent,
+    AgentToolCalled,
+    AgentToolReturned,
     AgentUpdateCall,
     AgentUpdateTTS,
     CallEnded,
     CallStarted,
     InputEvent,
+    LogMessage,
     OutputEvent,
     UserTextSent,
     UserTurnEnded,
@@ -621,3 +625,108 @@ class TestUpdateCallMapping:
         assert result.tts.voice_id is None
         assert result.tts.language is None
         assert result.stt is None
+
+
+# ============================================================
+# WebSocket output truncation tests
+# ============================================================
+
+
+class TestEventMessageTruncation:
+    """Tests for _map_output_event truncation of large output event payloads."""
+
+    def _map(self, event):
+        ws = create_mock_websocket()
+        runner = ConversationRunner(ws, noop_agent, env)
+        return runner._map_output_event(event)
+
+    def test_small_result_not_truncated(self):
+        """Tool results under the limit are passed through unchanged."""
+        event = AgentToolReturned(tool_call_id="1", tool_name="menu_info", tool_args={}, result="small")
+        output = self._map(event)
+        assert output.result == "small"
+
+    def test_large_result_truncated(self):
+        """Tool results over 30KB are truncated to avoid large WebSocket payloads."""
+        large_result = "x" * 40_000
+        event = AgentToolReturned(tool_call_id="1", tool_name="menu_info", tool_args={}, result=large_result)
+        output = self._map(event)
+        assert len(output.result) < 32_000
+        assert output.result.endswith("... [truncated]")
+        assert output.result.startswith("x" * 100)
+
+    def test_result_at_boundary_not_truncated(self):
+        """Tool results exactly at 30000 chars are not truncated."""
+        boundary_result = "y" * 30_000
+        event = AgentToolReturned(
+            tool_call_id="1", tool_name="menu_info", tool_args={}, result=boundary_result
+        )
+        output = self._map(event)
+        assert output.result == boundary_result
+
+    def test_none_result_unchanged(self):
+        """None results are passed through as None."""
+        event = AgentToolReturned(tool_call_id="1", tool_name="menu_info", tool_args={}, result=None)
+        output = self._map(event)
+        assert output.result is None
+
+    def test_large_tool_args_truncated(self):
+        """AgentToolCalled with large tool_args gets a sentinel dict."""
+        large_args = {"data": "x" * 40_000}
+        event = AgentToolCalled(tool_call_id="1", tool_name="big_tool", tool_args=large_args)
+        output = self._map(event)
+        assert output.arguments["_truncated"] is True
+        assert "_preview" in output.arguments
+        assert len(output.arguments["_preview"]) == 200
+
+    def test_small_tool_args_not_truncated(self):
+        """AgentToolCalled with small tool_args passes through unchanged."""
+        args = {"query": "hello"}
+        event = AgentToolCalled(tool_call_id="1", tool_name="search", tool_args=args)
+        output = self._map(event)
+        assert output.arguments == args
+
+    def test_large_tool_returned_args_truncated(self):
+        """AgentToolReturned also truncates large tool_args."""
+        large_args = {"data": "x" * 40_000}
+        event = AgentToolReturned(tool_call_id="1", tool_name="big_tool", tool_args=large_args, result="ok")
+        output = self._map(event)
+        assert output.arguments["_truncated"] is True
+
+    def test_large_log_metadata_truncated(self):
+        """LogMessage with large metadata truncates only the inner metadata key."""
+        large_metadata = {"blob": "z" * 40_000}
+        event = LogMessage(name="test", level="info", message="hi", metadata=large_metadata)
+        output = self._map(event)
+        assert output.metadata["level"] == "info"
+        assert output.metadata["message"] == "hi"
+        inner = output.metadata["metadata"]
+        assert isinstance(inner, dict)
+        assert inner["_truncated"] is True
+        assert "_preview" in inner
+
+    def test_small_log_metadata_not_truncated(self):
+        """LogMessage with small metadata passes through with original values."""
+        event = LogMessage(name="test", level="info", message="hi", metadata={"key": "val"})
+        output = self._map(event)
+        assert output.metadata["level"] == "info"
+        assert output.metadata["message"] == "hi"
+        assert output.metadata["metadata"] == {"key": "val"}
+
+    def test_non_serializable_result_does_not_crash(self):
+        """Non-JSON-serializable result (e.g. datetime) is converted via str, not crash."""
+        event = AgentToolReturned(tool_call_id="1", tool_name="t", tool_args={}, result=datetime.now())
+        output = self._map(event)
+        assert isinstance(output.result, str)
+
+    def test_non_serializable_tool_args_does_not_crash(self):
+        """Non-JSON-serializable values in tool_args don't crash json.dumps."""
+        event = AgentToolCalled(tool_call_id="1", tool_name="t", tool_args={"ts": datetime.now()})
+        output = self._map(event)
+        assert isinstance(output.arguments, dict)
+
+    def test_non_serializable_log_metadata_does_not_crash(self):
+        """Non-JSON-serializable values in LogMessage metadata don't crash json.dumps."""
+        event = LogMessage(name="test", level="info", message="hi", metadata={"ts": datetime.now()})
+        output = self._map(event)
+        assert isinstance(output.metadata, dict)
