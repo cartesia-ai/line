@@ -21,6 +21,7 @@ from line.events import (
     AgentSendText,
     AgentTextSent,
     AgentUpdateCall,
+    AgentUpdateTTS,
     CallEnded,
     CallStarted,
     InputEvent,
@@ -604,5 +605,19 @@ class TestUpdateCallMapping:
     def test_all_none_defaults(self):
         """No fields set -> TTS language None, STT config None (no change)."""
         result = self._map(AgentUpdateCall())
+        assert result.tts.language is None
+        assert result.stt is None
+
+    def test_update_tts_with_values(self):
+        """AgentUpdateTTS sets TTS voice and language, leaves STT alone."""
+        result = self._map(AgentUpdateTTS(voice_id="v1", language="fr"))
+        assert result.tts.voice_id == "v1"
+        assert result.tts.language == "fr"
+        assert result.stt is None
+
+    def test_update_tts_defaults(self):
+        """AgentUpdateTTS with no fields -> TTS voice/language None, STT None."""
+        result = self._map(AgentUpdateTTS())
+        assert result.tts.voice_id is None
         assert result.tts.language is None
         assert result.stt is None

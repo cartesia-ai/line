@@ -78,6 +78,13 @@ class AgentEnableMultilingualSTT(BaseModel):
     type: Literal["enable_multilingual_stt"] = "enable_multilingual_stt"
 
 
+# Temporary: short-term event until general multilingual language config is available
+class AgentUpdateTTS(BaseModel):
+    type: Literal["update_tts"] = "update_tts"
+    voice_id: Optional[str] = None
+    language: Optional[str] = None
+
+
 OutputEvent = Union[
     AgentSendText,
     AgentSendDtmf,
@@ -89,6 +96,7 @@ OutputEvent = Union[
     LogMessage,
     AgentUpdateCall,
     AgentEnableMultilingualSTT,
+    AgentUpdateTTS,
 ]
 
 
@@ -235,6 +243,7 @@ __all__ = [
     "LogMessage",
     "AgentUpdateCall",
     "AgentEnableMultilingualSTT",
+    "AgentUpdateTTS",
     "OutputEvent",
     # Custom
     "CustomHistoryEntry",
