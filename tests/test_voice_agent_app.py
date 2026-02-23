@@ -17,6 +17,7 @@ import pytest
 
 from line.agent import TurnEnv
 from line.events import (
+    AgentEnableMultilingualSTT,
     AgentSendText,
     AgentTextSent,
     AgentUpdateCall,
@@ -592,6 +593,13 @@ class TestUpdateCallMapping:
         assert result.stt is not None
         assert result.stt.language is None
         assert result.language is None
+
+    def test_enable_multilingual_stt(self):
+        """AgentEnableMultilingualSTT sets STT language to None, leaves TTS alone."""
+        result = self._map(AgentEnableMultilingualSTT())
+        assert result.stt is not None
+        assert result.stt.language is None
+        assert result.tts is None
 
     def test_all_none_defaults(self):
         """No fields set -> TTS language None, STT config None (no change)."""

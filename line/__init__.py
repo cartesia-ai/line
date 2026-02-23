@@ -12,6 +12,7 @@ from line.agent import (
 # Events
 from line.events import (
     AgentDtmfSent,
+    AgentEnableMultilingualSTT,
     AgentEndCall,
     AgentHandedOff,
     AgentSendDtmf,
@@ -73,6 +74,7 @@ __all__ = [
     "LogMetric",
     "LogMessage",
     "AgentUpdateCall",
+    "AgentEnableMultilingualSTT",
     "OutputEvent",
     # Input events
     "CallStarted",
