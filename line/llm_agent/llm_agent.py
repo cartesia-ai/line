@@ -356,7 +356,7 @@ class LlmAgent:
             )
             async with stream:
                 async for chunk in stream:
-                    # Track time to first chunk (text or tool call) - measured from start of _generate_response
+                    # Track time to first chunk (text or tool call)
                     if not first_chunk_logged and (chunk.text or chunk.tool_calls):
                         first_chunk_ms = (time.perf_counter() - response_start_time) * 1000
                         logger.info(f"Time to first chunk: {first_chunk_ms:.2f}ms")
@@ -367,7 +367,7 @@ class LlmAgent:
                         output = AgentSendText(text=chunk.text)
                         self.history._append_local(output)
 
-                        # Track time to first text - measured from start of _generate_response
+                        # Track time to first text
                         if not first_text_logged:
                             first_text_ms = (time.perf_counter() - response_start_time) * 1000
                             logger.info(f"Time to first text: {first_text_ms:.2f}ms")
