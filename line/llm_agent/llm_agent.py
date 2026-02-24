@@ -290,10 +290,10 @@ class LlmAgent:
         Args:
             env: The turn environment.
             event: The input event to process.
-            tool_specs: ToolSpecs to use for this call.
-            config: The effective LlmConfig for this call.
-            context: Extra context to append to history for this call only.
-            history: Override history for this call only.
+            tool_specs: ToolSpecs to use for the current #process invocation
+            config: The effective LlmConfig for the current #process invocation
+            context: Extra context to append to history for the current #process invocation only.
+            history: Override history for the current #process invocation only.
         """
         tools, web_search_options = self._resolve_tools(tool_specs)
         tool_map: Dict[str, FunctionTool] = {t.name: t for t in tools}
@@ -303,7 +303,7 @@ class LlmAgent:
         for _iteration in range(self._max_tool_iterations):
             # ==== LOOPBACK MANAGMENT ==== #
             # First, yield any pending events from backgrounded tools
-            # These events were produced since the last iteration (or from previous process() calls)
+            # These events were produced since the last iteration (or from previous process() invocations)
             if is_first_iteration or should_loopback:
                 # Drain any immediately available events (non-blocking)
                 while not self._background_event_queue.empty():
