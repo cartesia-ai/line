@@ -29,8 +29,8 @@ from line._harness_types import (
     AgentSpeechInput,
     AgentStateInput,
     ConfigOutput,
-    CustomEventOutput,
     CustomInput,
+    CustomOutput,
     DTMFInput,
     DTMFOutput,
     EndCallOutput,
@@ -654,7 +654,7 @@ class ConversationRunner:
             )
         if isinstance(event, AgentSendCustom):
             logger.debug(f"<- 📦 Custom event with metadata: {event.metadata}")
-            return CustomEventOutput(metadata=event.metadata)
+            return CustomOutput(metadata=event.metadata)
 
         return ErrorOutput(content=f"Unhandled output event type: {type(event).__name__}")
 

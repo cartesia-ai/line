@@ -126,7 +126,7 @@ class ConfigOutput(BaseModel):
     language: Optional[str] = None
 
 
-class CustomEventOutput(BaseModel):
+class CustomOutput(BaseModel):
     type: Literal["custom"] = "custom"
     metadata: Dict[str, object]
 
@@ -141,5 +141,5 @@ OutputMessage = Union[
     LogEventOutput,
     LogMetricOutput,
     ConfigOutput,
-    CustomEventOutput,
+    CustomOutput,
 ]
