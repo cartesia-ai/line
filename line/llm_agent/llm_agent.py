@@ -42,7 +42,7 @@ from line.events import (
     UserTextSent,
 )
 from line.llm_agent.config import LlmConfig, _merge_configs, _normalize_config
-from line.llm_agent.history import History
+from line.llm_agent.history import _HISTORY_EVENT_TYPES, History
 from line.llm_agent.provider import LLMProvider, Message, ToolCall
 from line.llm_agent.tools.decorators import loopback_tool
 from line.llm_agent.tools.system import EndCallTool, WebSearchTool
@@ -159,7 +159,15 @@ class LlmAgent:
             history: Override the managed history for this #process invocation only. When provided,
                 _build_messages uses this list instead of self.history. The managed
                 self.history still receives _set_input and _append_local as usual.
+
+        Raises:
+            TypeError: If config, tools, context, or history have invalid types.
         """
+        self._validate_config(config)
+        self._validate_tools(tools)
+        self._validate_context(context)
+        self._validate_history(history)
+
         # Track the event_id of the triggering input event
         # The triggering event is the last element in event.history
         current_event_id = event.history[-1].event_id if event.history else ""
@@ -727,6 +735,71 @@ class LlmAgent:
             await self._background_task
 
         await self._llm.aclose()
+
+    # ------------------------------------------------------------------
+    # Validation helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _validate_config(config: Optional[LlmConfig]) -> None:
+        """Validate the config argument passed to process().
+
+        Raises TypeError if config is not None or an LlmConfig instance.
+        """
+        if config is not None and not isinstance(config, LlmConfig):
+            raise TypeError(f"config must be an LlmConfig instance, got {type(config).__name__}")
+
+    @staticmethod
+    def _validate_tools(tools: Optional[List[ToolSpec]]) -> None:
+        """Validate the tools argument passed to process().
+
+        Raises TypeError if tools is not None, not a list, or contains invalid items.
+        """
+        if tools is not None:
+            if not isinstance(tools, list):
+                raise TypeError(f"tools must be a list, got {type(tools).__name__}")
+            for i, tool in enumerate(tools):
+                if not (isinstance(tool, (FunctionTool, WebSearchTool, EndCallTool)) or callable(tool)):
+                    raise TypeError(
+                        f"tools[{i}] must be a FunctionTool, WebSearchTool, EndCallTool, "
+                        f"or callable, got {type(tool).__name__}"
+                    )
+
+    @staticmethod
+    def _validate_context(context: Union[str, List[HistoryEvent], None]) -> None:
+        """Validate the context argument passed to process().
+
+        Raises TypeError if context is not None, a string, or a list of HistoryEvents.
+        """
+        if context is not None and not isinstance(context, str):
+            if not isinstance(context, list):
+                raise TypeError(
+                    f"context must be a string, list of HistoryEvents, or None, got {type(context).__name__}"
+                )
+            for i, item in enumerate(context):
+                if not isinstance(item, _HISTORY_EVENT_TYPES):
+                    raise TypeError(
+                        f"context[{i}] must be a HistoryEvent "
+                        f"(e.g. UserTextSent, AgentTextSent, AgentToolCalled, CustomHistoryEntry), "
+                        f"got {type(item).__name__}"
+                    )
+
+    @staticmethod
+    def _validate_history(history: Optional[List[HistoryEvent]]) -> None:
+        """Validate the history argument passed to process().
+
+        Raises TypeError if history is not None, not a list, or contains non-HistoryEvent items.
+        """
+        if history is not None:
+            if not isinstance(history, list):
+                raise TypeError(f"history must be a list of HistoryEvents, got {type(history).__name__}")
+            for i, item in enumerate(history):
+                if not isinstance(item, _HISTORY_EVENT_TYPES):
+                    raise TypeError(
+                        f"history[{i}] must be a HistoryEvent "
+                        f"(e.g. UserTextSent, AgentTextSent, AgentToolCalled, CustomHistoryEntry), "
+                        f"got {type(item).__name__}"
+                    )
 
 
 def _check_web_search_support(model: str) -> bool:
