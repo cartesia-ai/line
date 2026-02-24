@@ -12,8 +12,10 @@ from line.agent import (
 # Events
 from line.events import (
     AgentDtmfSent,
+    AgentEnableMultilingualSTT,
     AgentEndCall,
     AgentHandedOff,
+    AgentSendCustom,
     AgentSendDtmf,
     # Output events
     AgentSendText,
@@ -24,6 +26,7 @@ from line.events import (
     AgentTurnEnded,
     AgentTurnStarted,
     AgentUpdateCall,
+    AgentUpdateTTS,
     CallEnded,
     # Input events
     CallStarted,
@@ -34,6 +37,7 @@ from line.events import (
     LogMessage,
     LogMetric,
     OutputEvent,
+    UserCustomSent,
     UserDtmfSent,
     UserTextSent,
     UserTurnEnded,
@@ -73,6 +77,9 @@ __all__ = [
     "LogMetric",
     "LogMessage",
     "AgentUpdateCall",
+    "AgentEnableMultilingualSTT",
+    "AgentUpdateTTS",
+    "AgentSendCustom",
     "OutputEvent",
     # Input events
     "CallStarted",
@@ -86,6 +93,7 @@ __all__ = [
     "AgentDtmfSent",
     "AgentTurnEnded",
     "AgentHandedOff",
+    "UserCustomSent",
     "InputEvent",
     # Custom events
     "CustomHistoryEntry",

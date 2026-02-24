@@ -29,6 +29,8 @@ from line._harness_types import (
     AgentSpeechInput,
     AgentStateInput,
     ConfigOutput,
+    CustomInput,
+    CustomOutput,
     DTMFInput,
     DTMFOutput,
     EndCallOutput,
@@ -38,6 +40,7 @@ from line._harness_types import (
     LogMetricOutput,
     MessageOutput,
     OutputMessage,
+    STTConfig,
     ToolCallOutput,
     TranscriptionInput,
     TransferOutput,
@@ -47,7 +50,9 @@ from line._harness_types import (
 from line.agent import Agent, AgentSpec, EventFilter, TurnEnv
 from line.events import (
     AgentDtmfSent,
+    AgentEnableMultilingualSTT,
     AgentEndCall,
+    AgentSendCustom,
     AgentSendDtmf,
     AgentSendText,
     AgentTextSent,
@@ -57,12 +62,14 @@ from line.events import (
     AgentTurnEnded,
     AgentTurnStarted,
     AgentUpdateCall,
+    AgentUpdateTTS,
     CallEnded,
     CallStarted,
     InputEvent,
     LogMessage,
     LogMetric,
     OutputEvent,
+    UserCustomSent,
     UserDtmfSent,
     UserTextSent,
     UserTurnEnded,
@@ -471,6 +478,9 @@ class ConversationRunner:
         elif isinstance(message, DTMFInput):
             return UserDtmfSent(button=message.button)
 
+        elif isinstance(message, CustomInput):
+            return UserCustomSent(metadata=message.metadata)
+
         raise ValueError(f"Unhandled input message type: {type(message).__name__}")
 
     def _turn_content(
@@ -541,10 +551,42 @@ class ConversationRunner:
         elif isinstance(processed_event, AgentTurnEnded):
             event = AgentTurnEnded(history=processed_history, **base_data)
             logger.info("-> 🤖🔇 Agent stopped speaking")
+        elif isinstance(processed_event, UserCustomSent):
+            event = UserCustomSent(history=processed_history, **base_data)
+            logger.debug(f"-> 📦 Custom event with metadata: {event.metadata}")
         else:
             raise ValueError(f"Unknown event type: {type(processed_event).__name__}")
 
         return event, raw_history
+
+    @staticmethod
+    def _truncate_for_ws(value: Any, max_chars: int = 30000) -> str:
+        """Convert a value to string and truncate if over the limit.
+
+        Used to avoid sending large payloads over the WebSocket for logging.
+        The full data is still sent to the LLM via the agent path; this only
+        affects the observability payload.
+        """
+        s = json.dumps(value, default=str) if isinstance(value, (dict, list)) else str(value)
+        if len(s) > max_chars:
+            return s[:max_chars] + "... [truncated]"
+        return s
+
+    @staticmethod
+    def _truncate_dict_for_ws(
+        value: Optional[Dict[str, Any]], max_chars: int = 30000
+    ) -> Optional[Dict[str, Any]]:
+        """Truncate a dict if its JSON serialization exceeds the limit.
+
+        Returns the original dict if under the limit, or a sentinel dict with
+        a preview if over.
+        """
+        if value is None:
+            return None
+        serialized = json.dumps(value, default=str)
+        if len(serialized) > max_chars:
+            return {"_truncated": True, "_preview": serialized[:200]}
+        return value
 
     def _map_output_event(self, event: OutputEvent) -> OutputMessage:
         """Convert OutputEvent to websocket OutputMessage."""
@@ -565,28 +607,54 @@ class ConversationRunner:
             return LogMetricOutput(name=event.name, value=event.value)
         if isinstance(event, LogMessage):
             logger.debug(f"<- 🪵 Log message: {event.name} [{event.level}] {event.message}")
-            return LogEventOutput(
-                event=event.name,
-                metadata={"level": event.level, "message": event.message, "metadata": event.metadata},
-            )
+            metadata = {
+                "level": event.level,
+                "message": event.message,
+                "metadata": self._truncate_dict_for_ws(event.metadata),
+            }
+            return LogEventOutput(event=event.name, metadata=metadata)
         if isinstance(event, AgentToolCalled):
             logger.info(f"<- 🔧 Tool called: {event.tool_name}({event.tool_args})")
-            return ToolCallOutput(name=event.tool_name, arguments=event.tool_args)
+            return ToolCallOutput(name=event.tool_name, arguments=self._truncate_dict_for_ws(event.tool_args))
         if isinstance(event, AgentToolReturned):
             logger.info(f"<- 🔧 Tool returned: {event.tool_name}({event.tool_args}) -> {event.result}")
-            result_str = str(event.result) if event.result is not None else None
-            return ToolCallOutput(name=event.tool_name, arguments=event.tool_args, result=result_str)
+            result_str = self._truncate_for_ws(event.result) if event.result is not None else None
+            return ToolCallOutput(
+                name=event.tool_name,
+                arguments=self._truncate_dict_for_ws(event.tool_args),
+                result=result_str,
+            )
+        # Temporary: until Audio Harness changes for top-level language=multilingual are deployed
+        if isinstance(event, AgentEnableMultilingualSTT):
+            logger.info("<- ⚙️ Enable multilingual STT")
+            return ConfigOutput(stt=STTConfig(language=None))
+        # Temporary: until general multilingual language config is available
+        if isinstance(event, AgentUpdateTTS):
+            logger.info(f"<- ⚙️ Update TTS: voice_id={event.voice_id}, language={event.language}")
+            return ConfigOutput(tts=TTSConfig(voice_id=event.voice_id, language=event.language))
         if isinstance(event, AgentUpdateCall):
+            # "multilingual" is a special sentinel: STT gets None (auto-detect),
+            # TTS gets None (use voice default language).
+            is_multilingual = event.language == "multilingual"
+            effective_language = None if is_multilingual else event.language
+
             logger.info(
                 f"<- ⚙️ Update call: voice_id={event.voice_id}, "
-                f"pronunciation_dict_id={event.pronunciation_dict_id}"
+                f"pronunciation_dict_id={event.pronunciation_dict_id}, "
+                f"language={event.language}"
             )
             return ConfigOutput(
                 tts=TTSConfig(
                     voice_id=event.voice_id,
                     pronunciation_dict_id=event.pronunciation_dict_id,
+                    language=effective_language,
                 ),
+                stt=STTConfig(language=effective_language) if event.language is not None else None,
+                language=effective_language,
             )
+        if isinstance(event, AgentSendCustom):
+            logger.debug(f"<- 📦 Custom event with metadata: {event.metadata}")
+            return CustomOutput(metadata=event.metadata)
 
         return ErrorOutput(content=f"Unhandled output event type: {type(event).__name__}")
 
