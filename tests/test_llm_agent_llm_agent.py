@@ -263,6 +263,71 @@ async def test_timing_metrics_emitted(turn_env):
     assert outputs[3].text == "world!"
 
 
+async def test_timing_metrics_with_loopback_tool(turn_env):
+    """Test that llm_first_text_ms is emitted once per _generate_response, not per iteration.
+
+    When a loopback tool is called, the LLM runs multiple iterations:
+    - Iteration 1: LLM calls tool (emits llm_first_chunk_ms)
+    - Iteration 2: LLM generates text (emits llm_first_chunk_ms AND llm_first_text_ms)
+
+    llm_first_text_ms should be measured from the start of _generate_response,
+    not from the start of the second iteration.
+    """
+
+    @loopback_tool
+    async def get_weather(ctx, city: Annotated[str, "City name"]) -> str:
+        """Get weather for a city."""
+        return f"72°F in {city}"
+
+    responses = [
+        # First iteration: LLM calls tool (no text)
+        [
+            StreamChunk(
+                tool_calls=[
+                    ToolCall(
+                        id="call_1",
+                        name="get_weather",
+                        arguments='{"city": "NYC"}',
+                        is_complete=True,
+                    )
+                ]
+            ),
+            StreamChunk(is_final=True),
+        ],
+        # Second iteration: LLM generates text after seeing tool result
+        [
+            StreamChunk(text="The weather is 72°F."),
+            StreamChunk(is_final=True),
+        ],
+    ]
+
+    agent, mock_llm = create_agent_with_mock(responses, tools=[get_weather])
+
+    outputs = await collect_outputs(
+        agent,
+        turn_env,
+        UserTextSent(
+            content="What's the weather?",
+            history=[UserTextSent(content="What's the weather?")],
+        ),
+        include_metrics=True,
+    )
+
+    # Extract metrics
+    chunk_metrics = [o for o in outputs if isinstance(o, LogMetric) and o.name == "llm_first_chunk_ms"]
+    text_metrics = [o for o in outputs if isinstance(o, LogMetric) and o.name == "llm_first_text_ms"]
+
+    # llm_first_chunk_ms should be emitted twice (once per iteration)
+    assert len(chunk_metrics) == 2
+
+    # llm_first_text_ms should be emitted only once (when text first appears)
+    assert len(text_metrics) == 1
+
+    # The llm_first_text_ms value should be >= the second llm_first_chunk_ms
+    # because it's measured from the start of _generate_response, not from the second iteration
+    assert text_metrics[0].value >= chunk_metrics[1].value
+
+
 # =============================================================================
 # Tests: Loopback Tool
 # =============================================================================
