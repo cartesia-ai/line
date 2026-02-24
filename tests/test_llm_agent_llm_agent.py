@@ -264,14 +264,14 @@ async def test_timing_metrics_emitted(turn_env):
 
 
 async def test_timing_metrics_with_loopback_tool(turn_env):
-    """Test that llm_first_text_ms is emitted once per _generate_response, not per iteration.
+    """Test that timing metrics are emitted once per _generate_response, not per iteration.
 
     When a loopback tool is called, the LLM runs multiple iterations:
-    - Iteration 1: LLM calls tool (emits llm_first_chunk_ms)
-    - Iteration 2: LLM generates text (emits llm_first_chunk_ms AND llm_first_text_ms)
+    - Iteration 1: LLM calls tool (emits llm_first_chunk_ms since it's the first chunk)
+    - Iteration 2: LLM generates text (emits llm_first_text_ms since it's the first text)
 
-    llm_first_text_ms should be measured from the start of _generate_response,
-    not from the start of the second iteration.
+    Both metrics are measured from the start of _generate_response (after initial
+    loopback management), not from the start of each iteration.
     """
 
     @loopback_tool
@@ -317,15 +317,12 @@ async def test_timing_metrics_with_loopback_tool(turn_env):
     chunk_metrics = [o for o in outputs if isinstance(o, LogMetric) and o.name == "llm_first_chunk_ms"]
     text_metrics = [o for o in outputs if isinstance(o, LogMetric) and o.name == "llm_first_text_ms"]
 
-    # llm_first_chunk_ms should be emitted twice (once per iteration)
-    assert len(chunk_metrics) == 2
-
-    # llm_first_text_ms should be emitted only once (when text first appears)
+    # Both metrics should be emitted only once per _generate_response
+    assert len(chunk_metrics) == 1
     assert len(text_metrics) == 1
 
-    # The llm_first_text_ms value should be >= the second llm_first_chunk_ms
-    # because it's measured from the start of _generate_response, not from the second iteration
-    assert text_metrics[0].value >= chunk_metrics[1].value
+    # llm_first_chunk_ms <= llm_first_text_ms (first chunk comes before or at same time as first text)
+    assert chunk_metrics[0].value <= text_metrics[0].value
 
 
 # =============================================================================

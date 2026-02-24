@@ -309,9 +309,10 @@ class LlmAgent:
         is_first_iteration = True
         should_loopback = False
 
-        # Timing for llm_first_text_ms - measured from start of response generation
+        # Timing metrics - measured from start of _generate_response, emitted once
         response_start_time = time.perf_counter()
-        first_agent_text_logged = False
+        first_chunk_logged = False
+        first_text_logged = False
 
         for _iteration in range(self._max_tool_iterations):
             # ==== LOOPBACK MANAGMENT ==== #
@@ -347,10 +348,6 @@ class LlmAgent:
             if web_search_options:
                 chat_kwargs["web_search_options"] = web_search_options
 
-            # Timing metrics for per-iteration chunk timing
-            iteration_start_time = time.perf_counter()
-            first_token_logged = False
-
             stream = self._llm.chat(
                 messages,
                 tools if tools else None,
@@ -359,23 +356,23 @@ class LlmAgent:
             )
             async with stream:
                 async for chunk in stream:
-                    # Track time to first chunk (text or tool call)
-                    if not first_token_logged and (chunk.text or chunk.tool_calls):
-                        first_chunk_ms = (time.perf_counter() - iteration_start_time) * 1000
+                    # Track time to first chunk (text or tool call) - measured from start of _generate_response
+                    if not first_chunk_logged and (chunk.text or chunk.tool_calls):
+                        first_chunk_ms = (time.perf_counter() - response_start_time) * 1000
                         logger.info(f"Time to first chunk: {first_chunk_ms:.2f}ms")
                         yield LogMetric(name="llm_first_chunk_ms", value=first_chunk_ms)
-                        first_token_logged = True
+                        first_chunk_logged = True
 
                     if chunk.text:
                         output = AgentSendText(text=chunk.text)
                         self.history._append_local(output)
 
-                        # Track time to first text (measured from start of _generate_response)
-                        if not first_agent_text_logged:
+                        # Track time to first text - measured from start of _generate_response
+                        if not first_text_logged:
                             first_text_ms = (time.perf_counter() - response_start_time) * 1000
                             logger.info(f"Time to first text: {first_text_ms:.2f}ms")
                             yield LogMetric(name="llm_first_text_ms", value=first_text_ms)
-                            first_agent_text_logged = True
+                            first_text_logged = True
 
                         yield output
 
