@@ -349,6 +349,9 @@ def _build_full_history(
     queue: List[_LocalEvent] = []
 
     for input_evt in input_history:
+        # Track whether this input event loaded a fresh local queue so we avoid
+        # prematurely flushing newly-triggered locals on the same input event.
+        loaded_new_queue = False
         # If this input event generated any output events
         # flush old output events (they are semantically "prior" to this input event)
         # and load new queue of output events triggered by this input event
@@ -356,10 +359,25 @@ def _build_full_history(
             result.extend(_flush_queue(queue))
             local_slice = local_by_event_id[input_evt.event_id]
             queue = _concat_contiguous_agent_send_text(local_slice)
+            loaded_new_queue = True
 
         if not _is_input_matchable(input_evt):
+            if (
+                not loaded_new_queue
+                and queue
+                and _queue_has_only_non_matchables(queue)
+            ):
+                # If only non-matchable locals remain, flush them before the next
+                # non-matchable input event so ordering stays causal.
+                result.extend(_flush_queue(queue))
+                queue = []
             # Non-matchable input (UserTextSent, etc.) — emit directly
             result.append(input_evt)
+            if loaded_new_queue and queue and _queue_has_only_non_matchables(queue):
+                # If this non-matchable input triggered only non-matchable locals,
+                # emit them immediately after the triggering input event.
+                result.extend(_flush_queue(queue))
+                queue = []
         else:
             # Matchable input — match against queue
             emitted, queue = _match_matchable(input_evt, queue)
@@ -376,8 +394,13 @@ def _build_full_history(
 
 
 def _flush_queue(queue: List[_LocalEvent]) -> List[_LocalEvent]:
-    """Return non-matchable events from queue, discarding unmatched matchables."""
+    """Commit non-matchable queue events and drop unmatched matchables."""
     return [e for e in queue if not _is_local_matchable(e)]
+
+
+def _queue_has_only_non_matchables(queue: List[_LocalEvent]) -> bool:
+    """Return True when queue has events and all are non-matchable."""
+    return bool(queue) and all(not _is_local_matchable(local_evt) for local_evt in queue)
 
 
 def _split_leading_non_matchables(
@@ -469,6 +492,10 @@ def _to_history_event(event: object) -> Optional[HistoryEvent]:
     Non-history OutputEvents (LogMetric, etc.) are filtered out (returns None).
     All other events (InputEvent, AgentToolCalled, AgentToolReturned, CustomHistoryEntry)
     pass through unchanged.
+
+    Note:
+    AgentSendText.interruptible is intentionally not represented in HistoryEvent.
+    History captures transcript content/order, not playback interruption policy.
     """
     # Matchable OutputEvents → convert to InputEvent counterparts
     if isinstance(event, AgentSendText):
@@ -510,13 +537,20 @@ def _concat_contiguous_agent_send_text(local_history: List[_LocalEvent]) -> List
     Since the LLM streams output, we likely will have many AgentSendText events that are part of the same
     logical "message" from the LLM. This concats them into a single AgentSendText event for easier matching
     to the input history, which only has one AgentTextSent per LLM message.
+
+    AgentSendText(interruptible=False) events are kept separate and never merged.
     """
     if not local_history:
         return []
     result: List[_LocalEvent] = []
     current = local_history[0]
     for event in local_history[1:]:
-        if isinstance(current, AgentSendText) and isinstance(event, AgentSendText):
+        if (
+            isinstance(current, AgentSendText)
+            and isinstance(event, AgentSendText)
+            and current.interruptible
+            and event.interruptible
+        ):
             current = AgentSendText(text=current.text + event.text)
         else:
             result.append(current)
@@ -525,17 +559,21 @@ def _concat_contiguous_agent_send_text(local_history: List[_LocalEvent]) -> List
     return result
 
 
-# Matchable OutputEvent types - these can be matched between local and input history
-# Corresponds to events that the external system tracks/observes
+# Matchable OutputEvent types - these can be matched between local and input history.
+# AgentSendText is handled dynamically in _is_local_matchable() so interruptible=False
+# can be committed immediately without waiting for input ack-back matching.
 MATCHABLE_OUTPUT_EVENT_TYPES = (
     AgentSendDtmf,  # => AgentDtmfSent
-    AgentSendText,  # => AgentTextSent
     AgentEndCall,  # => CallEnded
 )
 
 
 def _is_local_matchable(event: _LocalEvent) -> bool:
     """Check if a local event is matchable (can be matched to input history)."""
+    if isinstance(event, AgentSendText):
+        # Uninterruptible text is committed immediately from local history and
+        # should not wait for harness ack-back matching.
+        return event.interruptible
     return isinstance(event, MATCHABLE_OUTPUT_EVENT_TYPES)
 
 
@@ -564,7 +602,7 @@ def _try_match_events(
     For text events, supports prefix matching (input is prefix of local).
     For DTMF and EndCall events, only exact matching is supported.
     """
-    if isinstance(local, AgentSendText) and isinstance(input_evt, AgentTextSent):
+    if isinstance(local, AgentSendText) and local.interruptible and isinstance(input_evt, AgentTextSent):
         if local.text == input_evt.content:
             return (input_evt, None)
         if local.text.startswith(input_evt.content):

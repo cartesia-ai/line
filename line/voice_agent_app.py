@@ -285,11 +285,12 @@ class ConversationRunner:
         self.shutdown_event = asyncio.Event()
         self.history: List[InputEvent] = []
         self.emitted_agent_text: str = (
-            ""  # Buffer for all AgentSendText content (for whitespace interpolation)
+            ""  # Buffer for interruptible AgentSendText content (for whitespace interpolation)
         )
 
         self.agent_callable, self.run_filter, self.cancel_filter = self._prepare_agent(agent_spec)
         self.agent_task: Optional[asyncio.Task] = None
+        self._emitted_uninterruptible_text: str = ""
 
     ######### Initialization Methods #########
 
@@ -359,12 +360,23 @@ class ConversationRunner:
 
                 # Convert and process the input message
                 event = self._convert_input_message(input_msg)
+                if isinstance(event, AgentTextSent):
+                    event = self._suppress_uninterruptible_ack_back(event)
+                    if event is None:
+                        continue
+                elif isinstance(event, AgentTurnEnded):
+                    # Drop stale expectations if the harness ended speech before
+                    # all ack-back chunks were observed.
+                    self._emitted_uninterruptible_text = ""
                 ev, self.history = self._process_input_event(self.history, event)
                 await self._handle_event(TurnEnv(), ev)
 
             except WebSocketDisconnect:
                 logger.info("WebSocket disconnected in loop")
                 self.shutdown_event.set()
+                # Call termination is a hard lifecycle boundary; drop any
+                # outstanding expected ack-back to avoid cross-call leakage.
+                self._emitted_uninterruptible_text = ""
                 end_event, self.history = self._process_input_event(self.history, CallEnded())
                 await self._handle_event(TurnEnv(), end_event)
             except json.JSONDecodeError as e:
@@ -408,7 +420,12 @@ class ConversationRunner:
                 async for output in self.agent_callable(turn_env, event):
                     # Buffer AgentSendText content for whitespace interpolation
                     if isinstance(output, AgentSendText):
-                        self.emitted_agent_text += output.text
+                        if output.interruptible:
+                            self.emitted_agent_text += output.text
+                        else:
+                            # Mark uninterruptible output as expected ack-back so incoming
+                            # AgentTextSent chunks can be dropped.
+                            self._emitted_uninterruptible_text += output.text
                     mapped = self._map_output_event(output)
 
                     if self.shutdown_event.is_set():
@@ -420,6 +437,7 @@ class ConversationRunner:
                 pass
             except Exception:
                 self.shutdown_event.set()
+                self._emitted_uninterruptible_text = ""
                 error_msg = traceback.format_exc()
                 logger.error(f"Error in agent.process: {error_msg}")
                 await self.send_error(f"Error in agent.process: {error_msg}")
@@ -428,7 +446,12 @@ class ConversationRunner:
         self.agent_task = asyncio.create_task(runner())
 
     async def _cancel_agent_task(self) -> None:
-        """Cancel any running agent iterable task."""
+        """Cancel any running agent iterable task.
+
+        Cancellation is an LM-task lifecycle boundary, not a harness speech
+        boundary. Expected uninterruptible ack-back must survive cancellation
+        until harness AgentTurnEnded/CallEnded confirms speech completion.
+        """
         if self.agent_task and not self.agent_task.done():
             self.agent_task.cancel()
             try:
@@ -443,6 +466,28 @@ class ConversationRunner:
             await self.websocket.send_json(ErrorOutput(content=error).model_dump())
         except Exception as e:
             logger.warning(f"Failed to send error via WebSocket: {e}")
+
+    def _suppress_uninterruptible_ack_back(self, event: AgentTextSent) -> Optional[AgentTextSent]:
+        """Suppress expected uninterruptible ack-back (drop fully or trim prefix)."""
+        if not self._emitted_uninterruptible_text:
+            return event
+
+        consumed_chars, remaining_committed, remaining_pending = _consume_expected_ack_back_prefix(
+            event.content,
+            self._emitted_uninterruptible_text,
+        )
+        if consumed_chars == 0:
+            return event
+
+        self._emitted_uninterruptible_text = remaining_pending
+        if not remaining_committed:
+            logger.debug(f'Dropped uninterruptible ack-back speech chunk: "{event.content}"')
+            return None
+        logger.debug(
+            f'Dropped uninterruptible ack-back speech prefix: "{event.content[:consumed_chars]}", '
+            f'keeping "{remaining_committed}"'
+        )
+        return AgentTextSent(content=remaining_committed, event_id=event.event_id)
 
     ######### Event Parsing Methods #########
     def _convert_input_message(self, message: InputMessage) -> InputEvent:
@@ -591,8 +636,11 @@ class ConversationRunner:
     def _map_output_event(self, event: OutputEvent) -> OutputMessage:
         """Convert OutputEvent to websocket OutputMessage."""
         if isinstance(event, AgentSendText):
-            logger.info(f'<- 🤖🗣️ Agent said: "{event.text}"')
-            return MessageOutput(content=event.text)
+            if event.interruptible:
+                logger.info(f'<- 🤖🗣️ Agent said: "{event.text}"')
+            else:
+                logger.info(f'<- 🤖🔒 Agent said (uninterruptible): "{event.text}"')
+            return MessageOutput(content=event.text, interruptible=event.interruptible)
         if isinstance(event, AgentSendDtmf):
             logger.info(f"<- 🤖🔔 Agent DTMF sent: {event.button}")
             return DTMFOutput(button=event.button)
@@ -785,6 +833,50 @@ def _parse_committed(committed_buffer_text: str, pending_text: str) -> tuple[str
     remaining_pending = "".join(ws_buffer) + pending_text[j:]
 
     return committed_str, remaining_committed, remaining_pending
+
+
+def _consume_expected_ack_back_prefix(committed_text: str, pending_text: str) -> tuple[int, str, str]:
+    """Consume the longest strict prefix of committed_text that matches pending_text.
+
+    This is stricter than _parse_committed: it never skips arbitrary pending text
+    to find a later match. It only tolerates:
+    - characters stripped by the harness in pending_text (e.g. whitespace/emoji)
+    - full stops inserted by TTS in committed_text
+
+    Returns:
+        (consumed_chars, remaining_committed, remaining_pending)
+    """
+    if not committed_text or not pending_text:
+        return 0, committed_text, pending_text
+
+    i = 0  # pointer into committed_text
+    j = 0  # pointer into pending_text
+
+    while i < len(committed_text) and j < len(pending_text):
+        c = committed_text[i]
+        p = pending_text[j]
+
+        if c == p:
+            i += 1
+            j += 1
+        elif _is_stripped_by_harness(p):
+            j += 1
+        elif c in FULL_STOP_CHARS:
+            i += 1
+        else:
+            break
+
+    if i == 0:
+        # No prefix consumed; preserve pending text exactly.
+        return 0, committed_text, pending_text
+
+    if i == len(committed_text):
+        # If committed text is fully consumed, drop trailing pending chars that
+        # the harness would strip anyway so they don't get stuck forever.
+        while j < len(pending_text) and _is_stripped_by_harness(pending_text[j]):
+            j += 1
+
+    return i, committed_text[i:], pending_text[j:]
 
 
 # Regex to match strings consisting entirely of emoji characters

@@ -184,6 +184,7 @@ class LlmAgent:
             async for output in self._handoff_target(env, event):
                 self.history._append_local(output)
                 yield output
+            # Keep turn timing consistent across all process paths, including handoffs.
             yield LogMetric(name="agent_turn_ms", value=(time.perf_counter() - turn_start_time) * 1000)
             return
 

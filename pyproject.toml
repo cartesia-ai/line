@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cartesia-line"
-version = "0.2.3alpha5"
+version = "0.2.3alpha6"
 description = "Cartesia Voice Agents SDK"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -68,6 +68,7 @@ target-version = 'py39'
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+norecursedirs = ["line/llm_agent/scripts", ".claude"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "C4"]

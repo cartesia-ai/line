@@ -16,6 +16,7 @@ from unittest.mock import AsyncMock, MagicMock
 from fastapi import WebSocket, WebSocketDisconnect
 import pytest
 
+from line._harness_types import MessageOutput
 from line.agent import TurnEnv
 from line.events import (
     AgentEnableMultilingualSTT,
@@ -568,6 +569,261 @@ class TestParseCommitted:
         assert committed == "Hello world"
         assert remaining_committed == ""
         assert remaining == ""
+
+
+# ============================================================
+# Uninterruptible message tests
+# ============================================================
+
+
+class TestUninterruptibleMessages:
+    """Tests for AgentSendText(interruptible=False) handling."""
+
+    @pytest.mark.asyncio
+    async def test_uninterruptible_maps_to_message_output_with_interruptible_false(self):
+        """AgentSendText(interruptible=False) maps to MessageOutput(interruptible=False)."""
+        ws = create_mock_websocket()
+        runner = ConversationRunner(ws, noop_agent, env)
+
+        result = runner._map_output_event(
+            AgentSendText(text="This call is recorded.", interruptible=False)
+        )
+        assert isinstance(result, MessageOutput)
+        assert result.content == "This call is recorded."
+        assert result.interruptible is False
+
+    @pytest.mark.asyncio
+    async def test_regular_send_text_maps_to_interruptible_true(self):
+        """AgentSendText maps to MessageOutput(interruptible=True) by default."""
+        ws = create_mock_websocket()
+        runner = ConversationRunner(ws, noop_agent, env)
+
+        result = runner._map_output_event(AgentSendText(text="Hello!"))
+        assert isinstance(result, MessageOutput)
+        assert result.content == "Hello!"
+        assert result.interruptible is True
+
+    @pytest.mark.asyncio
+    async def test_cancel_filter_still_applies_during_uninterruptible(self):
+        """SDK no longer suppresses cancel events during uninterruptible playback."""
+        ws = create_mock_websocket()
+        agent_started = asyncio.Event()
+        agent_cancelled = asyncio.Event()
+        proceed_to_yield = asyncio.Future()
+
+        async def blocking_agent(env, event):
+            if isinstance(event, CallStarted):
+                agent_started.set()
+                try:
+                    yield AgentSendText(text="Legal disclaimer.", interruptible=False)
+                    await proceed_to_yield
+                except asyncio.CancelledError:
+                    agent_cancelled.set()
+                    raise
+
+        msg_idx = 0
+
+        async def receive_messages():
+            nonlocal msg_idx
+            if msg_idx == 0:
+                await agent_started.wait()
+                msg_idx += 1
+                return {"type": "user_state", "value": "speaking"}
+            raise WebSocketDisconnect()
+
+        ws.receive_json = receive_messages
+
+        runner = ConversationRunner(ws, blocking_agent, env)
+        await runner.run()
+        assert agent_cancelled.is_set()
+        assert runner._emitted_uninterruptible_text == ""
+
+    @pytest.mark.asyncio
+    async def test_cancel_does_not_clear_emitted_uninterruptible_text(self):
+        """Canceling an LM task must not clear expected ack-back."""
+        ws = create_mock_websocket()
+        runner = ConversationRunner(ws, noop_agent, env)
+        runner._emitted_uninterruptible_text = "Legal disclaimer."
+
+        task_started = asyncio.Event()
+
+        async def blocking_task():
+            task_started.set()
+            await asyncio.Future()
+
+        runner.agent_task = asyncio.create_task(blocking_task())
+        await task_started.wait()
+
+        await runner._cancel_agent_task()
+
+        assert runner._emitted_uninterruptible_text == "Legal disclaimer."
+        assert runner.agent_task is None
+
+    @pytest.mark.asyncio
+    async def test_late_ack_back_after_cancel_is_still_suppressed(self):
+        """Late ack-back chunks should still be suppressed after task cancellation."""
+        ws = create_mock_websocket()
+        runner = ConversationRunner(ws, noop_agent, env)
+        runner._emitted_uninterruptible_text = "Legal disclaimer."
+
+        task_started = asyncio.Event()
+
+        async def blocking_task():
+            task_started.set()
+            await asyncio.Future()
+
+        runner.agent_task = asyncio.create_task(blocking_task())
+        await task_started.wait()
+        await runner._cancel_agent_task()
+
+        result = runner._suppress_uninterruptible_ack_back(AgentTextSent(content="Legaldisclaimer."))
+        assert result is None
+        assert runner._emitted_uninterruptible_text == ""
+
+    @pytest.mark.asyncio
+    async def test_late_ack_back_after_cancel_does_not_leak_into_processed_history(self):
+        """Late disclaimer ack-back should not leak or duplicate user events after cancel+restart."""
+        ws = create_mock_websocket()
+        first_turn_started = asyncio.Event()
+        first_turn_block = asyncio.Future()
+
+        async def scripted_agent(env, event):
+            if isinstance(event, CallStarted):
+                yield AgentSendText(text="This call may be recorded.", interruptible=False)
+                first_turn_started.set()
+                await first_turn_block
+            elif isinstance(event, UserTurnEnded):
+                yield AgentSendText(text="Thank you", interruptible=True)
+
+        runner = ConversationRunner(ws, scripted_agent, env)
+
+        await runner._start_agent_task(TurnEnv(), CallStarted())
+        await first_turn_started.wait()
+
+        # Partial disclaimer ack-back arrives before the old task is canceled.
+        partial = runner._suppress_uninterruptible_ack_back(AgentTextSent(content="Thiscallmay"))
+        assert partial is None
+        assert runner._emitted_uninterruptible_text
+
+        # UserTurnEnded starts a new LM run and cancels the old task.
+        await runner._start_agent_task(TurnEnv(), UserTurnEnded())
+
+        # Late disclaimer ack-back chunk after cancel should still be suppressed.
+        late = runner._suppress_uninterruptible_ack_back(AgentTextSent(content="berecorded."))
+        assert late is None
+        assert runner._emitted_uninterruptible_text == ""
+
+        if runner.agent_task:
+            await runner.agent_task
+
+        history: List[InputEvent] = []
+        _, history = runner._process_input_event(history, CallStarted())
+        _, history = runner._process_input_event(history, UserTextSent(content="Hello?"))
+        _, history = runner._process_input_event(history, UserTurnEnded(content=[]))
+        processed_event, history = runner._process_input_event(history, AgentTextSent(content="Thankyou"))
+
+        assert isinstance(processed_event, AgentTextSent)
+        assert processed_event.content == "Thank you"
+
+        processed_history = processed_event.history or []
+        user_texts = [
+            evt for evt in processed_history if isinstance(evt, UserTextSent) and evt.content == "Hello?"
+        ]
+        assert len(user_texts) == 1
+
+        leaked_disclaimer = [
+            evt
+            for evt in processed_history
+            if isinstance(evt, AgentTextSent) and "recorded" in evt.content.lower()
+        ]
+        assert leaked_disclaimer == []
+
+    def test_exact_ack_back_uninterruptible_text_is_suppressed(self):
+        """Exact ack-back matching emitted uninterruptible text is dropped."""
+        ws = create_mock_websocket()
+        runner = ConversationRunner(ws, noop_agent, env)
+
+        runner._emitted_uninterruptible_text = "This call is recorded."
+        result = runner._suppress_uninterruptible_ack_back(AgentTextSent(content="This call is recorded."))
+        assert result is None
+        assert runner._emitted_uninterruptible_text == ""
+
+    def test_ack_back_uninterruptible_text_is_suppressed(self):
+        """Ack-back matching emitted uninterruptible text is dropped."""
+        ws = create_mock_websocket()
+        runner = ConversationRunner(ws, noop_agent, env)
+
+        runner._emitted_uninterruptible_text = "This call is recorded."
+        result = runner._suppress_uninterruptible_ack_back(AgentTextSent(content="Thiscallisrecorded."))
+        assert result is None
+        assert runner._emitted_uninterruptible_text == ""
+
+    def test_ack_back_uninterruptible_prefix_is_suppressed_and_suffix_kept(self):
+        """Only the uninterruptible prefix is dropped when a chunk contains additional text."""
+        ws = create_mock_websocket()
+        runner = ConversationRunner(ws, noop_agent, env)
+
+        runner._emitted_uninterruptible_text = "Legal notice."
+        result = runner._suppress_uninterruptible_ack_back(AgentTextSent(content="Legalnotice.Hello"))
+
+        assert result is not None
+        assert result.content == "Hello"
+        assert runner._emitted_uninterruptible_text == ""
+
+    def test_non_prefix_text_is_not_suppressed(self):
+        """Suppression requires prefix alignment and does not skip pending text."""
+        ws = create_mock_websocket()
+        runner = ConversationRunner(ws, noop_agent, env)
+
+        runner._emitted_uninterruptible_text = "Legal Hello"
+        result = runner._suppress_uninterruptible_ack_back(AgentTextSent(content="Hello"))
+
+        assert result is not None
+        assert result.content == "Hello"
+        assert runner._emitted_uninterruptible_text == "Legal Hello"
+
+    def test_multichunk_ack_back_then_interruptible_text(self):
+        """After uninterruptible ack-back is consumed, following chunk passes through untouched."""
+        ws = create_mock_websocket()
+        runner = ConversationRunner(ws, noop_agent, env)
+
+        runner._emitted_uninterruptible_text = "Legal notice."
+        first = runner._suppress_uninterruptible_ack_back(AgentTextSent(content="Legalnotice."))
+        second = runner._suppress_uninterruptible_ack_back(AgentTextSent(content="Hello there"))
+
+        assert first is None
+        assert second is not None
+        assert second.content == "Hello there"
+        assert runner._emitted_uninterruptible_text == ""
+
+    def test_trailing_stripped_ack_back_chars_are_drained(self):
+        """Trailing pending chars stripped by harness do not get stuck in ack-back buffer."""
+        ws = create_mock_websocket()
+        runner = ConversationRunner(ws, noop_agent, env)
+
+        runner._emitted_uninterruptible_text = "Legal notice. "
+        result = runner._suppress_uninterruptible_ack_back(AgentTextSent(content="Legalnotice."))
+
+        assert result is None
+        assert runner._emitted_uninterruptible_text == ""
+
+    @pytest.mark.asyncio
+    async def test_agent_exception_clears_emitted_uninterruptible_text(self):
+        """Unhandled agent exceptions clear emitted uninterruptible text state."""
+        ws = create_mock_websocket()
+        ws.close = AsyncMock()
+
+        async def failing_agent(env, event):
+            if isinstance(event, CallStarted):
+                yield AgentSendText(text="Legal disclaimer.", interruptible=False)
+                raise RuntimeError("boom")
+
+        ws.receive_json.side_effect = [WebSocketDisconnect()]
+
+        runner = ConversationRunner(ws, failing_agent, env)
+        await runner.run()
+
+        assert runner._emitted_uninterruptible_text == ""
 
 
 # ============================================================

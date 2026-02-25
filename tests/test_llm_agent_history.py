@@ -1108,3 +1108,96 @@ class TestHistory:
         # Should have: a, injected, b, local
         assert len(result2) == 4
         assert any(isinstance(e, CustomHistoryEntry) and e.content == "injected" for e in result2)
+
+
+class TestUninterruptibleTextHistory:
+    """Tests for AgentSendText(interruptible=False) behavior in _build_full_history."""
+
+    @staticmethod
+    def _annotate(events: list, event_id: str) -> list[tuple]:
+        return [(event_id, e) for e in events]
+
+    async def test_uninterruptible_text_is_included_without_input_ack_back(self):
+        """Uninterruptible text is committed from local history even without harness ack-back."""
+        trigger_event_id = "evt1"
+        next_event_id = "evt2"
+        input_history = [
+            UserTextSent(content="Hi", event_id=trigger_event_id),
+            UserTextSent(content="Next", event_id=next_event_id),
+        ]
+        local_history = self._annotate(
+            [AgentSendText(text="Legal notice.", interruptible=False)],
+            event_id=trigger_event_id,
+        )
+
+        result = _build_full_history(input_history, local_history, current_event_id="current")
+
+        assert len(result) == 3
+        assert isinstance(result[0], UserTextSent)
+        assert isinstance(result[1], AgentTextSent)
+        assert result[1].content == "Legal notice."
+        assert isinstance(result[2], UserTextSent)
+
+    async def test_uninterruptible_not_merged_with_adjacent_send_text(self):
+        """Uninterruptible text is preserved as a separate event between adjacent text."""
+        event_id = "user-evt"
+        input_history = [
+            UserTextSent(content="Start", event_id=event_id),
+            AgentTextSent(content="Hello.", event_id="agent-evt-1"),
+            AgentTextSent(content="How can I help?", event_id="agent-evt-2"),
+        ]
+        local_history = self._annotate(
+            [
+                AgentSendText(text="Hello."),
+                AgentSendText(text="Legal notice.", interruptible=False),
+                AgentSendText(text="How can I help?"),
+            ],
+            event_id=event_id,
+        )
+
+        result = _build_full_history(input_history, local_history, current_event_id="current")
+
+        text_events = [e for e in result if isinstance(e, AgentTextSent)]
+        assert len(text_events) == 3
+        assert text_events[0].content == "Hello."
+        assert text_events[1].content == "Legal notice."
+        assert text_events[2].content == "How can I help?"
+
+    async def test_uninterruptible_current_event_included(self):
+        """Current uninterruptible text event is included in result."""
+        local_history = self._annotate(
+            [AgentSendText(text="Disclaimer.", interruptible=False)],
+            event_id="current",
+        )
+
+        result = _build_full_history([], local_history, current_event_id="current")
+
+        assert len(result) == 1
+        assert isinstance(result[0], AgentTextSent)
+        assert result[0].content == "Disclaimer."
+
+    async def test_mixed_interruptible_uninterruptible_sequence(self):
+        """Mixed interruptible/uninterruptible local events are preserved in order."""
+        trigger_event_id = "evt1"
+        input_history = [
+            UserTextSent(content="Start", event_id=trigger_event_id),
+            AgentTextSent(content="Hello!", event_id="agent-evt-1"),
+            UserTextSent(content="...", event_id="evt2"),
+            AgentTextSent(content="How can I help?", event_id="agent-evt-2"),
+        ]
+        local_history = self._annotate(
+            [
+                AgentSendText(text="Hello!"),
+                AgentSendText(text="This call is recorded.", interruptible=False),
+                AgentSendText(text="How can I help?"),
+            ],
+            event_id=trigger_event_id,
+        )
+
+        result = _build_full_history(input_history, local_history, current_event_id="current")
+
+        text_events = [e for e in result if isinstance(e, AgentTextSent)]
+        assert len(text_events) == 3
+        assert text_events[0].content == "Hello!"
+        assert text_events[1].content == "This call is recorded."
+        assert text_events[2].content == "How can I help?"
