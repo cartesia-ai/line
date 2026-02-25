@@ -239,10 +239,10 @@ async def test_timing_metrics_emitted(turn_env):
         include_metrics=True,
     )
 
-    # Should have 4 events: 2 LogMetric + 2 AgentSendText
-    assert len(outputs) == 4
+    # Should have 5 events: 2 LogMetric + 2 AgentSendText + 1 agent_turn_ms
+    assert len(outputs) == 5
 
-    # First two should be LogMetric events
+    # First two should be LogMetric events for chunk and text timing
     assert isinstance(outputs[0], LogMetric)
     assert outputs[0].name == "llm_first_chunk_ms"
     assert isinstance(outputs[0].value, float)
@@ -256,11 +256,17 @@ async def test_timing_metrics_emitted(turn_env):
     # First chunk should be <= first text time (or very close)
     assert outputs[0].value <= outputs[1].value + 1  # Allow 1ms tolerance
 
-    # Last two should be AgentSendText events
+    # Next two should be AgentSendText events
     assert isinstance(outputs[2], AgentSendText)
     assert outputs[2].text == "Hello "
     assert isinstance(outputs[3], AgentSendText)
     assert outputs[3].text == "world!"
+
+    # Last should be agent_turn_ms
+    assert isinstance(outputs[4], LogMetric)
+    assert outputs[4].name == "agent_turn_ms"
+    assert isinstance(outputs[4].value, float)
+    assert outputs[4].value >= outputs[1].value  # Turn duration >= first text time
 
 
 async def test_timing_metrics_with_loopback_tool(turn_env):
@@ -316,13 +322,16 @@ async def test_timing_metrics_with_loopback_tool(turn_env):
     # Extract metrics
     chunk_metrics = [o for o in outputs if isinstance(o, LogMetric) and o.name == "llm_first_chunk_ms"]
     text_metrics = [o for o in outputs if isinstance(o, LogMetric) and o.name == "llm_first_text_ms"]
+    turn_metrics = [o for o in outputs if isinstance(o, LogMetric) and o.name == "agent_turn_ms"]
 
-    # Both metrics should be emitted only once per _generate_response
+    # All metrics should be emitted only once per process call
     assert len(chunk_metrics) == 1
     assert len(text_metrics) == 1
+    assert len(turn_metrics) == 1
 
-    # llm_first_chunk_ms <= llm_first_text_ms (first chunk comes before or at same time as first text)
+    # llm_first_chunk_ms <= llm_first_text_ms <= agent_turn_ms
     assert chunk_metrics[0].value <= text_metrics[0].value
+    assert text_metrics[0].value <= turn_metrics[0].value
 
 
 # =============================================================================

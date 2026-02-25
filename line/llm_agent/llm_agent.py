@@ -163,6 +163,8 @@ class LlmAgent:
         Raises:
             TypeError: If config, tools, context, or history have invalid types.
         """
+        turn_start_time = time.perf_counter()
+
         self._validate_config(config)
         self._validate_tools(tools)
         self._validate_context(context)
@@ -182,6 +184,7 @@ class LlmAgent:
             async for output in self._handoff_target(env, event):
                 self.history._append_local(output)
                 yield output
+            yield LogMetric(name="agent_turn_ms", value=(time.perf_counter() - turn_start_time) * 1000)
             return
 
         # Handle CallStarted
@@ -191,17 +194,21 @@ class LlmAgent:
                 self.history._append_local(output)
                 self._introduction_sent = True
                 yield output
+            yield LogMetric(name="agent_turn_ms", value=(time.perf_counter() - turn_start_time) * 1000)
             return
 
         # Handle CallEnded
         if isinstance(event, CallEnded):
             await self.cleanup()
+            yield LogMetric(name="agent_turn_ms", value=(time.perf_counter() - turn_start_time) * 1000)
             return
 
         async for output in self._generate_response(
             env, event, effective_tools, effective_config, context=context, history=history
         ):
             yield output
+
+        yield LogMetric(name="agent_turn_ms", value=(time.perf_counter() - turn_start_time) * 1000)
 
     def _get_tool_name(self, tool: ToolSpec) -> str:
         """Extract the name from a ToolSpec.
