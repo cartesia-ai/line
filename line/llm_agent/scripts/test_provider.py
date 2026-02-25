@@ -107,7 +107,7 @@ async def test_api_key(model: str, api_key: str) -> bool:
     messages = [Message(role="user", content="Say 'ok'")]
 
     try:
-        async with provider.chat(messages) as stream:
+        async with await provider.chat(messages) as stream:
             async for chunk in stream:
                 if chunk.text:
                     print(f"✓ API key valid - got response: {chunk.text.strip()}")
@@ -130,7 +130,7 @@ async def test_streaming_text(model: str, api_key: str):
     messages = [Message(role="user", content="Say 'Hello, World!' and nothing else.")]
 
     print("Response: ", end="", flush=True)
-    async with provider.chat(messages) as stream:
+    async with await provider.chat(messages) as stream:
         async for chunk in stream:
             if chunk.text:
                 print(chunk.text, end="", flush=True)

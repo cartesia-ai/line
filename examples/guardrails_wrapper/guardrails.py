@@ -213,7 +213,7 @@ Respond with ONLY a JSON object (no markdown, no explanation):
 
         try:
             response_text = ""
-            stream = self._guardrail_llm.chat(messages, tools=None)
+            stream = await self._guardrail_llm.chat(messages, tools=None)
             async with stream:
                 async for chunk in stream:
                     if chunk.text:

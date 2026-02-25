@@ -86,7 +86,7 @@ class MockLLM:
         self._recorded_messages: List[List[Message]] = []
         self._recorded_tools: List[Optional[List[FunctionTool]]] = []
 
-    def chat(
+    async def chat(
         self, messages: List[Message], tools: Optional[List[FunctionTool]] = None, **kwargs
     ) -> MockStream:
         self._recorded_messages.append(messages.copy())
@@ -98,6 +98,9 @@ class MockLLM:
             return MockStream(response)
         else:
             return MockStream([StreamChunk(is_final=True)])
+
+    async def warmup(self, config=None):
+        pass
 
     async def aclose(self):
         pass

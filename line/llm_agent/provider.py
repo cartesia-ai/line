@@ -11,14 +11,9 @@ Model naming:
 """
 
 from dataclasses import dataclass, field
-from typing import Any, AsyncIterator, Dict, List, Optional
-
-from litellm import acompletion, get_llm_provider, get_supported_openai_params
-from litellm.utils import get_optional_params
+from typing import Any, List, Optional, Protocol, Tuple, runtime_checkable
 
 from line.llm_agent.config import LlmConfig, _normalize_config
-from line.llm_agent.schema_converter import function_tools_to_openai
-from line.llm_agent.tools.utils import FunctionTool
 
 
 @dataclass
@@ -52,11 +47,64 @@ class Message:
     name: Optional[str] = None
 
 
-class LLMProvider:
-    """
-    LLM provider using LiteLLM for unified multi-provider access.
+# ---------------------------------------------------------------------------
+# Provider protocol
+# ---------------------------------------------------------------------------
 
-    Handles streaming responses and tool calls for all LiteLLM-supported models.
+
+@runtime_checkable
+class ProviderProtocol(Protocol):
+    """Protocol defining the interface all provider backends must implement."""
+
+    async def chat(
+        self,
+        messages: List[Message],
+        tools: Optional[List[Any]] = None,
+        config: Optional[Any] = None,
+        **kwargs: Any,
+    ) -> Any: ...
+
+    async def warmup(self, config: Optional[Any] = None) -> None: ...
+
+    async def aclose(self) -> None: ...
+
+
+# ---------------------------------------------------------------------------
+# Unified facade
+# ---------------------------------------------------------------------------
+
+
+def _is_realtime_model(model: str) -> bool:
+    """Check if a model name indicates an OpenAI Realtime model."""
+    return "realtime" in model.lower()
+
+
+def _is_websocket_model(model: str) -> bool:
+    """Check if a model should use the WebSocket (Responses API) backend.
+
+    Currently matches gpt-5.2 variants.  Other models that support WebSocket
+    mode can be opted in via the ``backend`` parameter on ``LlmProvider``.
+    """
+    lower = model.lower()
+    return lower.startswith("gpt-5.2") or lower.startswith("gpt5.2")
+
+
+class LlmProvider:
+    """Unified LLM provider facade.
+
+    Selects the appropriate backend (HTTP/LiteLLM, Realtime WS, or Responses WS)
+    based on the model name, and delegates all calls to it.
+
+    Centralizes config normalization and reasoning-effort detection so that
+    backends receive pre-normalized configs and pre-computed flags.
+
+    Args:
+        model: Model name (e.g. ``"gpt-4o"``, ``"gpt-4o-realtime-preview"``).
+        api_key: Provider API key.
+        config: LLM configuration.
+        backend: Explicit backend selection: ``"http"``, ``"realtime"``, or
+            ``"websocket"``.  When ``None`` (the default) the backend is
+            auto-detected from the model name.
     """
 
     def __init__(
@@ -64,210 +112,80 @@ class LLMProvider:
         model: str,
         api_key: Optional[str] = None,
         config: Optional[LlmConfig] = None,
+        backend: Optional[str] = None,
     ):
-        self._model = model
-        self._api_key = api_key
-        self._config = _normalize_config(config or LlmConfig())
+        normalized_config = _normalize_config(config or LlmConfig())
+
+        use_realtime = backend == "realtime" or (backend is None and _is_realtime_model(model))
+        use_websocket = backend == "websocket" or (backend is None and _is_websocket_model(model))
+
+        if use_realtime:
+            from line.llm_agent.realtime_provider import RealtimeProvider
+
+            self._backend: ProviderProtocol = RealtimeProvider(
+                model=model, api_key=api_key, config=normalized_config
+            )
+        elif use_websocket:
+            from line.llm_agent.websocket_provider import WebSocketProvider
+
+            supports, default = self._detect_reasoning_effort(model)
+            self._backend = WebSocketProvider(
+                model=model,
+                api_key=api_key,
+                config=normalized_config,
+                default_reasoning_effort=default,
+            )
+        else:
+            from line.llm_agent.http_provider import HttpProvider
+
+            supports, default = self._detect_reasoning_effort(model)
+            self._backend = HttpProvider(
+                model=model,
+                api_key=api_key,
+                config=normalized_config,
+                supports_reasoning_effort=supports,
+                default_reasoning_effort=default,
+            )
+
+    @staticmethod
+    def _detect_reasoning_effort(model: str) -> Tuple[bool, str]:
+        """Detect whether *model* supports ``reasoning_effort`` and find the best default.
+
+        Returns ``(supports_reasoning_effort, default_reasoning_effort)``.
+
+        "none" is ideal (disables reasoning entirely) but not all providers
+        support it.  We probe litellm's own parameter mapping to find out: if
+        mapping "none" through the provider's config raises, fall back to "low"
+        (the lowest universally-supported level).
+        """
+        from litellm import get_llm_provider, get_supported_openai_params
+        from litellm.utils import get_optional_params
 
         supported = get_supported_openai_params(model=model) or []
-        self._supports_reasoning_effort = "reasoning_effort" in supported
+        supports = "reasoning_effort" in supported
 
-        # Determine the right default when no explicit reasoning_effort is configured.
-        # "none" is ideal (disables reasoning entirely) but not all providers support it.
-        # Probe litellm's own parameter mapping to find out: if mapping "none" through the
-        # provider's config raises, fall back to "low" (the lowest universally-supported level).
-        self._default_reasoning_effort = "low"
-        if self._supports_reasoning_effort:
+        default = "low"
+        if supports:
             try:
                 _, provider, _, _ = get_llm_provider(model=model)
                 get_optional_params(model=model, custom_llm_provider=provider, reasoning_effort="none")
-                self._default_reasoning_effort = "none"
+                default = "none"
             except Exception:
                 pass
 
-    def chat(
-        self,
-        messages: List[Message],
-        tools: Optional[List[FunctionTool]] = None,
-        config: Optional[LlmConfig] = None,
-        **kwargs,
-    ) -> "_ChatStream":
-        """Start a streaming chat completion.
+        return supports, default
 
-        Args:
-            messages: Conversation messages.
-            tools: Optional function tools available for this call.
-            config: Optional per-call config override. When provided, its values
-                are used for sampling/model parameters and system prompt instead
-                of the config passed at init time.
-        """
-        cfg = config or self._config
-        llm_messages = self._build_messages(messages, cfg)
+    async def chat(self, messages, tools=None, config=None, **kwargs):
+        cfg = _normalize_config(config) if config else None
+        return await self._backend.chat(messages, tools, config=cfg, **kwargs)
 
-        llm_kwargs: Dict[str, Any] = {
-            "model": self._model,
-            "messages": llm_messages,
-            "stream": True,
-            "num_retries": cfg.num_retries,
-        }
+    async def warmup(self, config=None):
+        cfg = _normalize_config(config) if config else None
+        await self._backend.warmup(cfg)
 
-        if self._api_key:
-            llm_kwargs["api_key"] = self._api_key
-        if cfg.fallbacks:
-            llm_kwargs["fallbacks"] = cfg.fallbacks
-        if cfg.timeout:
-            llm_kwargs["timeout"] = cfg.timeout
-
-        # Add config parameters
-        if cfg.temperature is not None:
-            llm_kwargs["temperature"] = cfg.temperature
-        if cfg.max_tokens is not None:
-            llm_kwargs["max_tokens"] = cfg.max_tokens
-        if cfg.top_p is not None:
-            llm_kwargs["top_p"] = cfg.top_p
-        if cfg.stop:
-            llm_kwargs["stop"] = cfg.stop
-        if cfg.seed is not None:
-            llm_kwargs["seed"] = cfg.seed
-        if cfg.presence_penalty is not None:
-            llm_kwargs["presence_penalty"] = cfg.presence_penalty
-        if cfg.frequency_penalty is not None:
-            llm_kwargs["frequency_penalty"] = cfg.frequency_penalty
-        if self._supports_reasoning_effort:
-            llm_kwargs["reasoning_effort"] = cfg.reasoning_effort or self._default_reasoning_effort
-
-        if cfg.extra:
-            llm_kwargs.update(cfg.extra)
-
-        if tools:
-            llm_kwargs["tools"] = function_tools_to_openai(tools, strict=False)
-
-        llm_kwargs.update(kwargs)
-
-        return _ChatStream(llm_kwargs)
-
-    def _build_messages(
-        self, messages: List[Message], config: Optional[LlmConfig] = None
-    ) -> List[Dict[str, Any]]:
-        """Convert Message objects to LiteLLM format."""
-        cfg = config or self._config
-        result = []
-
-        if cfg.system_prompt:
-            result.append({"role": "system", "content": cfg.system_prompt})
-
-        for msg in messages:
-            llm_msg: Dict[str, Any] = {"role": msg.role}
-
-            if msg.content is not None:
-                llm_msg["content"] = msg.content
-
-            if msg.tool_calls:
-                # ToolCallRequest
-                llm_msg["tool_calls"] = [
-                    {
-                        "id": tc.id,
-                        "type": "function",
-                        "function": {"name": tc.name, "arguments": tc.arguments},
-                        # Include thought_signature for Gemini 3+ models
-                        # LiteLLM expects this in provider_specific_fields
-                        **(
-                            {"provider_specific_fields": {"thought_signature": tc.thought_signature}}
-                            if tc.thought_signature
-                            else {}
-                        ),
-                    }
-                    for tc in msg.tool_calls
-                ]
-
-            if msg.role == "tool":
-                # ToolCallResponse
-                llm_msg["tool_call_id"] = msg.tool_call_id
-                if msg.name:
-                    llm_msg["name"] = msg.name
-
-            result.append(llm_msg)
-        return result
-
-    async def aclose(self) -> None:
-        """Close the provider (no-op for LiteLLM)."""
-        pass
+    async def aclose(self):
+        await self._backend.aclose()
 
 
-class _ChatStream:
-    """Async context manager for streaming chat responses."""
-
-    def __init__(self, llm_kwargs: Dict[str, Any]):
-        self._kwargs = llm_kwargs
-        self._response = None
-
-    async def __aenter__(self) -> "_ChatStream":
-        self._response = await acompletion(**self._kwargs)
-        return self
-
-    async def __aexit__(self, *args) -> None:
-        pass
-
-    async def __aiter__(self) -> AsyncIterator[StreamChunk]:
-        if self._response is None:
-            raise RuntimeError("Stream not started. Use 'async with' context manager.")
-
-        tool_calls: Dict[int, ToolCall] = {}
-
-        async for chunk in self._response:
-            text = None
-            if chunk.choices and chunk.choices[0].delta:
-                delta = chunk.choices[0].delta
-                text = getattr(delta, "content", None)
-
-                # Handle incremental tool calls
-                tc_delta = getattr(delta, "tool_calls", None)
-                if tc_delta:
-                    for tc in tc_delta:
-                        idx = tc.index
-                        if idx not in tool_calls:
-                            tool_calls[idx] = ToolCall(
-                                id=tc.id or "",
-                                name=tc.function.name if tc.function else "",
-                            )
-                        else:
-                            if tc.id:
-                                tool_calls[idx].id = tc.id
-                            if tc.function and tc.function.name:
-                                tool_calls[idx].name = tc.function.name
-
-                        if tc.function and tc.function.arguments:
-                            # Providers stream tool args differently:
-                            # - OpenAI: incremental chunks ("{\"ci", "ty\":", ...") - must concat
-                            # - Anthropic: incremental chunks like OpenAI - must concat
-                            # - Gemini: complete args repeated each chunk - must dedupe
-                            # Detect by checking if existing args look complete (ends with "}")
-                            existing = tool_calls[idx].arguments
-                            new_args = tc.function.arguments
-                            if not existing:
-                                tool_calls[idx].arguments = new_args
-                            elif not existing.endswith("}"):
-                                tool_calls[idx].arguments += new_args  # Incremental
-                            # else: complete args, skip duplicate
-
-                        # Capture thought_signature for Gemini 3+ models
-                        # LiteLLM stores it in provider_specific_fields
-                        provider_fields = getattr(tc, "provider_specific_fields", None)
-                        if provider_fields:
-                            thought_sig = provider_fields.get("thought_signature")
-                            if thought_sig:
-                                tool_calls[idx].thought_signature = thought_sig
-
-            # Check finish reason
-            finish_reason = None
-            if chunk.choices and chunk.choices[0].finish_reason:
-                finish_reason = chunk.choices[0].finish_reason
-                if finish_reason in ("tool_calls", "stop"):
-                    for tc in tool_calls.values():
-                        tc.is_complete = True
-
-            yield StreamChunk(
-                text=text,
-                tool_calls=list(tool_calls.values()) if tool_calls else [],
-                is_final=finish_reason is not None,
-            )
+# Backward-compat alias — existing scripts and examples import LLMProvider directly.
+from line.llm_agent.http_provider import HttpProvider as LLMProvider  # noqa: E402, F401

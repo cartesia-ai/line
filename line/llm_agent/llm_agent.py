@@ -22,7 +22,6 @@ from typing import (
     Union,
 )
 
-from litellm import get_supported_openai_params
 from loguru import logger
 
 from line.agent import AgentCallable, TurnEnv
@@ -43,7 +42,7 @@ from line.events import (
 )
 from line.llm_agent.config import LlmConfig, _merge_configs, _normalize_config
 from line.llm_agent.history import _HISTORY_EVENT_TYPES, History
-from line.llm_agent.provider import LLMProvider, Message, ToolCall
+from line.llm_agent.provider import LlmProvider, Message, ToolCall
 from line.llm_agent.tools.decorators import loopback_tool
 from line.llm_agent.tools.system import EndCallTool, WebSearchTool
 from line.llm_agent.tools.utils import FunctionTool, ToolEnv, ToolType, construct_function_tool
@@ -75,19 +74,9 @@ class LlmAgent:
     ):
         if not api_key:
             raise ValueError("Missing API key in LLmAgent initialization")
-        supported_params = get_supported_openai_params(model=model)
-        if supported_params is None:
-            raise ValueError(
-                f"Model {model} is not supported. See https://models.litellm.ai/ for supported models."
-            )
 
         # Resolve the base config to insert default values for any _UNSET sentinels.
         effective_config = _normalize_config(config or LlmConfig())
-        if effective_config.reasoning_effort is not None and "reasoning_effort" not in supported_params:
-            raise ValueError(
-                f"Model {model} does not support reasoning_effort. "
-                "Remove reasoning_effort from your LlmConfig or use a model that supports it."
-            )
 
         self._model = model
         self._api_key = api_key
@@ -96,10 +85,10 @@ class LlmAgent:
 
         self._tools: List[ToolSpec] = list(tools or [])
 
-        self._llm = LLMProvider(
-            model=self._model,
-            api_key=self._api_key,
-            config=self._config,
+        self._llm = LlmProvider(
+            model=model,
+            api_key=api_key,
+            config=effective_config,
         )
 
         self._introduction_sent = False
@@ -186,11 +175,18 @@ class LlmAgent:
 
         # Handle CallStarted
         if isinstance(event, CallStarted):
+            warmup_task = asyncio.create_task(self._llm.warmup(config=effective_config))
             if effective_config.introduction and not self._introduction_sent:
                 output = AgentSendText(text=effective_config.introduction)
                 self.history._append_local(output)
                 self._introduction_sent = True
                 yield output
+            try:
+                await warmup_task
+            except asyncio.CancelledError:
+                raise  # Warmup task continues as a separate asyncio.Task
+            except Exception as e:
+                logger.warning(f"Provider warmup failed: {e}")
             return
 
         # Handle CallEnded
@@ -347,7 +343,7 @@ class LlmAgent:
             first_token_logged = False
             first_agent_text_logged = False
 
-            stream = self._llm.chat(
+            stream = await self._llm.chat(
                 messages,
                 tools if tools else None,
                 config=config,
