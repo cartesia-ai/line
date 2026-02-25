@@ -163,6 +163,8 @@ class LlmAgent:
         Raises:
             TypeError: If config, tools, context, or history have invalid types.
         """
+        turn_start_time = time.perf_counter()
+
         self._validate_config(config)
         self._validate_tools(tools)
         self._validate_context(context)
@@ -182,6 +184,7 @@ class LlmAgent:
             async for output in self._handoff_target(env, event):
                 self.history._append_local(output)
                 yield output
+            yield LogMetric(name="agent_turn_ms", value=(time.perf_counter() - turn_start_time) * 1000)
             return
 
         # Handle CallStarted
@@ -191,17 +194,21 @@ class LlmAgent:
                 self.history._append_local(output)
                 self._introduction_sent = True
                 yield output
+            yield LogMetric(name="agent_turn_ms", value=(time.perf_counter() - turn_start_time) * 1000)
             return
 
         # Handle CallEnded
         if isinstance(event, CallEnded):
             await self.cleanup()
+            yield LogMetric(name="agent_turn_ms", value=(time.perf_counter() - turn_start_time) * 1000)
             return
 
         async for output in self._generate_response(
             env, event, effective_tools, effective_config, context=context, history=history
         ):
             yield output
+
+        yield LogMetric(name="agent_turn_ms", value=(time.perf_counter() - turn_start_time) * 1000)
 
     def _get_tool_name(self, tool: ToolSpec) -> str:
         """Extract the name from a ToolSpec.
@@ -308,6 +315,12 @@ class LlmAgent:
 
         is_first_iteration = True
         should_loopback = False
+
+        # Timing metrics - measured from start of _generate_response, emitted once
+        response_start_time = time.perf_counter()
+        first_chunk_logged = False
+        first_text_logged = False
+
         for _iteration in range(self._max_tool_iterations):
             # ==== LOOPBACK MANAGMENT ==== #
             # First, yield any pending events from backgrounded tools
@@ -342,11 +355,6 @@ class LlmAgent:
             if web_search_options:
                 chat_kwargs["web_search_options"] = web_search_options
 
-            # Timing metrics
-            request_start_time = time.perf_counter()
-            first_token_logged = False
-            first_agent_text_logged = False
-
             stream = self._llm.chat(
                 messages,
                 tools if tools else None,
@@ -356,22 +364,22 @@ class LlmAgent:
             async with stream:
                 async for chunk in stream:
                     # Track time to first chunk (text or tool call)
-                    if not first_token_logged and (chunk.text or chunk.tool_calls):
-                        first_chunk_ms = (time.perf_counter() - request_start_time) * 1000
+                    if not first_chunk_logged and (chunk.text or chunk.tool_calls):
+                        first_chunk_ms = (time.perf_counter() - response_start_time) * 1000
                         logger.info(f"Time to first chunk: {first_chunk_ms:.2f}ms")
                         yield LogMetric(name="llm_first_chunk_ms", value=first_chunk_ms)
-                        first_token_logged = True
+                        first_chunk_logged = True
 
                     if chunk.text:
                         output = AgentSendText(text=chunk.text)
                         self.history._append_local(output)
 
                         # Track time to first text
-                        if not first_agent_text_logged:
-                            first_text_ms = (time.perf_counter() - request_start_time) * 1000
+                        if not first_text_logged:
+                            first_text_ms = (time.perf_counter() - response_start_time) * 1000
                             logger.info(f"Time to first text: {first_text_ms:.2f}ms")
                             yield LogMetric(name="llm_first_text_ms", value=first_text_ms)
-                            first_agent_text_logged = True
+                            first_text_logged = True
 
                         yield output
 

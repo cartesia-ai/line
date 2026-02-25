@@ -239,10 +239,10 @@ async def test_timing_metrics_emitted(turn_env):
         include_metrics=True,
     )
 
-    # Should have 4 events: 2 LogMetric + 2 AgentSendText
-    assert len(outputs) == 4
+    # Should have 5 events: 2 LogMetric + 2 AgentSendText + 1 agent_turn_ms
+    assert len(outputs) == 5
 
-    # First two should be LogMetric events
+    # First two should be LogMetric events for chunk and text timing
     assert isinstance(outputs[0], LogMetric)
     assert outputs[0].name == "llm_first_chunk_ms"
     assert isinstance(outputs[0].value, float)
@@ -256,11 +256,82 @@ async def test_timing_metrics_emitted(turn_env):
     # First chunk should be <= first text time (or very close)
     assert outputs[0].value <= outputs[1].value + 1  # Allow 1ms tolerance
 
-    # Last two should be AgentSendText events
+    # Next two should be AgentSendText events
     assert isinstance(outputs[2], AgentSendText)
     assert outputs[2].text == "Hello "
     assert isinstance(outputs[3], AgentSendText)
     assert outputs[3].text == "world!"
+
+    # Last should be agent_turn_ms
+    assert isinstance(outputs[4], LogMetric)
+    assert outputs[4].name == "agent_turn_ms"
+    assert isinstance(outputs[4].value, float)
+    assert outputs[4].value >= outputs[1].value  # Turn duration >= first text time
+
+
+async def test_timing_metrics_with_loopback_tool(turn_env):
+    """Test that timing metrics are emitted once per _generate_response, not per iteration.
+
+    When a loopback tool is called, the LLM runs multiple iterations:
+    - Iteration 1: LLM calls tool (emits llm_first_chunk_ms since it's the first chunk)
+    - Iteration 2: LLM generates text (emits llm_first_text_ms since it's the first text)
+
+    Both metrics are measured from the start of _generate_response (after initial
+    loopback management), not from the start of each iteration.
+    """
+
+    @loopback_tool
+    async def get_weather(ctx, city: Annotated[str, "City name"]) -> str:
+        """Get weather for a city."""
+        return f"72°F in {city}"
+
+    responses = [
+        # First iteration: LLM calls tool (no text)
+        [
+            StreamChunk(
+                tool_calls=[
+                    ToolCall(
+                        id="call_1",
+                        name="get_weather",
+                        arguments='{"city": "NYC"}',
+                        is_complete=True,
+                    )
+                ]
+            ),
+            StreamChunk(is_final=True),
+        ],
+        # Second iteration: LLM generates text after seeing tool result
+        [
+            StreamChunk(text="The weather is 72°F."),
+            StreamChunk(is_final=True),
+        ],
+    ]
+
+    agent, mock_llm = create_agent_with_mock(responses, tools=[get_weather])
+
+    outputs = await collect_outputs(
+        agent,
+        turn_env,
+        UserTextSent(
+            content="What's the weather?",
+            history=[UserTextSent(content="What's the weather?")],
+        ),
+        include_metrics=True,
+    )
+
+    # Extract metrics
+    chunk_metrics = [o for o in outputs if isinstance(o, LogMetric) and o.name == "llm_first_chunk_ms"]
+    text_metrics = [o for o in outputs if isinstance(o, LogMetric) and o.name == "llm_first_text_ms"]
+    turn_metrics = [o for o in outputs if isinstance(o, LogMetric) and o.name == "agent_turn_ms"]
+
+    # All metrics should be emitted only once per process call
+    assert len(chunk_metrics) == 1
+    assert len(text_metrics) == 1
+    assert len(turn_metrics) == 1
+
+    # llm_first_chunk_ms <= llm_first_text_ms <= agent_turn_ms
+    assert chunk_metrics[0].value <= text_metrics[0].value
+    assert text_metrics[0].value <= turn_metrics[0].value
 
 
 # =============================================================================
