@@ -348,6 +348,18 @@ class LlmAgent:
 
             # ==== GENERATION CALL ==== #
             messages = await self._build_messages(context=context, history=history)
+
+            # Check if the last user message has content (before filtering)
+            # Skip if empty - handles empty ASR transcriptions and avoids invalid API calls
+            last_user_msg = next((msg for msg in reversed(messages) if msg.role == "user"), None)
+            if not last_user_msg or not (last_user_msg.content or "").strip():
+                logger.warning("Skipping LLM call: no user message with content")
+                break
+
+            # Filter out empty messages before sending to LLM
+            # Some providers (e.g., Anthropic) reject requests with empty message content
+            messages = _filter_empty_messages(messages)
+
             tool_calls_dict: Dict[str, ToolCall] = {}
 
             # Build kwargs for LLM chat, including web_search_options if available
@@ -870,6 +882,17 @@ def _normalize_to_async_gen(
             yield item
 
     return wrapper
+
+
+def _filter_empty_messages(messages: List[Message]) -> List[Message]:
+    """Filter out messages with empty content.
+
+    Some providers (e.g., Anthropic) reject requests containing empty messages.
+    This filters while preserving:
+    - Assistant messages with tool_calls (content may be None)
+    - Messages with non-empty content
+    """
+    return [msg for msg in messages if msg.tool_calls or (msg.content and msg.content.strip())]
 
 
 def _construct_tool_events(

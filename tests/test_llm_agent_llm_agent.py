@@ -1869,3 +1869,260 @@ async def test_history_override_does_not_affect_managed(turn_env):
     # Should see the managed history, not the override
     assert any(m.content == "Real message" for m in second_messages)
     assert not any(m.content == "Override only" for m in second_messages)
+
+
+# =============================================================================
+# Tests: Empty Message Handling
+# =============================================================================
+
+
+class TestEmptyMessageHandling:
+    """Tests for handling empty user messages (e.g., empty ASR transcriptions).
+
+    Empty messages should not trigger LLM generation to prevent:
+    1. Invalid API calls (some providers reject empty messages)
+    2. Wonky generations from empty inputs
+    """
+
+    async def test_empty_transcription_skips_generation(self, turn_env):
+        """Test that an empty user message does not trigger LLM generation."""
+        responses = [
+            [
+                StreamChunk(text="Should not see this"),
+                StreamChunk(is_final=True),
+            ]
+        ]
+
+        agent, mock_llm = create_agent_with_mock(responses)
+
+        outputs = await collect_outputs(
+            agent,
+            turn_env,
+            UserTextSent(content="", history=[UserTextSent(content="")]),
+        )
+
+        # Should have no text outputs
+        text_outputs = [o for o in outputs if isinstance(o, AgentSendText)]
+        assert len(text_outputs) == 0
+
+        # LLM should not have been called
+        assert mock_llm._call_count == 0
+
+    async def test_whitespace_only_transcription_skips_generation(self, turn_env):
+        """Test that whitespace-only user message does not trigger LLM generation."""
+        responses = [
+            [
+                StreamChunk(text="Should not see this"),
+                StreamChunk(is_final=True),
+            ]
+        ]
+
+        agent, mock_llm = create_agent_with_mock(responses)
+
+        outputs = await collect_outputs(
+            agent,
+            turn_env,
+            UserTextSent(content="   \n\t  ", history=[UserTextSent(content="   \n\t  ")]),
+        )
+
+        text_outputs = [o for o in outputs if isinstance(o, AgentSendText)]
+        assert len(text_outputs) == 0
+        assert mock_llm._call_count == 0
+
+    async def test_empty_transcription_after_valid_message_skips_generation(self, turn_env):
+        """Test that empty message following valid conversation does not trigger generation."""
+        responses = [
+            # First response to valid message
+            [
+                StreamChunk(text="Hello!"),
+                StreamChunk(is_final=True),
+            ],
+            # Should not be called for empty message
+            [
+                StreamChunk(text="Should not see this"),
+                StreamChunk(is_final=True),
+            ],
+        ]
+
+        agent, mock_llm = create_agent_with_mock(responses)
+
+        # First call with valid message
+        await collect_outputs(
+            agent,
+            turn_env,
+            UserTextSent(content="Hi", history=[UserTextSent(content="Hi")]),
+        )
+        assert mock_llm._call_count == 1
+
+        # Second call with empty message in history
+        history = [
+            UserTextSent(content="Hi"),
+            AgentTextSent(content="Hello!"),
+            UserTextSent(content=""),  # Empty transcription
+        ]
+        outputs = await collect_outputs(
+            agent,
+            turn_env,
+            UserTextSent(content="", history=history),
+        )
+
+        # Should have no new text outputs
+        text_outputs = [o for o in outputs if isinstance(o, AgentSendText)]
+        assert len(text_outputs) == 0
+
+        # LLM should NOT have been called again
+        assert mock_llm._call_count == 1
+
+    async def test_empty_transcription_after_tool_call_skips_generation(self, turn_env):
+        """Test that empty message after tool interaction does not trigger generation."""
+
+        @loopback_tool
+        async def get_weather(ctx, city: Annotated[str, "City name"]) -> str:
+            """Get weather for a city."""
+            return f"72°F in {city}"
+
+        responses = [
+            # First call: LLM calls tool
+            [
+                StreamChunk(
+                    tool_calls=[
+                        ToolCall(
+                            id="call_1",
+                            name="get_weather",
+                            arguments='{"city": "NYC"}',
+                            is_complete=True,
+                        )
+                    ]
+                ),
+                StreamChunk(is_final=True),
+            ],
+            # Second call: LLM responds after tool
+            [
+                StreamChunk(text="The weather is 72°F."),
+                StreamChunk(is_final=True),
+            ],
+            # Third call should not happen (empty message)
+            [
+                StreamChunk(text="Should not see this"),
+                StreamChunk(is_final=True),
+            ],
+        ]
+
+        agent, mock_llm = create_agent_with_mock(responses, tools=[get_weather])
+
+        # First call triggers tool
+        await collect_outputs(
+            agent,
+            turn_env,
+            UserTextSent(
+                content="What's the weather?",
+                history=[UserTextSent(content="What's the weather?")],
+            ),
+        )
+        assert mock_llm._call_count == 2  # Tool call + response after tool
+
+        # Second call with empty message
+        history = [
+            UserTextSent(content="What's the weather?"),
+            AgentTextSent(content="The weather is 72°F."),
+            UserTextSent(content=""),  # Empty transcription
+        ]
+        outputs = await collect_outputs(
+            agent,
+            turn_env,
+            UserTextSent(content="", history=history),
+        )
+
+        text_outputs = [o for o in outputs if isinstance(o, AgentSendText)]
+        assert len(text_outputs) == 0
+        assert mock_llm._call_count == 2  # No additional calls
+
+    async def test_loopback_still_works_with_valid_content(self, turn_env):
+        """Test that loopback continues when there's valid user content."""
+
+        @loopback_tool
+        async def get_weather(ctx, city: Annotated[str, "City name"]) -> str:
+            """Get weather for a city."""
+            return f"72°F in {city}"
+
+        responses = [
+            # First call: LLM calls tool
+            [
+                StreamChunk(
+                    tool_calls=[
+                        ToolCall(
+                            id="call_1",
+                            name="get_weather",
+                            arguments='{"city": "NYC"}',
+                            is_complete=True,
+                        )
+                    ]
+                ),
+                StreamChunk(is_final=True),
+            ],
+            # Second call: LLM responds after tool result
+            [
+                StreamChunk(text="The weather is 72°F."),
+                StreamChunk(is_final=True),
+            ],
+        ]
+
+        agent, mock_llm = create_agent_with_mock(responses, tools=[get_weather])
+
+        outputs = await collect_outputs(
+            agent,
+            turn_env,
+            UserTextSent(
+                content="What's the weather in NYC?",
+                history=[UserTextSent(content="What's the weather in NYC?")],
+            ),
+        )
+
+        # Should have: AgentToolCalled, AgentToolReturned, AgentSendText
+        tool_calls = [o for o in outputs if isinstance(o, AgentToolCalled)]
+        tool_results = [o for o in outputs if isinstance(o, AgentToolReturned)]
+        text_outputs = [o for o in outputs if isinstance(o, AgentSendText)]
+
+        assert len(tool_calls) == 1
+        assert len(tool_results) == 1
+        assert len(text_outputs) == 1
+        assert text_outputs[0].text == "The weather is 72°F."
+
+        # LLM should have been called twice (loopback worked)
+        assert mock_llm._call_count == 2
+
+    async def test_empty_messages_filtered_from_llm_request(self, turn_env):
+        """Test that empty messages in history are filtered before sending to LLM."""
+        responses = [
+            [
+                StreamChunk(text="Response"),
+                StreamChunk(is_final=True),
+            ]
+        ]
+
+        agent, mock_llm = create_agent_with_mock(responses)
+
+        # History with some empty messages mixed in
+        history = [
+            UserTextSent(content="First message"),
+            AgentTextSent(content=""),  # Empty - should be filtered
+            UserTextSent(content=""),  # Empty - should be filtered (but this is last, so skip)
+            AgentTextSent(content="Response to first"),
+            UserTextSent(content="Second message"),  # Valid - this is last user message
+        ]
+
+        outputs = await collect_outputs(
+            agent,
+            turn_env,
+            UserTextSent(content="Second message", history=history),
+        )
+
+        # Should have generated a response
+        text_outputs = [o for o in outputs if isinstance(o, AgentSendText)]
+        assert len(text_outputs) == 1
+
+        # Check messages sent to LLM - empty messages should be filtered
+        messages = mock_llm._recorded_messages[0]
+        for msg in messages:
+            if msg.content is not None:  # Skip tool call messages
+                assert msg.content.strip() != "", f"Found empty message: {msg}"
