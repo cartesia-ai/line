@@ -285,7 +285,7 @@ class ConversationRunner:
         self.shutdown_event = asyncio.Event()
         self.history: List[InputEvent] = []
         self.emitted_agent_text: str = (
-            ""  # Buffer for interruptible AgentSendText content (for whitespace interpolation)
+            ""  # Buffer for all AgentSendText content (for whitespace interpolation)
         )
 
         self.agent_callable, self.run_filter, self.cancel_filter = self._prepare_agent(agent_spec)
@@ -420,11 +420,13 @@ class ConversationRunner:
                 async for output in self.agent_callable(turn_env, event):
                     # Buffer AgentSendText content for whitespace interpolation
                     if isinstance(output, AgentSendText):
-                        if output.interruptible:
-                            self.emitted_agent_text += output.text
-                        else:
-                            # Mark uninterruptible output as expected ack-back so incoming
-                            # AgentTextSent chunks can be dropped.
+                        self.emitted_agent_text += output.text
+                        if not output.interruptible:
+                            # Pre-commit: record in canonical history now (before
+                            # any subsequent user events arrive on the WebSocket).
+                            self.history.append(AgentTextSent(content=output.text))
+                            # Mark as expected ack-back so incoming AgentTextSent
+                            # chunks from the harness can be suppressed.
                             self._emitted_uninterruptible_text += output.text
                     mapped = self._map_output_event(output)
 
@@ -483,12 +485,12 @@ class ConversationRunner:
         if not remaining_committed:
             logger.debug(
                 f'Skipping expected uninterruptible ack-back chunk "{event.content}" '
-                "(already committed from local history)"
+                "(already pre-committed to history)"
             )
             return None
         logger.debug(
             f'Skipping expected uninterruptible ack-back prefix "{event.content[:consumed_chars]}" '
-            "(already committed from local history); "
+            "(already pre-committed to history); "
             f'forwarding remaining chunk "{remaining_committed}"'
         )
         return AgentTextSent(content=remaining_committed, event_id=event.event_id)
@@ -855,12 +857,14 @@ def _consume_expected_ack_back_prefix(committed_text: str, pending_text: str) ->
 
     i = 0  # pointer into committed_text
     j = 0  # pointer into pending_text
+    matched = False  # whether at least one real character pair matched
 
     while i < len(committed_text) and j < len(pending_text):
         c = committed_text[i]
         p = pending_text[j]
 
         if c == p:
+            matched = True
             i += 1
             j += 1
         elif _is_stripped_by_harness(p):
@@ -870,8 +874,14 @@ def _consume_expected_ack_back_prefix(committed_text: str, pending_text: str) ->
         else:
             break
 
-    if i == 0:
-        # No prefix consumed; preserve pending text exactly.
+    # Skip any trailing TTS-inserted full stops in remaining committed text
+    # (mirrors the same sweep in _parse_committed).
+    while i < len(committed_text) and committed_text[i] in FULL_STOP_CHARS:
+        i += 1
+
+    if not matched:
+        # No real character matched; full stops and whitespace alone are not
+        # sufficient to count as a prefix match.
         return 0, committed_text, pending_text
 
     if i == len(committed_text):

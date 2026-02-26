@@ -38,6 +38,7 @@ from line.events import (
 from line.voice_agent_app import (
     AgentEnv,
     ConversationRunner,
+    _consume_expected_ack_back_prefix,
     _get_processed_history,
     _parse_committed,
 )
@@ -603,7 +604,7 @@ class TestUninterruptibleMessages:
 
     @pytest.mark.asyncio
     async def test_cancel_filter_still_applies_during_uninterruptible(self):
-        """SDK no longer suppresses cancel events during uninterruptible playback."""
+        """Cancel filter applies normally even during uninterruptible playback."""
         ws = create_mock_websocket()
         agent_started = asyncio.Event()
         agent_cancelled = asyncio.Event()
@@ -635,6 +636,10 @@ class TestUninterruptibleMessages:
         await runner.run()
         assert agent_cancelled.is_set()
         assert runner._emitted_uninterruptible_text == ""
+        # Pre-commit: uninterruptible text should appear in history
+        agent_texts = [e for e in runner.history if isinstance(e, AgentTextSent)]
+        assert len(agent_texts) == 1
+        assert agent_texts[0].content == "Legal disclaimer."
 
     @pytest.mark.asyncio
     async def test_cancel_does_not_clear_emitted_uninterruptible_text(self):
@@ -805,6 +810,18 @@ class TestUninterruptibleMessages:
         assert result is None
         assert runner._emitted_uninterruptible_text == ""
 
+    def test_trailing_tts_full_stop_in_ack_back_is_consumed(self):
+        """TTS-injected trailing full stop should not leak through suppression."""
+        ws = create_mock_websocket()
+        runner = ConversationRunner(ws, noop_agent, env)
+
+        # Agent emitted "Hello" without a period, but TTS appended one
+        runner._emitted_uninterruptible_text = "Hello"
+        result = runner._suppress_uninterruptible_ack_back(AgentTextSent(content="Hello."))
+
+        assert result is None
+        assert runner._emitted_uninterruptible_text == ""
+
     @pytest.mark.asyncio
     async def test_agent_exception_clears_emitted_uninterruptible_text(self):
         """Unhandled agent exceptions clear emitted uninterruptible text state."""
@@ -821,6 +838,384 @@ class TestUninterruptibleMessages:
         runner = ConversationRunner(ws, failing_agent, env)
         await runner.run()
 
+        assert runner._emitted_uninterruptible_text == ""
+
+    @pytest.mark.asyncio
+    async def test_precommit_uninterruptible_appears_before_subsequent_user_events(self):
+        """Pre-committed uninterruptible text appears in history before the next user event."""
+        ws = create_mock_websocket()
+        agent_yielded = asyncio.Event()
+
+        async def scripted_agent(env, event):
+            if isinstance(event, CallStarted):
+                yield AgentSendText(text="This call is recorded.", interruptible=False)
+                agent_yielded.set()
+                # Keep running so the task is alive when user events arrive
+                await asyncio.Future()
+
+        msg_idx = 0
+
+        async def receive_messages():
+            nonlocal msg_idx
+            if msg_idx == 0:
+                await agent_yielded.wait()
+                msg_idx += 1
+                return {"type": "user_state", "value": "speaking"}
+            if msg_idx == 1:
+                msg_idx += 1
+                return {"type": "transcription", "content": "Hello?"}
+            raise WebSocketDisconnect()
+
+        ws.receive_json = receive_messages
+
+        runner = ConversationRunner(ws, scripted_agent, env)
+        await runner.run()
+
+        # Find the pre-committed AgentTextSent and the UserTurnStarted
+        agent_text_idx = None
+        user_turn_started_idx = None
+        for i, evt in enumerate(runner.history):
+            if isinstance(evt, AgentTextSent) and evt.content == "This call is recorded.":
+                agent_text_idx = i
+            if isinstance(evt, UserTurnStarted) and agent_text_idx is not None:
+                user_turn_started_idx = i
+                break
+
+        assert agent_text_idx is not None, "Pre-committed AgentTextSent not found in history"
+        assert user_turn_started_idx is not None, "UserTurnStarted not found after AgentTextSent"
+        assert agent_text_idx < user_turn_started_idx
+
+    @pytest.mark.asyncio
+    async def test_precommit_uninterruptible_buffers_into_emitted_agent_text(self):
+        """Uninterruptible text is buffered into emitted_agent_text for whitespace restoration."""
+        ws = create_mock_websocket()
+
+        async def scripted_agent(env, event):
+            if isinstance(event, CallStarted):
+                yield AgentSendText(text="Hello ", interruptible=True)
+                yield AgentSendText(text="Legal notice.", interruptible=False)
+
+        runner = ConversationRunner(ws, scripted_agent, env)
+        await runner._start_agent_task(TurnEnv(), CallStarted())
+        await runner.agent_task
+
+        assert runner.emitted_agent_text == "Hello Legal notice."
+
+
+# ============================================================
+# Adversarial _consume_expected_ack_back_prefix tests
+# ============================================================
+
+
+class TestConsumeExpectedAckBackAdversarial:
+    """Adversarial edge cases for _consume_expected_ack_back_prefix."""
+
+    # -- Pure full-stop committed text should NOT match --
+
+    def test_lone_full_stop_does_not_match_pending(self):
+        """A lone TTS-injected '.' must not falsely suppress against real pending text."""
+        consumed, remaining_c, remaining_p = _consume_expected_ack_back_prefix(".", "Hello")
+        assert consumed == 0
+        assert remaining_c == "."
+        assert remaining_p == "Hello"
+
+    def test_multiple_full_stops_do_not_match_pending(self):
+        """Pure full-stop committed '...' must not match against any pending text."""
+        consumed, remaining_c, remaining_p = _consume_expected_ack_back_prefix("...", "Hello world")
+        assert consumed == 0
+        assert remaining_c == "..."
+        assert remaining_p == "Hello world"
+
+    def test_devanagari_full_stop_does_not_match_pending(self):
+        """Devanagari danda '।' alone must not falsely suppress."""
+        consumed, remaining_c, remaining_p = _consume_expected_ack_back_prefix("।", "नमस्ते")
+        assert consumed == 0
+        assert remaining_c == "।"
+        assert remaining_p == "नमस्ते"
+
+    def test_cjk_full_stop_does_not_match_pending(self):
+        """CJK full stop '。' alone must not falsely suppress."""
+        consumed, remaining_c, remaining_p = _consume_expected_ack_back_prefix("。", "你好")
+        assert consumed == 0
+        assert remaining_c == "。"
+        assert remaining_p == "你好"
+
+    # -- Full stops combined with real content SHOULD match --
+
+    def test_leading_full_stop_before_real_content_is_consumed(self):
+        """A TTS-injected leading '.' before real content is valid noise."""
+        consumed, remaining_c, remaining_p = _consume_expected_ack_back_prefix(".Hello", "Hello")
+        assert consumed == 6  # ".Hello" fully consumed
+        assert remaining_c == ""
+        assert remaining_p == ""
+
+    def test_multiple_trailing_full_stops_after_real_match(self):
+        """Multiple TTS-injected trailing full stops are swept after a real match."""
+        consumed, remaining_c, remaining_p = _consume_expected_ack_back_prefix("Hello...", "Hello")
+        assert consumed == 8
+        assert remaining_c == ""
+        assert remaining_p == ""
+
+    def test_mixed_full_stop_types_around_real_content(self):
+        """Mixed full stop characters (.।。) around real content are all swept."""
+        consumed, remaining_c, remaining_p = _consume_expected_ack_back_prefix(".Hello।。", "Hello")
+        assert consumed == 8
+        assert remaining_c == ""
+        assert remaining_p == ""
+
+    # -- Whitespace and emoji in pending --
+
+    def test_leading_whitespace_in_pending_is_skipped(self):
+        """Leading whitespace in pending is harness-stripped and should be skipped."""
+        consumed, remaining_c, remaining_p = _consume_expected_ack_back_prefix("Hello", "  Hello")
+        assert consumed == 5
+        assert remaining_c == ""
+        assert remaining_p == ""
+
+    def test_emoji_in_pending_is_skipped(self):
+        """Emoji characters in pending are harness-stripped and should be skipped."""
+        consumed, remaining_c, remaining_p = _consume_expected_ack_back_prefix("Hellothere", "Hello 👋 there")
+        assert consumed == 10
+        assert remaining_c == ""
+        assert remaining_p == ""
+
+    def test_emoji_only_pending_does_not_match(self):
+        """Pure emoji pending with real committed text should not match."""
+        consumed, remaining_c, remaining_p = _consume_expected_ack_back_prefix("Hello", "👋🎉")
+        assert consumed == 0
+        assert remaining_c == "Hello"
+        assert remaining_p == "👋🎉"
+
+    # -- Partial consumption and multi-chunk scenarios --
+
+    def test_partial_committed_against_longer_pending(self):
+        """Committed is a prefix of the full pending text; remainder stays pending."""
+        consumed, remaining_c, remaining_p = _consume_expected_ack_back_prefix("Hello", "Hello world goodbye")
+        assert consumed == 5
+        assert remaining_c == ""
+        # Leading whitespace after match is drained (it's harness-stripped)
+        assert remaining_p == "world goodbye"
+
+    def test_multi_chunk_drain_then_corrupt_chunk(self):
+        """After partial consumption, a non-matching chunk passes through untouched."""
+        # Chunk 1: partial match
+        consumed1, rem_c1, rem_p = _consume_expected_ack_back_prefix("Hello", "Hello world")
+        assert consumed1 == 5
+        assert rem_c1 == ""
+        assert rem_p == "world"
+
+        # Chunk 2: corrupted, doesn't match remaining pending
+        consumed2, rem_c2, rem_p2 = _consume_expected_ack_back_prefix("Xorld", rem_p)
+        assert consumed2 == 0
+        assert rem_c2 == "Xorld"
+        assert rem_p2 == "world"
+
+    def test_committed_longer_than_pending(self):
+        """Committed extends beyond pending — partial match, remainder in committed."""
+        consumed, remaining_c, remaining_p = _consume_expected_ack_back_prefix(
+            "HelloworldExtra", "Hello world"
+        )
+        assert consumed > 0
+        assert remaining_c == "Extra"
+        assert remaining_p == ""
+
+    def test_single_char_match(self):
+        """A single-character match is sufficient to count as a real match."""
+        consumed, remaining_c, remaining_p = _consume_expected_ack_back_prefix("H", "Hello")
+        assert consumed == 1
+        assert remaining_c == ""
+        assert remaining_p == "ello"
+
+    # -- Unicode and accented characters --
+
+    def test_accented_characters(self):
+        """Accented characters should match exactly."""
+        consumed, remaining_c, remaining_p = _consume_expected_ack_back_prefix("Héllocafé", "Héllo café")
+        assert consumed == 9
+        assert remaining_c == ""
+        assert remaining_p == ""
+
+    # -- Empty / degenerate inputs --
+
+    def test_empty_committed_returns_zero(self):
+        """Empty committed text means nothing to consume."""
+        consumed, remaining_c, remaining_p = _consume_expected_ack_back_prefix("", "Hello")
+        assert consumed == 0
+        assert remaining_c == ""
+        assert remaining_p == "Hello"
+
+    def test_empty_pending_returns_zero(self):
+        """Empty pending text means nothing to match against."""
+        consumed, remaining_c, remaining_p = _consume_expected_ack_back_prefix("Hello", "")
+        assert consumed == 0
+        assert remaining_c == "Hello"
+        assert remaining_p == ""
+
+    def test_both_empty(self):
+        """Both empty — no-op."""
+        consumed, remaining_c, remaining_p = _consume_expected_ack_back_prefix("", "")
+        assert consumed == 0
+        assert remaining_c == ""
+        assert remaining_p == ""
+
+    # -- Boundary between uninterruptible and interruptible in same chunk --
+
+    def test_interruptible_suffix_preserved_after_uninterruptible_prefix(self):
+        """When a chunk straddles the boundary, only the uninterruptible prefix is consumed."""
+        # Agent emitted "Hold." (uninterruptible), then "So yes" (interruptible)
+        # Harness bundles: "Hold.Soyes"
+        consumed, remaining_c, remaining_p = _consume_expected_ack_back_prefix("Hold.Soyes", "Hold.")
+        assert consumed == 5  # "Hold." consumed
+        assert remaining_c == "Soyes"
+        assert remaining_p == ""
+
+    def test_tts_injects_full_stop_at_boundary(self):
+        """TTS injects a period between uninterruptible and interruptible text."""
+        # Agent emitted "Hold" (uninterruptible), TTS adds ".", then interruptible text follows
+        # Harness sends: "Hold.Soyes"
+        consumed, remaining_c, remaining_p = _consume_expected_ack_back_prefix("Hold.Soyes", "Hold")
+        # "Hold" matches real chars, trailing "." is swept
+        assert consumed == 5  # "Hold" + "."
+        assert remaining_c == "Soyes"
+        assert remaining_p == ""
+
+    # -- Full stop at chunk boundary after partial drain --
+
+    def test_full_stop_only_chunk_after_pending_drained(self):
+        """Once pending is empty, a full-stop-only chunk should pass through."""
+        consumed, remaining_c, remaining_p = _consume_expected_ack_back_prefix(".", "")
+        assert consumed == 0
+        assert remaining_c == "."
+        assert remaining_p == ""
+
+    def test_full_stop_only_chunk_with_remaining_pending(self):
+        """A full-stop-only ack-back must not consume from remaining pending text."""
+        # This is the key adversarial case: pending has real text left,
+        # but the ack-back is just TTS noise — must not falsely suppress.
+        consumed, remaining_c, remaining_p = _consume_expected_ack_back_prefix(".", " world")
+        assert consumed == 0
+        assert remaining_c == "."
+        assert remaining_p == " world"
+
+
+# ============================================================
+# Adversarial _suppress_uninterruptible_ack_back integration tests
+# ============================================================
+
+
+class TestSuppressUninterruptibleAdversarial:
+    """Integration tests: adversarial scenarios through the runner's suppress method."""
+
+    def test_pure_full_stop_ack_back_not_suppressed(self):
+        """A lone '.' ack-back must not be suppressed even when pending text exists."""
+        ws = create_mock_websocket()
+        runner = ConversationRunner(ws, noop_agent, env)
+
+        runner._emitted_uninterruptible_text = "Hello world"
+        result = runner._suppress_uninterruptible_ack_back(AgentTextSent(content="."))
+
+        assert result is not None
+        assert result.content == "."
+        # Pending must be untouched
+        assert runner._emitted_uninterruptible_text == "Hello world"
+
+    def test_multi_chunk_with_interleaved_full_stop_noise(self):
+        """Real chunks suppress correctly even if a full-stop-only chunk appears between them."""
+        ws = create_mock_websocket()
+        runner = ConversationRunner(ws, noop_agent, env)
+
+        runner._emitted_uninterruptible_text = "Hello world"
+
+        # Chunk 1: real content, partially drains pending
+        r1 = runner._suppress_uninterruptible_ack_back(AgentTextSent(content="Hello"))
+        assert r1 is None
+        assert runner._emitted_uninterruptible_text == "world"
+
+        # Chunk 2: TTS noise — must pass through, not corrupt pending
+        r2 = runner._suppress_uninterruptible_ack_back(AgentTextSent(content="."))
+        assert r2 is not None
+        assert r2.content == "."
+        assert runner._emitted_uninterruptible_text == "world"
+
+        # Chunk 3: real content, finishes draining
+        r3 = runner._suppress_uninterruptible_ack_back(AgentTextSent(content="world"))
+        assert r3 is None
+        assert runner._emitted_uninterruptible_text == ""
+
+    def test_unicode_ack_back_suppressed(self):
+        """Accented/unicode uninterruptible text is suppressed correctly."""
+        ws = create_mock_websocket()
+        runner = ConversationRunner(ws, noop_agent, env)
+
+        runner._emitted_uninterruptible_text = "Héllo café"
+        result = runner._suppress_uninterruptible_ack_back(AgentTextSent(content="Héllocafé"))
+
+        assert result is None
+        assert runner._emitted_uninterruptible_text == ""
+
+    def test_emoji_in_pending_suppressed(self):
+        """Emoji in pending (harness-stripped) doesn't prevent suppression."""
+        ws = create_mock_websocket()
+        runner = ConversationRunner(ws, noop_agent, env)
+
+        runner._emitted_uninterruptible_text = "Hello 👋 there"
+        result = runner._suppress_uninterruptible_ack_back(AgentTextSent(content="Hellothere"))
+
+        assert result is None
+        assert runner._emitted_uninterruptible_text == ""
+
+    def test_completely_unrelated_ack_back_passes_through(self):
+        """An ack-back with no character overlap passes through untouched."""
+        ws = create_mock_websocket()
+        runner = ConversationRunner(ws, noop_agent, env)
+
+        runner._emitted_uninterruptible_text = "Hello"
+        result = runner._suppress_uninterruptible_ack_back(AgentTextSent(content="XYZ"))
+
+        assert result is not None
+        assert result.content == "XYZ"
+        assert runner._emitted_uninterruptible_text == "Hello"
+
+    def test_event_id_preserved_on_trimmed_ack_back(self):
+        """When only the prefix is suppressed, the returned event preserves the original event_id."""
+        ws = create_mock_websocket()
+        runner = ConversationRunner(ws, noop_agent, env)
+
+        runner._emitted_uninterruptible_text = "Legal."
+        original = AgentTextSent(content="Legal.Hello")
+        result = runner._suppress_uninterruptible_ack_back(original)
+
+        assert result is not None
+        assert result.content == "Hello"
+        assert result.event_id == original.event_id
+
+    def test_repeated_suppression_drains_long_pending(self):
+        """Multiple ack-back chunks progressively drain a long pending buffer."""
+        ws = create_mock_websocket()
+        runner = ConversationRunner(ws, noop_agent, env)
+
+        runner._emitted_uninterruptible_text = "This call may be recorded for quality purposes"
+
+        r1 = runner._suppress_uninterruptible_ack_back(AgentTextSent(content="Thiscallmaybe"))
+        assert r1 is None
+
+        r2 = runner._suppress_uninterruptible_ack_back(AgentTextSent(content="recordedforquality"))
+        assert r2 is None
+
+        r3 = runner._suppress_uninterruptible_ack_back(AgentTextSent(content="purposes"))
+        assert r3 is None
+        assert runner._emitted_uninterruptible_text == ""
+
+    def test_trailing_tts_full_stop_with_interruptible_suffix(self):
+        """TTS adds '.' at uninterruptible boundary, followed by interruptible content."""
+        ws = create_mock_websocket()
+        runner = ConversationRunner(ws, noop_agent, env)
+
+        runner._emitted_uninterruptible_text = "Hold"
+        result = runner._suppress_uninterruptible_ack_back(AgentTextSent(content="Hold.Anyway"))
+
+        assert result is not None
+        assert result.content == "Anyway"
         assert runner._emitted_uninterruptible_text == ""
 
 

@@ -1111,18 +1111,24 @@ class TestHistory:
 
 
 class TestUninterruptibleTextHistory:
-    """Tests for AgentSendText(interruptible=False) behavior in _build_full_history."""
+    """Tests for AgentSendText(interruptible=False) behavior in _build_full_history.
+
+    Uninterruptible text is pre-committed as AgentTextSent in the input history
+    by voice_agent_app, so standard matching applies here.
+    """
 
     @staticmethod
     def _annotate(events: list, event_id: str) -> list[tuple]:
         return [(event_id, e) for e in events]
 
-    async def test_uninterruptible_text_is_included_without_input_ack_back(self):
-        """Uninterruptible text is committed from local history even without harness ack-back."""
+    async def test_precommitted_uninterruptible_text_matches_standard(self):
+        """Pre-committed AgentTextSent in input matches local AgentSendText via standard flow."""
         trigger_event_id = "evt1"
         next_event_id = "evt2"
         input_history = [
             UserTextSent(content="Hi", event_id=trigger_event_id),
+            # Pre-committed by voice_agent_app before ack-back arrives
+            AgentTextSent(content="Legal notice.", event_id="precommit-1"),
             UserTextSent(content="Next", event_id=next_event_id),
         ]
         local_history = self._annotate(
@@ -1138,12 +1144,14 @@ class TestUninterruptibleTextHistory:
         assert result[1].content == "Legal notice."
         assert isinstance(result[2], UserTextSent)
 
-    async def test_uninterruptible_not_merged_with_adjacent_send_text(self):
-        """Uninterruptible text is preserved as a separate event between adjacent text."""
+    async def test_precommitted_uninterruptible_with_adjacent_text(self):
+        """Pre-committed uninterruptible text coexists with interruptible ack-backs."""
         event_id = "user-evt"
         input_history = [
             UserTextSent(content="Start", event_id=event_id),
             AgentTextSent(content="Hello.", event_id="agent-evt-1"),
+            # Pre-committed by voice_agent_app
+            AgentTextSent(content="Legal notice.", event_id="precommit-1"),
             AgentTextSent(content="How can I help?", event_id="agent-evt-2"),
         ]
         local_history = self._annotate(
@@ -1177,11 +1185,13 @@ class TestUninterruptibleTextHistory:
         assert result[0].content == "Disclaimer."
 
     async def test_mixed_interruptible_uninterruptible_sequence(self):
-        """Mixed interruptible/uninterruptible local events are preserved in order."""
+        """Mixed interruptible/uninterruptible local events match pre-committed input."""
         trigger_event_id = "evt1"
         input_history = [
             UserTextSent(content="Start", event_id=trigger_event_id),
             AgentTextSent(content="Hello!", event_id="agent-evt-1"),
+            # Pre-committed by voice_agent_app
+            AgentTextSent(content="This call is recorded.", event_id="precommit-1"),
             UserTextSent(content="...", event_id="evt2"),
             AgentTextSent(content="How can I help?", event_id="agent-evt-2"),
         ]
