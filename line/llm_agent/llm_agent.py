@@ -757,22 +757,33 @@ class LlmAgent:
             return None
 
         get_event_task = asyncio.ensure_future(self._background_event_queue.get())
-        done, _ = await asyncio.wait(
-            [get_event_task, self._background_task],
-            return_when=asyncio.FIRST_COMPLETED,
-        )
-
-        # Check if the get_event task completed
-        if get_event_task in done:
-            return get_event_task.result()
-
-        # Background task completed first - cancel the get_event task
-        get_event_task.cancel()
         try:
-            await get_event_task
+            done, _ = await asyncio.wait(
+                [get_event_task, self._background_task],
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+
+            # Check if the get_event task completed
+            if get_event_task in done:
+                return get_event_task.result()
+
+            # Background task completed first - cancel the get_event task
+            get_event_task.cancel()
+            try:
+                await get_event_task
+            except asyncio.CancelledError:
+                pass
+            return None
         except asyncio.CancelledError:
-            pass
-        return None
+            # If we're cancelled externally (e.g., user started speaking),
+            # ensure get_event_task is cancelled so it doesn't consume
+            # events meant for the next process() call
+            get_event_task.cancel()
+            try:
+                await get_event_task
+            except asyncio.CancelledError:
+                pass
+            raise
 
     async def cleanup(self) -> None:
         """Clean up resources."""
