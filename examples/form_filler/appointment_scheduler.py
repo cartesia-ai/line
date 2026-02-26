@@ -161,11 +161,18 @@ class AppointmentScheduler:
             match = re.match(r"^(\d{1,2})(?::(\d{2}))?\s*(am|pm)$", time_lower)
             if match:
                 h, m, ampm = match.group(1), match.group(2) or "00", match.group(3)
-                time_normalized = f"{h}:{m} {ampm}"
+                # Strip leading zeros from hour to match slot format (e.g., "9:00 am" not "09:00 am")
+                time_normalized = f"{int(h)}:{m} {ampm}"
                 return time_normalized == slot_time
 
             # Fallback: check if slot starts with the hour (e.g., "2" matches "2:00 pm")
-            return slot_time.startswith(f"{time_lower.split()[0]}:")
+            # Strip leading zeros from the hour for comparison
+            hour_part = time_lower.split()[0]
+            try:
+                normalized_hour = str(int(hour_part))
+                return slot_time.startswith(f"{normalized_hour}:")
+            except ValueError:
+                return slot_time.startswith(f"{hour_part}:")
 
         # Find matching slots
         matching_slots = [s for s in self._all_slots if slot_matches_date(s) and slot_matches_time(s)]
