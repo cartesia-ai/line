@@ -1,15 +1,16 @@
 """Appointment scheduling for doctor visits with mock availability data."""
 
 import asyncio
+from datetime import datetime, timedelta
 import random
 import re
-from datetime import datetime, timedelta
 
 # IntakeForm is imported at runtime to avoid circular imports
 from typing import TYPE_CHECKING, Annotated, Optional
 
-from line.llm_agent import ToolEnv, loopback_tool
 from loguru import logger
+
+from line.llm_agent import ToolEnv, loopback_tool
 
 if TYPE_CHECKING:
     from intake_form import IntakeForm
@@ -167,9 +168,7 @@ class AppointmentScheduler:
             return slot_time.startswith(f"{time_lower.split()[0]}:")
 
         # Find matching slots
-        matching_slots = [
-            s for s in self._all_slots if slot_matches_date(s) and slot_matches_time(s)
-        ]
+        matching_slots = [s for s in self._all_slots if slot_matches_date(s) and slot_matches_time(s)]
 
         if not matching_slots:
             # Try date-only match if no exact match
@@ -254,12 +253,8 @@ def create_scheduler_tools(scheduler: AppointmentScheduler, form: "IntakeForm"):
     @loopback_tool
     async def select_appointment_slot(
         ctx: ToolEnv,
-        date: Annotated[
-            str, "The date - day of week (e.g., 'Thursday') or date (e.g., 'February 13')"
-        ],
-        time: Annotated[
-            str, "The time (e.g., '9:00 AM', '2pm') or period (e.g., 'morning', 'afternoon')"
-        ],
+        date: Annotated[str, "The date - day of week (e.g., 'Thursday') or date (e.g., 'February 13')"],
+        time: Annotated[str, "The time (e.g., '9:00 AM', '2pm') or period (e.g., 'morning', 'afternoon')"],
     ) -> str:
         """Select an appointment slot based on the user's preferred date and time.
         Also use this when the user wants to change their selected time before booking.
@@ -304,10 +299,7 @@ def create_scheduler_tools(scheduler: AppointmentScheduler, form: "IntakeForm"):
             return
 
         appt = result["appointment"]
-        yield (
-            f"Your appointment is confirmed! "
-            f"You're scheduled for {appt['time']} on {appt['date']}. "
-        )
+        yield (f"Your appointment is confirmed! You're scheduled for {appt['time']} on {appt['date']}. ")
 
     return [
         check_availability,

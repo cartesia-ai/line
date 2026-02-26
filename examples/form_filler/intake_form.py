@@ -1,17 +1,16 @@
 """Intake form management for doctor visit scheduling."""
 
 import asyncio
-import json
 from dataclasses import dataclass
+import json
 from typing import Annotated, Any, Optional
 
-from line.llm_agent import ToolEnv, loopback_tool
 from loguru import logger
 
+from line.llm_agent import ToolEnv, loopback_tool
+
 # Default instruction shown to the agent after recording an answer (before next question).
-REPEAT_ANSWER_TO_USER_INSTRUCTION = (
-    "Repeat the answer back to the user. Then proceed to next question."
-)
+REPEAT_ANSWER_TO_USER_INSTRUCTION = "Repeat the answer back to the user. Then proceed to next question."
 
 REPEAT_SPELLING_BACK_TO_USER_INSTRUCTION = "IMPORTANT: spell the user's answer back with dashes and ask if it is correct (for example 'That's J-O-H-N, right?' or 'That's A-B-C-1-2-3'). Make sure the user confirms the answer before asking the next question."
 
@@ -61,7 +60,7 @@ FORM_FIELDS = [
         "section": "intake",
         "required": True,
         "post_record_instructions": REPEAT_ANSWER_TO_USER_INSTRUCTION,
-    }
+    },
 ]
 
 
@@ -226,9 +225,7 @@ class IntakeForm:
         """Format a field as a question for the agent."""
         text = field["question"]
         if field.get("context"):
-            text += (
-                f" (context: (do not say this to the user unless instructed) {field['context']})"
-            )
+            text += f" (context: (do not say this to the user unless instructed) {field['context']})"
         return text
 
     def _process_answer(self, answer: str, field: dict) -> tuple[bool, Any, str]:
@@ -309,7 +306,9 @@ def create_intake_tools(form: IntakeForm):
         result = await form.record_answer(field_id, answer)
 
         if not result.success:
-            return f"Error: {result.error or 'Unknown error'}. Current question: {result.current_question or ''}"
+            return (
+                f"Error: {result.error or 'Unknown error'}. Current question: {result.current_question or ''}"
+            )
 
         if result.is_complete:
             return f"[{result.recorded_field}: {result.recorded_value}] {result.record_intake_instructions}."
