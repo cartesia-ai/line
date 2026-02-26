@@ -890,9 +890,14 @@ def _filter_empty_messages(messages: List[Message]) -> List[Message]:
     Some providers (e.g., Anthropic) reject requests containing empty messages.
     This filters while preserving:
     - Assistant messages with tool_calls (content may be None)
+    - Tool result messages with tool_call_id (content may be empty)
     - Messages with non-empty content
     """
-    return [msg for msg in messages if msg.tool_calls or (msg.content and msg.content.strip())]
+    return [
+        msg
+        for msg in messages
+        if msg.tool_calls or msg.tool_call_id or (msg.content and msg.content.strip())
+    ]
 
 
 def _construct_tool_events(

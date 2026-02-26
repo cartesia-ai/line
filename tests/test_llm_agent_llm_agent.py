@@ -2126,3 +2126,63 @@ class TestEmptyMessageHandling:
         for msg in messages:
             if msg.content is not None:  # Skip tool call messages
                 assert msg.content.strip() != "", f"Found empty message: {msg}"
+
+    async def test_tool_result_with_empty_content_preserved(self, turn_env):
+        """Test that tool-result messages with empty content are NOT filtered.
+        
+        LLM providers require every tool call to have a matching tool result.
+        Even if the tool returns an empty string, the result message must be preserved.
+        """
+
+        @loopback_tool
+        async def empty_tool(ctx) -> str:
+            """Tool that returns empty string."""
+            return ""
+
+        responses = [
+            # First call: LLM calls tool
+            [
+                StreamChunk(
+                    tool_calls=[
+                        ToolCall(
+                            id="call_1",
+                            name="empty_tool",
+                            arguments="{}",
+                            is_complete=True,
+                        )
+                    ]
+                ),
+                StreamChunk(is_final=True),
+            ],
+            # Second call: LLM responds after tool result
+            [
+                StreamChunk(text="Done"),
+                StreamChunk(is_final=True),
+            ],
+        ]
+
+        agent, mock_llm = create_agent_with_mock(responses, tools=[empty_tool])
+
+        await collect_outputs(
+            agent,
+            turn_env,
+            UserTextSent(
+                content="Call the empty tool",
+                history=[UserTextSent(content="Call the empty tool")],
+            ),
+        )
+
+        # LLM should have been called twice (tool call + response after tool)
+        assert mock_llm._call_count == 2
+
+        # Check second call messages - should include tool result even though empty
+        messages = mock_llm._recorded_messages[1]
+        
+        # Find tool result message
+        tool_result_msgs = [msg for msg in messages if msg.role == "tool"]
+        assert len(tool_result_msgs) == 1, "Tool result message should be preserved"
+        
+        tool_result = tool_result_msgs[0]
+        # Loopback tools may append suffixes like "-0" to tool_call_id
+        assert tool_result.tool_call_id.startswith("call_1")
+        assert tool_result.content == ""  # Empty content but message preserved
