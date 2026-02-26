@@ -59,6 +59,7 @@ FORM_FIELDS = [
         "type": "string",
         "section": "intake",
         "required": True,
+        "post_record_instructions": REPEAT_ANSWER_TO_USER_INSTRUCTION,
     },
 ]
 
