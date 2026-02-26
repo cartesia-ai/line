@@ -8,7 +8,7 @@ from appointment_scheduler import AppointmentScheduler, create_scheduler_tools
 from intake_form import IntakeForm, create_intake_tools
 from loguru import logger
 
-from line.llm_agent import LlmAgent, LlmConfig
+from line.llm_agent import LlmAgent, LlmConfig, end_call
 from line.voice_agent_app import AgentEnv, CallRequest, VoiceAgentApp
 
 SYSTEM_PROMPT_TEMPLATE = """
@@ -104,7 +104,7 @@ async def get_agent(env: AgentEnv, call_request: CallRequest):
     agent = LlmAgent(
         model="gemini/gemini-2.5-flash",
         api_key=os.getenv("GEMINI_API_KEY"),
-        tools=[*intake_tools, *scheduler_tools],
+        tools=[*intake_tools, *scheduler_tools, end_call],
         config=LlmConfig(
             system_prompt=system_prompt,
             introduction=introduction,
