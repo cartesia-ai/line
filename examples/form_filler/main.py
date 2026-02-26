@@ -1,82 +1,119 @@
-"""
-Form Filler Example - Collects user information via YAML-defined form.
-
-Run with: ANTHROPIC_API_KEY=your-key uv run python main.py
-"""
+"""Doctor appointment scheduling agent with intake form and appointment booking."""
 
 import os
-from pathlib import Path
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
-from form_filler import FormFiller
+from appointment_scheduler import AppointmentScheduler, create_scheduler_tools
+from intake_form import IntakeForm, create_intake_tools
+from line.llm_agent import LlmAgent, LlmConfig
+from line.voice_agent_app import AgentEnv, CallRequest, VoiceAgentApp
 from loguru import logger
 
-from line.llm_agent import LlmAgent, LlmConfig, end_call
-from line.voice_agent_app import AgentEnv, CallRequest, VoiceAgentApp
 
-FORM_PATH = Path(__file__).parent / "schedule_form.yaml"
+SYSTEM_PROMPT_TEMPLATE = """
+# You and your goal
+You are a friendly medical office assistant helping patients schedule intake appointments over the phone. \
+    Your goal is to fill out an intake form with the patient using your tools, \
+    and to help them schedule an appointment after it has been submitted.
+
+# Communication Guidelines
+- Keep your responses to 35 words or less. Otherwise, the user will get impatient
+- Avoid using bullet points, numbered lists, asterisks, or special characters
+- Always end your responses with a question, except when saying goodbye
+- Speak naturally without emojis or structured formatting. Spell out dates: "Tuesday, February fourth" not "2/4."
+
+Conversation flow:
+1. Once the user tells you their name, greet them and begin asking intake form questions
+2. Use the tools (e.g. record_answer) appropriately
+3. The form auto-submits after the last answer. Transition to appointment scheduling without mentioning submission.
+
+Tools:
+- record_answer - Save each answer. The returned value is the answer that was recorded, and instructions for what to do next.
+- list_answer - Review what they've entered
+
+Field IDs for the intake form: first_name, last_name, reason_for_visit, date_of_birth, phone
+
+IMPORTANT intake form behavior:
+- Ask ONE question at a time and wait for the answer
+- If the user changes topic mid-form, answer their question, then gently prompt them to continue
+- NEVER say things like "Let me record that", "I'll save that", "Got it, recording that", or similar. Just move to the next question naturally.
+- No need to say that the form has been submitted.
+
+# Appointment Scheduling
+
+Tools:
+1. check_availability - Get available time slots
+2. select_appointment_slot(date, time) - Select a slot. Parse the user's preference into date (e.g., "Thursday", "February 13") and time (e.g., "2:00 PM", "morning", "afternoon")
+3. book_appointment_and_submit_form - Confirm booking using contact info from the intake form
+
+Tips:
+- Don't read out every single slot. Summarize like "I have openings Tuesday morning and Thursday afternoon."
+- Ask which time of day works better to narrow it down
+- After intake form is submitted, offer to help them schedule.
+- When the user says something like "Thursday afternoon" or "2pm Friday", parse it into the date and time parameters.
+- Confirm the slot with the user before booking.
+
+# Ending Calls
+After scheduling the appointment, check if the caller has any other requests.
+When the caller indicates they are done or says goodbye:
+1. FIRST, you MUST say a warm goodbye message like "Thank you for calling, have a great day!"
+2. THEN call end_call
+
+CRITICAL: NEVER call end_call without speaking a goodbye message first. Always include goodbye text in your response before the end_call tool.
+
+# Additional information
+Today is {current_date} and the current time is {current_time}. You are in the Pacific Timezone.
+
+Examples:
+user: "My name is John Smith"
+assistant: "Hi John! I have that as J-O-H-N <NEXT QUESTION>"
 
 
-USER_PROMPT = """You are a friendly medical office assistant helping patients schedule appointments over the phone.
+Examples:
+user: "last name smith"
+assistant: "Great, I heard S-M-I-T-H. <NEXT QUESTION>"
+"""
 
-# Personality
-Warm, patient, reassuring, efficient. Professional but approachable—like a helpful receptionist who genuinely cares.
+INTRODUCTION_TEMPLATE = "Hi, this is Jane from UCSF Medical. I'm here to help you schedule an appointment. Who am I speaking with?"
 
-# Voice and tone
-Use natural, conversational language. Say "Got it" not "Answer recorded." Be warm but efficient—patients are often busy, unwell, or anxious. Match the caller's energy: if they sound worried, acknowledge it; if they're in a hurry, be crisp.
-
-# Response style
-Keep responses brief—you're collecting information, not lecturing. Vary your acknowledgments:
-- "Got it"
-- "Perfect"
-- "Okay, Dr. Smith"
-- "Tuesday morning works"
-
-Transition smoothly: "And what date works best for you?" or "Now, do you have a preferred doctor?"
-Never say "Great!" or "Excellent!" after every answer—it sounds hollow.
-
-# Sample phrases
-Caller sounds unwell: "I'm sorry you're not feeling well—let's get you scheduled quickly."
-Caller is unsure: "Most people choose morning for sick visits. Want me to note that?"
-Caller goes off-topic: "I understand. Now, what date works for you?"
-Caller needs to check something: "Take your time."
-Didn't catch the answer: "Sorry, I missed that—could you repeat it?"
-
-# Medical context
-When asking about symptoms, be matter-of-fact and compassionate—not clinical or alarming.
-Treat health information with appropriate sensitivity.
-If caller mentions chest pain, difficulty breathing, or other emergencies: "That sounds urgent—please call 911 or go to the emergency room right away."
-
-# Phone guidelines
-Speak naturally without emojis or structured formatting. Spell out dates: "Tuesday, February fourth" not "2/4."
-
-# Tools
-## end_call
-Use only after the form is complete AND the caller confirms.
-
-Process:
-1. Summarize key details: appointment type, doctor, requested date/time
-2. Set expectations: "We'll call you back within 24 hours to confirm"
-3. Say goodbye: "Thanks for calling—take care!"
-4. Then call end_call"""
+TEMPERATURE = 0.7
 
 
 async def get_agent(env: AgentEnv, call_request: CallRequest):
-    logger.info(f"Starting form filler call: {call_request.call_id}")
+    logger.info(f"Starting new doctor appointment call: {call_request}")
 
-    form = FormFiller(str(FORM_PATH), system_prompt=USER_PROMPT)
+    # Create per-call instances
+    form = IntakeForm()
+    form.start_form()
+    scheduler = AppointmentScheduler()
 
-    # Get the first question to include in the introduction
-    first_question = form.get_current_question_text()
+    # Create tools bound to these instances
+    intake_tools = create_intake_tools(form)
+    scheduler_tools = create_scheduler_tools(scheduler, form)
 
-    return LlmAgent(
-        model="anthropic/claude-haiku-4-5-20251001",
-        api_key=os.getenv("ANTHROPIC_API_KEY"),
-        tools=[form.record_answer_tool, end_call],
+    # Format system prompt with current date and time
+    now = datetime.now(ZoneInfo("America/Los_Angeles"))
+    system_prompt = SYSTEM_PROMPT_TEMPLATE.format(
+        current_date=now.strftime("%A, %B %d, %Y"),
+        current_time=now.strftime("%I:%M %p %Z"),
+    )
+
+    introduction = INTRODUCTION_TEMPLATE
+
+    agent = LlmAgent(
+        model="gemini/gemini-2.5-flash",
+        api_key=os.getenv("GEMINI_API_KEY"),
+        tools=[*intake_tools, *scheduler_tools],
         config=LlmConfig(
-            system_prompt=form.get_system_prompt(),
-            introduction=f"Hi, thanks for calling! I'd be happy to help you schedule an appointment. Let me just get a few details. {first_question}",
+            system_prompt=system_prompt,
+            introduction=introduction,
+            max_tokens=250,
+            temperature=TEMPERATURE,
         ),
     )
+
+    return agent
 
 
 app = VoiceAgentApp(get_agent=get_agent)

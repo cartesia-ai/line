@@ -1,11 +1,18 @@
 [project]
-name = "form-filler"
+name = "doctor-appointment-form-filler"
 version = "0.1.0"
-description = "Form filling example using Line SDK"
+description = "Voice agent that helps patients schedule doctor appointments and complete intake forms."
 requires-python = ">=3.10"
 dependencies = [
-    "cartesia-line==0.2.2",
+    "cartesia-line==0.2.3alpha4",
+    "loguru>=0.7.0",
 ]
 
 [tool.setuptools]
-py-modules = ["main", "form_filler"]
+py-modules = ["main", "intake_form", "appointment_scheduler"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+    "pytest-asyncio>=1.3.0",
+]
