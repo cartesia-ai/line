@@ -481,11 +481,15 @@ class ConversationRunner:
 
         self._emitted_uninterruptible_text = remaining_pending
         if not remaining_committed:
-            logger.debug(f'Dropped uninterruptible ack-back speech chunk: "{event.content}"')
+            logger.debug(
+                f'Skipping expected uninterruptible ack-back chunk "{event.content}" '
+                "(already committed from local history)"
+            )
             return None
         logger.debug(
-            f'Dropped uninterruptible ack-back speech prefix: "{event.content[:consumed_chars]}", '
-            f'keeping "{remaining_committed}"'
+            f'Skipping expected uninterruptible ack-back prefix "{event.content[:consumed_chars]}" '
+            "(already committed from local history); "
+            f'forwarding remaining chunk "{remaining_committed}"'
         )
         return AgentTextSent(content=remaining_committed, event_id=event.event_id)
 
