@@ -894,9 +894,7 @@ def _filter_empty_messages(messages: List[Message]) -> List[Message]:
     - Messages with non-empty content
     """
     return [
-        msg
-        for msg in messages
-        if msg.tool_calls or msg.tool_call_id or (msg.content and msg.content.strip())
+        msg for msg in messages if msg.tool_calls or msg.tool_call_id or (msg.content and msg.content.strip())
     ]
 
 

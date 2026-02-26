@@ -2129,7 +2129,7 @@ class TestEmptyMessageHandling:
 
     async def test_tool_result_with_empty_content_preserved(self, turn_env):
         """Test that tool-result messages with empty content are NOT filtered.
-        
+
         LLM providers require every tool call to have a matching tool result.
         Even if the tool returns an empty string, the result message must be preserved.
         """
@@ -2177,11 +2177,11 @@ class TestEmptyMessageHandling:
 
         # Check second call messages - should include tool result even though empty
         messages = mock_llm._recorded_messages[1]
-        
+
         # Find tool result message
         tool_result_msgs = [msg for msg in messages if msg.role == "tool"]
         assert len(tool_result_msgs) == 1, "Tool result message should be preserved"
-        
+
         tool_result = tool_result_msgs[0]
         # Loopback tools may append suffixes like "-0" to tool_call_id
         assert tool_result.tool_call_id.startswith("call_1")
