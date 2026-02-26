@@ -585,9 +585,7 @@ class TestUninterruptibleMessages:
         ws = create_mock_websocket()
         runner = ConversationRunner(ws, noop_agent, env)
 
-        result = runner._map_output_event(
-            AgentSendText(text="This call is recorded.", interruptible=False)
-        )
+        result = runner._map_output_event(AgentSendText(text="This call is recorded.", interruptible=False))
         assert isinstance(result, MessageOutput)
         assert result.content == "This call is recorded."
         assert result.interruptible is False

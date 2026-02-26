@@ -362,11 +362,7 @@ def _build_full_history(
             loaded_new_queue = True
 
         if not _is_input_matchable(input_evt):
-            if (
-                not loaded_new_queue
-                and queue
-                and _queue_has_only_non_matchables(queue)
-            ):
+            if not loaded_new_queue and queue and _queue_has_only_non_matchables(queue):
                 # If only non-matchable locals remain, flush them before the next
                 # non-matchable input event so ordering stays causal.
                 result.extend(_flush_queue(queue))
