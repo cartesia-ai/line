@@ -290,7 +290,8 @@ class ConversationRunner:
 
         self.agent_callable, self.run_filter, self.cancel_filter = self._prepare_agent(agent_spec)
         self.agent_task: Optional[asyncio.Task] = None
-        self._emitted_uninterruptible_text: str = ""
+        self._pending_commit_texts: List[str] = []
+        self._suppression_buffer: str = ""
 
     ######### Initialization Methods #########
 
@@ -361,22 +362,24 @@ class ConversationRunner:
                 # Convert and process the input message
                 event = self._convert_input_message(input_msg)
                 if isinstance(event, AgentTextSent):
-                    event = self._suppress_uninterruptible_ack_back(event)
+                    event = self._suppress_ack_back(event)
                     if event is None:
                         continue
-                elif isinstance(event, AgentTurnEnded):
-                    # Drop stale expectations if the harness ended speech before
-                    # all ack-back chunks were observed.
-                    self._emitted_uninterruptible_text = ""
+                else:
+                    # User event or agent state — flush pending commits first
+                    self._flush_pending_commits()
+                    if isinstance(event, (AgentTurnEnded, CallEnded)):
+                        self._suppression_buffer = ""
+                        self._pending_commit_texts = []
                 ev, self.history = self._process_input_event(self.history, event)
                 await self._handle_event(TurnEnv(), ev)
 
             except WebSocketDisconnect:
                 logger.info("WebSocket disconnected in loop")
                 self.shutdown_event.set()
-                # Call termination is a hard lifecycle boundary; drop any
-                # outstanding expected ack-back to avoid cross-call leakage.
-                self._emitted_uninterruptible_text = ""
+                self._flush_pending_commits()
+                self._suppression_buffer = ""
+                self._pending_commit_texts = []
                 end_event, self.history = self._process_input_event(self.history, CallEnded())
                 await self._handle_event(TurnEnv(), end_event)
             except json.JSONDecodeError as e:
@@ -421,13 +424,11 @@ class ConversationRunner:
                     # Buffer AgentSendText content for whitespace interpolation
                     if isinstance(output, AgentSendText):
                         self.emitted_agent_text += output.text
-                        if not output.interruptible:
-                            # Pre-commit: record in canonical history now (before
-                            # any subsequent user events arrive on the WebSocket).
-                            self.history.append(AgentTextSent(content=output.text))
-                            # Mark as expected ack-back so incoming AgentTextSent
-                            # chunks from the harness can be suppressed.
-                            self._emitted_uninterruptible_text += output.text
+                        if not output.interruptible or self._pending_commit_texts:
+                            # First uninterruptible yield (or any yield after it):
+                            # buffer for deferred commit
+                            self._pending_commit_texts.append(output.text)
+                            self._suppression_buffer += output.text
                     mapped = self._map_output_event(output)
 
                     if self.shutdown_event.is_set():
@@ -439,7 +440,8 @@ class ConversationRunner:
                 pass
             except Exception:
                 self.shutdown_event.set()
-                self._emitted_uninterruptible_text = ""
+                self._suppression_buffer = ""
+                self._pending_commit_texts = []
                 error_msg = traceback.format_exc()
                 logger.error(f"Error in agent.process: {error_msg}")
                 await self.send_error(f"Error in agent.process: {error_msg}")
@@ -469,31 +471,34 @@ class ConversationRunner:
         except Exception as e:
             logger.warning(f"Failed to send error via WebSocket: {e}")
 
-    def _suppress_uninterruptible_ack_back(self, event: AgentTextSent) -> Optional[AgentTextSent]:
-        """Suppress expected uninterruptible ack-back (drop fully or trim prefix)."""
-        if not self._emitted_uninterruptible_text:
+    def _suppress_ack_back(self, event: AgentTextSent) -> Optional[AgentTextSent]:
+        """Suppress expected ack-back for buffered text (drop fully or trim prefix)."""
+        if not self._suppression_buffer:
             return event
 
         consumed_chars, remaining_committed, remaining_pending = _consume_expected_ack_back_prefix(
             event.content,
-            self._emitted_uninterruptible_text,
+            self._suppression_buffer,
         )
         if consumed_chars == 0:
             return event
 
-        self._emitted_uninterruptible_text = remaining_pending
+        self._suppression_buffer = remaining_pending
         if not remaining_committed:
-            logger.debug(
-                f'Skipping expected uninterruptible ack-back chunk "{event.content}" '
-                "(already pre-committed to history)"
-            )
+            logger.debug(f'Skipping expected ack-back chunk "{event.content}" (buffered for deferred commit)')
             return None
         logger.debug(
-            f'Skipping expected uninterruptible ack-back prefix "{event.content[:consumed_chars]}" '
-            "(already pre-committed to history); "
+            f'Skipping expected ack-back prefix "{event.content[:consumed_chars]}" '
+            "(buffered for deferred commit); "
             f'forwarding remaining chunk "{remaining_committed}"'
         )
         return AgentTextSent(content=remaining_committed, event_id=event.event_id)
+
+    def _flush_pending_commits(self):
+        """Flush pending commit buffer to history as individual AgentTextSent events."""
+        for text in self._pending_commit_texts:
+            self.history.append(AgentTextSent(content=text))
+        self._pending_commit_texts = []
 
     ######### Event Parsing Methods #########
     def _convert_input_message(self, message: InputMessage) -> InputEvent:
