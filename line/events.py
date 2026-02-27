@@ -73,18 +73,6 @@ class AgentUpdateCall(BaseModel):
     language: Optional[str] = None
 
 
-# Temporary: short-term event until general multilingual language config is available
-class AgentEnableMultilingualSTT(BaseModel):
-    type: Literal["enable_multilingual_stt"] = "enable_multilingual_stt"
-
-
-# Temporary: short-term event until general multilingual language config is available
-class AgentUpdateTTS(BaseModel):
-    type: Literal["update_tts"] = "update_tts"
-    voice_id: Optional[str] = None
-    language: Optional[str] = None
-
-
 class AgentSendCustom(BaseModel):
     type: Literal["agent_send_custom"] = "agent_send_custom"
     metadata: Dict[str, Any]
@@ -100,8 +88,6 @@ OutputEvent = Union[
     LogMetric,
     LogMessage,
     AgentUpdateCall,
-    AgentEnableMultilingualSTT,
-    AgentUpdateTTS,
     AgentSendCustom,
 ]
 
@@ -256,8 +242,6 @@ __all__ = [
     "LogMetric",
     "LogMessage",
     "AgentUpdateCall",
-    "AgentEnableMultilingualSTT",
-    "AgentUpdateTTS",
     "AgentSendCustom",
     "OutputEvent",
     # Custom
