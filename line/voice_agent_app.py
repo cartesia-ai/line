@@ -370,7 +370,6 @@ class ConversationRunner:
                     self._flush_pending_commits()
                     if isinstance(event, (AgentTurnEnded, CallEnded)):
                         self._suppression_buffer = ""
-                        self._pending_commit_texts = []
                 ev, self.history = self._process_input_event(self.history, event)
                 await self._handle_event(TurnEnv(), ev)
 
@@ -379,7 +378,6 @@ class ConversationRunner:
                 self.shutdown_event.set()
                 self._flush_pending_commits()
                 self._suppression_buffer = ""
-                self._pending_commit_texts = []
                 end_event, self.history = self._process_input_event(self.history, CallEnded())
                 await self._handle_event(TurnEnv(), end_event)
             except json.JSONDecodeError as e:
