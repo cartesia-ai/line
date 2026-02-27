@@ -781,7 +781,7 @@ class TestHistory:
         assert len(result) == 1
         assert isinstance(result[0], CustomHistoryEntry)
         assert result[0].content == "some context"
-        assert result[0].role == "system"
+        assert result[0].role == "user"
 
     async def test_add_entry_with_user_role(self):
         h = History()

@@ -20,7 +20,6 @@ from line.events import (
     AgentToolCalled,
     AgentToolReturned,
     CallStarted,
-    CustomHistoryEntry,
     LogMetric,
     OutputEvent,
     UserTextSent,
@@ -1337,216 +1336,63 @@ class TestBuildMessagesPendingToolResults:
 # =============================================================================
 
 
-class TestAddHistoryEntry:
-    """Tests for LlmAgent.add_history_entry."""
+async def test_add_history_entry_end_to_end(turn_env):
+    """add_history_entry during a tool call is visible to the LLM on loopback."""
+    # The tool calls add_history_entry on the agent, then the LLM sees it
+    agent, mock_llm = create_agent_with_mock([])
 
-    @staticmethod
-    def _annotate(events: list, event_id: str) -> list[tuple[str, "OutputEvent"]]:
-        """Annotate events with a triggering event_id."""
-        return [(event_id, e) for e in events]
+    @loopback_tool
+    def inject_context(ctx, info: str):
+        """Inject context."""
+        agent.history.add_entry(f"Context: {info}")
+        return "done"
 
-    async def test_adds_custom_history_entry_as_mutation(self):
-        """add_history_entry stores a mutation that produces a CustomHistoryEntry."""
-        agent, _ = create_agent_with_mock([])
+    agent._tools = [inject_context]
+    agent._tool_map = {inject_context.name: inject_context}
 
-        agent.add_history_entry("injected context")
+    # First LLM call: calls the tool
+    # Second LLM call: responds with final text after seeing the injected context
+    mock_llm._responses = [
+        [
+            StreamChunk(
+                tool_calls=[
+                    ToolCall(
+                        id="c1",
+                        name="inject_context",
+                        arguments='{"info": "important data"}',
+                        is_complete=True,
+                    )
+                ]
+            ),
+            StreamChunk(is_final=True),
+        ],
+        [
+            StreamChunk(text="Got it!"),
+            StreamChunk(is_final=True),
+        ],
+    ]
 
-        assert len(agent.history._mutations) == 1
-        result = list(agent.history)
-        assert len(result) == 1
-        assert isinstance(result[0], CustomHistoryEntry)
-        assert result[0].content == "injected context"
+    outputs = await collect_outputs(
+        agent,
+        turn_env,
+        UserTextSent(content="Do something", history=[UserTextSent(content="Do something")]),
+    )
 
-    async def test_add_history_entry_before_first_process(self):
-        """add_history_entry called before process() appears before other events in messages."""
-        agent, _ = create_agent_with_mock([])
+    # Should have: AgentToolCalled, AgentToolReturned, AgentSendText
+    tool_called = [o for o in outputs if isinstance(o, AgentToolCalled)]
+    tool_returned = [o for o in outputs if isinstance(o, AgentToolReturned)]
+    text_outputs = [o for o in outputs if isinstance(o, AgentSendText)]
 
-        # Called before any process() — entry should appear at beginning
-        agent.add_history_entry("pre-process context")
+    assert len(tool_called) == 1
+    assert len(tool_returned) == 1
+    assert len(text_outputs) == 1
+    assert text_outputs[0].text == "Got it!"
 
-        user0 = UserTextSent(content="Hello")
-        input_history = [user0]
-
-        messages = await build_messages_with(
-            agent, input_history, agent.history._local_history, user0.event_id
-        )
-
-        # Entry should appear before the user message
-        assert len(messages) == 2
-        assert messages[0].role == "system"
-        assert messages[0].content == "pre-process context"
-        assert messages[1].role == "user"
-        assert messages[1].content == "Hello"
-
-    async def test_add_history_entry_before_first_process_no_input_history(self):
-        """add_history_entry before process() works even with empty input history."""
-        agent, _ = create_agent_with_mock([])
-
-        agent.add_history_entry("early context")
-
-        messages = await build_messages_with(agent, [], agent.history._local_history, "current")
-
-        assert len(messages) == 1
-        assert messages[0].role == "system"
-        assert messages[0].content == "early context"
-
-    async def test_multiple_add_history_entry_calls(self):
-        """Multiple add_history_entry calls each produce a mutation."""
-        agent, _ = create_agent_with_mock([])
-
-        agent.add_history_entry("first")
-        agent.add_history_entry("second")
-
-        assert len(agent.history._mutations) == 2
-        result = list(agent.history)
-        # Both should appear at beginning, in order (first call first)
-        # Each appends after the last event (FIFO)
-        assert len(result) == 2
-        assert result[0].content == "first"
-        assert result[1].content == "second"
-
-    async def test_custom_entry_defaults_to_system_message(self):
-        """CustomHistoryEntry in local_history defaults to a system message."""
-        agent, _ = create_agent_with_mock([])
-
-        user0 = UserTextSent(content="Hello")
-        input_history = [user0]
-        local_history = self._annotate(
-            [CustomHistoryEntry(content="extra context")],
-            event_id=user0.event_id,
-        )
-
-        messages = await build_messages_with(agent, input_history, local_history, "current")
-
-        # Should have: user message from input, then custom entry as system message
-        assert len(messages) == 2
-        assert messages[0].role == "user"
-        assert messages[0].content == "Hello"
-        assert messages[1].role == "system"
-        assert messages[1].content == "extra context"
-
-    async def test_custom_entry_with_user_role(self):
-        """CustomHistoryEntry with role='user' produces a user message."""
-        agent, _ = create_agent_with_mock([])
-
-        user0 = UserTextSent(content="Hello")
-        input_history = [user0]
-        local_history = self._annotate(
-            [CustomHistoryEntry(content="user context", role="user")],
-            event_id=user0.event_id,
-        )
-
-        messages = await build_messages_with(agent, input_history, local_history, "current")
-
-        assert len(messages) == 2
-        assert messages[0].role == "user"
-        assert messages[0].content == "Hello"
-        assert messages[1].role == "user"
-        assert messages[1].content == "user context"
-
-    async def test_custom_entry_in_current_local(self):
-        """CustomHistoryEntry in current_local events uses its role."""
-        agent, _ = create_agent_with_mock([])
-
-        user0 = UserTextSent(content="Hello")
-        input_history = [user0]
-        local_history = self._annotate(
-            [CustomHistoryEntry(content="current context")],
-            event_id="current",
-        )
-
-        messages = await build_messages_with(agent, input_history, local_history, "current")
-
-        assert len(messages) == 2
-        assert messages[0].role == "user"
-        assert messages[0].content == "Hello"
-        assert messages[1].role == "system"
-        assert messages[1].content == "current context"
-
-    async def test_custom_entry_interleaved_with_tool_calls(self):
-        """CustomHistoryEntry preserves position relative to tool calls."""
-        agent, _ = create_agent_with_mock([])
-
-        user0 = UserTextSent(content="Start")
-        input_history = [user0]
-        local_history = self._annotate(
-            [
-                AgentToolCalled(tool_call_id="c1", tool_name="lookup", tool_args={}),
-                AgentToolReturned(tool_call_id="c1", tool_name="lookup", tool_args={}, result="data"),
-                CustomHistoryEntry(content="injected after tool"),
-            ],
-            event_id=user0.event_id,
-        )
-
-        messages = await build_messages_with(agent, input_history, local_history, "current")
-
-        # user, assistant(tool_call), tool(result), system(custom)
-        assert len(messages) == 4
-        assert messages[0].role == "user"
-        assert messages[0].content == "Start"
-        assert messages[1].role == "assistant"
-        assert messages[2].role == "tool"
-        assert messages[2].content == "data"
-        assert messages[3].role == "system"
-        assert messages[3].content == "injected after tool"
-
-    async def test_add_history_entry_end_to_end(self, turn_env):
-        """add_history_entry during a tool call is visible to the LLM on loopback."""
-        # The tool calls add_history_entry on the agent, then the LLM sees it
-        agent, mock_llm = create_agent_with_mock([])
-
-        @loopback_tool
-        def inject_context(ctx, info: str):
-            """Inject context."""
-            agent.add_history_entry(f"Context: {info}")
-            return "done"
-
-        agent._tools = [inject_context]
-        agent._tool_map = {inject_context.name: inject_context}
-
-        # First LLM call: calls the tool
-        # Second LLM call: responds with final text after seeing the injected context
-        mock_llm._responses = [
-            [
-                StreamChunk(
-                    tool_calls=[
-                        ToolCall(
-                            id="c1",
-                            name="inject_context",
-                            arguments='{"info": "important data"}',
-                            is_complete=True,
-                        )
-                    ]
-                ),
-                StreamChunk(is_final=True),
-            ],
-            [
-                StreamChunk(text="Got it!"),
-                StreamChunk(is_final=True),
-            ],
-        ]
-
-        outputs = await collect_outputs(
-            agent,
-            turn_env,
-            UserTextSent(content="Do something", history=[UserTextSent(content="Do something")]),
-        )
-
-        # Should have: AgentToolCalled, AgentToolReturned, AgentSendText
-        tool_called = [o for o in outputs if isinstance(o, AgentToolCalled)]
-        tool_returned = [o for o in outputs if isinstance(o, AgentToolReturned)]
-        text_outputs = [o for o in outputs if isinstance(o, AgentSendText)]
-
-        assert len(tool_called) == 1
-        assert len(tool_returned) == 1
-        assert len(text_outputs) == 1
-        assert text_outputs[0].text == "Got it!"
-
-        # Verify the injected context was visible to the LLM on the second call
-        second_call_messages = mock_llm._recorded_messages[1]
-        system_messages = [m for m in second_call_messages if m.role == "system"]
-        system_contents = [m.content for m in system_messages]
-        assert "Context: important data" in system_contents
+    # Verify the injected context was visible to the LLM on the second call
+    second_call_messages = mock_llm._recorded_messages[1]
+    user_messages = [m for m in second_call_messages if m.role == "user"]
+    user_contents = [m.content for m in user_messages]
+    assert "Context: important data" in user_contents
 
 
 # =============================================================================
@@ -1653,7 +1499,7 @@ async def test_process_replaces_config(turn_env):
 
 
 async def test_process_with_context_string(turn_env):
-    """Test that context string appears as system message at end of history."""
+    """Test that context string appears as user message at end of history."""
     responses = [
         [
             StreamChunk(text="Got it!"),
@@ -1673,11 +1519,11 @@ async def test_process_with_context_string(turn_env):
     # Check messages sent to LLM
     messages = mock_llm._recorded_messages[0]
 
-    # Should have: user message, then system context at end
+    # Should have: user message, then context at end (user role by default)
     assert len(messages) == 2
     assert messages[0].role == "user"
     assert messages[0].content == "Hi"
-    assert messages[1].role == "system"
+    assert messages[1].role == "user"
     assert messages[1].content == "You are a helpful assistant."
 
 
@@ -1746,7 +1592,7 @@ async def test_process_with_history_and_context(turn_env):
     assert len(messages) == 2
     assert messages[0].role == "user"
     assert messages[0].content == "Override message"
-    assert messages[1].role == "system"
+    assert messages[1].role == "user"
     assert messages[1].content == "Extra system context"
 
 
