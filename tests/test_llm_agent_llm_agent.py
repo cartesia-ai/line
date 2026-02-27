@@ -2189,3 +2189,34 @@ class TestEmptyMessageHandling:
         # Loopback tools may append suffixes like "-0" to tool_call_id
         assert tool_result.tool_call_id.startswith("call_1")
         assert tool_result.content == ""  # Empty content but message preserved
+
+    async def test_empty_messages_list_skips_generation(self, turn_env):
+        """Test that generation is skipped when messages list is empty.
+
+        This is a defensive safeguard for edge cases where the triggering event
+        passes validation but the built messages list ends up empty (e.g., when
+        using an empty history override).
+        """
+        responses = [
+            [
+                StreamChunk(text="Should not see this"),
+                StreamChunk(is_final=True),
+            ]
+        ]
+
+        agent, mock_llm = create_agent_with_mock(responses)
+
+        # Valid triggering event but empty history override results in no messages
+        outputs = await collect_outputs(
+            agent,
+            turn_env,
+            UserTextSent(content="Hello", history=[UserTextSent(content="Hello")]),
+            history=[],  # Empty history override
+        )
+
+        # Should have no text outputs
+        text_outputs = [o for o in outputs if isinstance(o, AgentSendText)]
+        assert len(text_outputs) == 0
+
+        # LLM should not have been called
+        assert mock_llm._call_count == 0

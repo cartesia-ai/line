@@ -353,7 +353,12 @@ class LlmAgent:
             # Empty UserTextSent is also filtered in _build_messages for clean data
             triggering_event = event.history[-1] if event.history else None
             if isinstance(triggering_event, UserTextSent) and not triggering_event.content.strip():
-                logger.warning("Skipping LLM call: empty user message")
+                logger.warning("Skipping LLM call: empty user turn")
+                break
+
+            # Skip if no messages to send (e.g., empty history or all messages filtered)
+            if not messages:
+                logger.warning("Skipping LLM call: no messages to send")
                 break
 
             tool_calls_dict: Dict[str, ToolCall] = {}
