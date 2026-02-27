@@ -837,7 +837,8 @@ class TestUninterruptibleMessages:
 
     @pytest.mark.asyncio
     async def test_deferred_commit_interruptible_then_uninterruptible_before_user_event(self):
-        """Interruptible ack-back passes through; uninterruptible text is buffered and committed before user event."""
+        """Interruptible ack-back passes through; uninterruptible text is buffered
+        and committed before user event."""
         ws = create_mock_websocket()
         agent_yielded = asyncio.Event()
 
@@ -901,7 +902,8 @@ class TestUninterruptibleMessages:
 
         runner = ConversationRunner(ws, scripted_agent, env)
         await runner._start_agent_task(TurnEnv(), CallStarted())
-        await runner.agent_task
+        if runner.agent_task:
+            await runner.agent_task
 
         # Flush pending commits (simulating a user event arriving)
         runner._flush_pending_commits()
