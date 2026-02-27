@@ -2091,8 +2091,12 @@ class TestEmptyMessageHandling:
         # LLM should have been called twice (loopback worked)
         assert mock_llm._call_count == 2
 
-    async def test_empty_messages_filtered_from_llm_request(self, turn_env):
-        """Test that empty messages in history are filtered before sending to LLM."""
+    async def test_empty_user_messages_filtered_from_llm_request(self, turn_env):
+        """Test that empty user messages in history are filtered before sending to LLM.
+
+        Only UserTextSent messages are filtered - not AgentTextSent, to avoid
+        creating invalid consecutive same-role message sequences.
+        """
         responses = [
             [
                 StreamChunk(text="Response"),
@@ -2102,13 +2106,12 @@ class TestEmptyMessageHandling:
 
         agent, mock_llm = create_agent_with_mock(responses)
 
-        # History with some empty messages mixed in
+        # History with empty user messages mixed in
         history = [
             UserTextSent(content="First message"),
-            AgentTextSent(content=""),  # Empty - should be filtered
-            UserTextSent(content=""),  # Empty - should be filtered (but this is last, so skip)
             AgentTextSent(content="Response to first"),
-            UserTextSent(content="Second message"),  # Valid - this is last user message
+            UserTextSent(content=""),  # Empty - should be filtered
+            UserTextSent(content="Second message"),  # Valid
         ]
 
         outputs = await collect_outputs(
@@ -2121,11 +2124,11 @@ class TestEmptyMessageHandling:
         text_outputs = [o for o in outputs if isinstance(o, AgentSendText)]
         assert len(text_outputs) == 1
 
-        # Check messages sent to LLM - empty messages should be filtered
+        # Check messages sent to LLM - empty user messages should be filtered
         messages = mock_llm._recorded_messages[0]
-        for msg in messages:
-            if msg.content is not None:  # Skip tool call messages
-                assert msg.content.strip() != "", f"Found empty message: {msg}"
+        user_messages = [msg for msg in messages if msg.role == "user"]
+        for msg in user_messages:
+            assert msg.content.strip() != "", f"Found empty user message: {msg}"
 
     async def test_tool_result_with_empty_content_preserved(self, turn_env):
         """Test that tool-result messages with empty content are NOT filtered.

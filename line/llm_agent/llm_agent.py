@@ -310,12 +310,6 @@ class LlmAgent:
             context: Extra context to append to history for the current #process invocation only.
             history: Override history for the current #process invocation only.
         """
-        # Skip if triggering event has empty content (e.g., empty ASR transcription)
-        triggering_event = event.history[-1] if event.history else None
-        if isinstance(triggering_event, UserTextSent) and not triggering_event.content.strip():
-            logger.warning("Skipping LLM call: empty user message")
-            return
-
         tools, web_search_options = self._resolve_tools(tool_specs)
         tool_map: Dict[str, FunctionTool] = {t.name: t for t in tools}
 
@@ -354,6 +348,15 @@ class LlmAgent:
 
             # ==== GENERATION CALL ==== #
             messages = await self._build_messages(context=context, history=history)
+
+            # Skip if triggering event is an empty user message (e.g., empty ASR transcription)
+            # Check on first iteration only - loopback iterations always proceed
+            # Empty UserTextSent is also filtered in _build_messages for clean data
+            if _iteration == 0:
+                triggering_event = event.history[-1] if event.history else None
+                if isinstance(triggering_event, UserTextSent) and not triggering_event.content.strip():
+                    logger.warning("Skipping LLM call: empty user message")
+                    break
 
             tool_calls_dict: Dict[str, ToolCall] = {}
 
@@ -595,17 +598,17 @@ class LlmAgent:
         messages = []
         for event in full_history:
             # Handle InputEvent types
-            # Filter out empty content - some providers (e.g., Anthropic) reject empty messages
             if isinstance(event, UserTextSent):
+                # Filter empty user messages - prevents invalid API calls from empty ASR
                 if event.content and event.content.strip():
                     messages.append(Message(role="user", content=event.content))
             elif isinstance(event, AgentTextSent):
-                if event.content and event.content.strip():
-                    messages.append(Message(role="assistant", content=event.content))
+                # Don't filter assistant messages - could create consecutive user messages
+                messages.append(Message(role="assistant", content=event.content))
             # Handle CustomHistoryEntry (injected history entries)
             elif isinstance(event, CustomHistoryEntry):
-                if event.content and event.content.strip():
-                    messages.append(Message(role=event.role, content=event.content))
+                # Don't filter - could create invalid message sequences
+                messages.append(Message(role=event.role, content=event.content))
             # Handle tool events from local_history
             elif isinstance(event, AgentToolCalled):
                 # Look up thought_signature from cache (for Gemini 3+ models)
