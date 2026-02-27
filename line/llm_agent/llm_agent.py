@@ -349,13 +349,6 @@ class LlmAgent:
             # ==== GENERATION CALL ==== #
             messages = await self._build_messages(context=context, history=history)
 
-            # Skip if triggering event is an empty user message (e.g., empty ASR transcription)
-            # Empty UserTextSent is also filtered in _build_messages for clean data
-            triggering_event = event.history[-1] if event.history else None
-            if isinstance(triggering_event, UserTextSent) and not triggering_event.content.strip():
-                logger.warning("Skipping LLM call: empty user turn")
-                break
-
             # Skip if no messages to send (e.g., empty history or all messages filtered)
             if not messages:
                 logger.warning("Skipping LLM call: no messages to send")
@@ -618,8 +611,8 @@ class LlmAgent:
                 if event.content and event.content.strip():
                     messages.append(Message(role="user", content=event.content))
             elif isinstance(event, AgentTextSent):
-                # Don't filter assistant messages - could create consecutive user messages
-                messages.append(Message(role="assistant", content=event.content))
+                if event.content and event.content.strip():
+                    messages.append(Message(role="assistant", content=event.content))
             # Handle CustomHistoryEntry (injected history entries)
             elif isinstance(event, CustomHistoryEntry):
                 # Don't filter - could create invalid message sequences
