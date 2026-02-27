@@ -350,13 +350,11 @@ class LlmAgent:
             messages = await self._build_messages(context=context, history=history)
 
             # Skip if triggering event is an empty user message (e.g., empty ASR transcription)
-            # Check on first iteration only - loopback iterations always proceed
             # Empty UserTextSent is also filtered in _build_messages for clean data
-            if _iteration == 0:
-                triggering_event = event.history[-1] if event.history else None
-                if isinstance(triggering_event, UserTextSent) and not triggering_event.content.strip():
-                    logger.warning("Skipping LLM call: empty user message")
-                    break
+            triggering_event = event.history[-1] if event.history else None
+            if isinstance(triggering_event, UserTextSent) and not triggering_event.content.strip():
+                logger.warning("Skipping LLM call: empty user message")
+                break
 
             tool_calls_dict: Dict[str, ToolCall] = {}
 
