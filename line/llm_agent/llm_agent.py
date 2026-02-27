@@ -361,6 +361,18 @@ class LlmAgent:
                 logger.warning("Skipping LLM call: no messages to send")
                 break
 
+            # Validate last message for LLM API compatibility
+            # - Cannot end with assistant message (Anthropic requires user/tool to continue)
+            # - User messages must be non-empty (Anthropic rejects empty/whitespace user content)
+            # - Tool messages are valid (expected after tool_use for loopback)
+            last_msg = messages[-1]
+            if last_msg.role == "assistant":
+                logger.warning("Skipping LLM call: conversation cannot end with assistant message")
+                break
+            if last_msg.role == "user" and not last_msg.content.strip():
+                logger.warning("Skipping LLM call: last user message must be non-empty")
+                break
+
             tool_calls_dict: Dict[str, ToolCall] = {}
 
             # Build kwargs for LLM chat, including web_search_options if available

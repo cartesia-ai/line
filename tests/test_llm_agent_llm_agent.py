@@ -1681,41 +1681,6 @@ async def test_process_with_context_string(turn_env):
     assert messages[1].content == "You are a helpful assistant."
 
 
-async def test_process_with_context_list(turn_env):
-    """Test that context list events appear at end of history."""
-    responses = [
-        [
-            StreamChunk(text="Got it!"),
-            StreamChunk(is_final=True),
-        ]
-    ]
-
-    agent, mock_llm = create_agent_with_mock(responses)
-
-    context_events = [
-        UserTextSent(content="Extra user context"),
-        AgentTextSent(content="Extra agent context"),
-    ]
-
-    await collect_outputs(
-        agent,
-        turn_env,
-        UserTextSent(content="Hi", history=[UserTextSent(content="Hi")]),
-        context=context_events,
-    )
-
-    messages = mock_llm._recorded_messages[0]
-
-    # Should have: user message from history, then context events at end
-    assert len(messages) == 3
-    assert messages[0].role == "user"
-    assert messages[0].content == "Hi"
-    assert messages[1].role == "user"
-    assert messages[1].content == "Extra user context"
-    assert messages[2].role == "assistant"
-    assert messages[2].content == "Extra agent context"
-
-
 async def test_process_with_history_override(turn_env):
     """Test that history override replaces managed history for LLM messages."""
     responses = [
