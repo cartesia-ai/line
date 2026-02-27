@@ -414,21 +414,21 @@ class TestGetProcessedHistory:
     """Tests for whitespace restoration in history."""
 
     def test_empty_history(self):
-        result = _get_processed_history("x", [])
+        result = _get_processed_history([("x", True)], [])
         assert result == []
 
     def test_no_agent_text_events(self):
         history = [CallStarted(), UserTextSent(content="x")]
-        result = _get_processed_history("", history)
+        result = _get_processed_history([], history)
         assert result == history
 
     def test_restores_whitespace(self):
-        result = _get_processed_history("a b", [AgentTextSent(content="ab")])
+        result = _get_processed_history([("a b", True)], [AgentTextSent(content="ab")])
         assert len(result) == 1
         assert result[0].content == "a b"
 
     def test_partial_commit(self):
-        result = _get_processed_history("a b c", [AgentTextSent(content="ab")])
+        result = _get_processed_history([("a b c", True)], [AgentTextSent(content="ab")])
         assert len(result) == 1
         assert result[0].content == "a b"
 
@@ -437,12 +437,12 @@ class TestGetProcessedHistory:
             AgentTextSent(content="ab"),
             AgentTextSent(content="cd"),
         ]
-        result = _get_processed_history("a b c d", history)
+        result = _get_processed_history([("a b c d", True)], history)
         assert len(result) == 1
         assert result[0].content == "a b c d"
 
     def test_no_spaces_passthrough(self):
-        result = _get_processed_history("ab", [AgentTextSent(content="ab")])
+        result = _get_processed_history([("ab", True)], [AgentTextSent(content="ab")])
         assert len(result) == 1
         assert result[0].content == "ab"
 
@@ -452,7 +452,7 @@ class TestGetProcessedHistory:
             AgentTextSent(content="ab"),
             UserTurnStarted(),
         ]
-        result = _get_processed_history("a b", history)
+        result = _get_processed_history([("a b", True)], history)
         assert len(result) == 3
         assert isinstance(result[0], CallStarted)
         assert result[1].content == "a b"
@@ -635,46 +635,171 @@ class TestUninterruptibleMessages:
         assert agent_cancelled.is_set()
 
     @pytest.mark.asyncio
-    async def test_cancel_does_not_clear_suppression_buffer(self):
-        """Canceling an LM task must not clear expected ack-back."""
+    async def test_emitted_agent_text_tracks_interruptibility(self):
+        """emitted_agent_text records (text, interruptible) tuples."""
         ws = create_mock_websocket()
-        runner = ConversationRunner(ws, noop_agent, env)
-        runner._suppression_buffer = "Legal disclaimer."
 
-        task_started = asyncio.Event()
+        async def scripted_agent(env, event):
+            if isinstance(event, CallStarted):
+                yield AgentSendText(text="Let me check.", interruptible=True)
+                yield AgentSendText(text="Legal notice.", interruptible=False)
+                yield AgentSendText(text="How can I help?", interruptible=True)
 
-        async def blocking_task():
-            task_started.set()
-            await asyncio.Future()
+        runner = ConversationRunner(ws, scripted_agent, env)
+        await runner._start_agent_task(TurnEnv(), CallStarted())
+        if runner.agent_task:
+            await runner.agent_task
 
-        runner.agent_task = asyncio.create_task(blocking_task())
-        await task_started.wait()
+        assert runner.emitted_agent_text == [
+            ("Let me check.", True),
+            ("Legal notice.", False),
+            ("How can I help?", True),
+        ]
 
-        await runner._cancel_agent_task()
+    def test_uninterruptible_precommit_before_user_event(self):
+        """Uninterruptible text is pre-committed in full before user events."""
+        # Agent emitted uninterruptible text, partial ack-back arrived, then user spoke
+        chunks = [("This call is recorded.", False)]
+        history = [
+            AgentTextSent(content="Thiscall"),  # partial ack-back
+            UserTextSent(content="Hi"),
+        ]
+        result = _get_processed_history(chunks, history)
+        assert len(result) == 2
+        assert isinstance(result[0], AgentTextSent)
+        assert result[0].content == "This call is recorded."
+        assert isinstance(result[1], UserTextSent)
 
-        assert runner._suppression_buffer == "Legal disclaimer."
-        assert runner.agent_task is None
+    def test_late_ack_back_deduped_after_precommit(self):
+        """Late ack-backs for pre-committed text are deduplicated."""
+        chunks = [("This call is recorded.", False)]
+        history = [
+            AgentTextSent(content="Thiscall"),  # partial ack-back before user event
+            UserTextSent(content="Hi"),
+            AgentTextSent(content="isrecorded."),  # late ack-back after user event
+        ]
+        result = _get_processed_history(chunks, history)
+        # Should have: AgentTextSent (pre-committed), UserTextSent. Late ack-back deduped.
+        agent_texts = [e for e in result if isinstance(e, AgentTextSent)]
+        assert len(agent_texts) == 1
+        assert agent_texts[0].content == "This call is recorded."
+        user_texts = [e for e in result if isinstance(e, UserTextSent)]
+        assert len(user_texts) == 1
 
-    @pytest.mark.asyncio
-    async def test_late_ack_back_after_cancel_is_still_suppressed(self):
-        """Late ack-back chunks should still be suppressed after task cancellation."""
-        ws = create_mock_websocket()
-        runner = ConversationRunner(ws, noop_agent, env)
-        runner._suppression_buffer = "Legal disclaimer."
+    def test_interruptible_text_not_precommitted(self):
+        """Interruptible text is NOT pre-committed — only ack'd text appears."""
+        chunks = [("Hello world", True)]
+        history = [
+            AgentTextSent(content="Hello"),  # partial ack-back
+            UserTextSent(content="Stop"),
+        ]
+        result = _get_processed_history(chunks, history)
+        agent_texts = [e for e in result if isinstance(e, AgentTextSent)]
+        assert len(agent_texts) == 1
+        assert agent_texts[0].content == "Hello"
 
-        task_started = asyncio.Event()
+    def test_consecutive_uninterruptible_chunks_precommitted(self):
+        """Multiple consecutive uninterruptible chunks are all pre-committed."""
+        chunks = [("Legal notice.", False), (" Terms apply.", False)]
+        history = [
+            AgentTextSent(content="Legal"),  # partial ack-back of first chunk
+            UserTextSent(content="Hi"),
+        ]
+        result = _get_processed_history(chunks, history)
+        agent_texts = [e for e in result if isinstance(e, AgentTextSent)]
+        assert len(agent_texts) == 1
+        assert agent_texts[0].content == "Legal notice. Terms apply."
 
-        async def blocking_task():
-            task_started.set()
-            await asyncio.Future()
+    def test_interruptible_then_uninterruptible_precommit(self):
+        """Interruptible text before uninterruptible is not extended; uninterruptible
+        is pre-committed when ack-backs reach it."""
+        chunks = [("Hello there.", True), ("This call is recorded.", False)]
+        history = [
+            AgentTextSent(content="Hellothere.Thiscall"),  # ack-back spans both chunks
+            UserTextSent(content="Hi"),
+        ]
+        result = _get_processed_history(chunks, history)
+        agent_texts = [e for e in result if isinstance(e, AgentTextSent)]
+        assert len(agent_texts) == 1
+        # Whitespace restored + uninterruptible chunk completed
+        assert agent_texts[0].content == "Hello there.This call is recorded."
 
-        runner.agent_task = asyncio.create_task(blocking_task())
-        await task_started.wait()
-        await runner._cancel_agent_task()
+    def test_mixed_ack_back_with_late_dedup(self):
+        """Full flow: interruptible ack-back, uninterruptible pre-commit, late dedup."""
+        chunks = [("Hello.", True), ("Legal notice.", False)]
+        history = [
+            AgentTextSent(content="Hello.Legal"),  # ack-back covers interruptible + partial uninterruptible
+            UserTextSent(content="Bye"),
+            AgentTextSent(content="notice."),  # late ack-back for rest of uninterruptible
+        ]
+        result = _get_processed_history(chunks, history)
+        agent_texts = [e for e in result if isinstance(e, AgentTextSent)]
+        assert len(agent_texts) == 1
+        assert agent_texts[0].content == "Hello.Legal notice."
 
-        result = runner._suppress_ack_back(AgentTextSent(content="Legaldisclaimer."))
-        assert result is None
-        assert runner._suppression_buffer == ""
+    def test_identical_text_interruptible_then_uninterruptible(self):
+        """When interruptible and uninterruptible chunks have identical text,
+        consumed_pos lands inside the interruptible chunk (ambiguous) so we
+        do NOT pre-commit. The text appears after the user event via ack-back."""
+        chunks = [("Hello", True), ("Hello", False)]
+        history = [
+            AgentTextSent(content="Hel"),  # partial ack-back, inside interruptible chunk
+            UserTextSent(content="Stop"),
+            AgentTextSent(content="loHello"),  # late ack-back spanning both chunks
+        ]
+        result = _get_processed_history(chunks, history)
+        agent_texts = [e for e in result if isinstance(e, AgentTextSent)]
+        user_texts = [e for e in result if isinstance(e, UserTextSent)]
+        # Interruptible chunk → no pre-commit. Ack-back text appears after user.
+        assert len(agent_texts) == 2
+        assert agent_texts[0].content == "Hel"
+        assert result.index(agent_texts[0]) < result.index(user_texts[0])
+        assert result.index(user_texts[0]) < result.index(agent_texts[1])
+
+    def test_no_ack_backs_before_user_event_no_precommit(self):
+        """With zero ack-backs, consumed_pos is at chunk start (boundary),
+        so we do NOT pre-commit — no evidence the chunk was being spoken.
+        Self-correcting: once ack-back arrives, next call will pre-commit."""
+        chunks = [("Legal notice.", False)]
+        history = [
+            UserTextSent(content="Hi"),  # user speaks before any ack-back
+            AgentTextSent(content="Legalnotice."),  # late ack-back
+        ]
+        result = _get_processed_history(chunks, history)
+        agent_texts = [e for e in result if isinstance(e, AgentTextSent)]
+        user_texts = [e for e in result if isinstance(e, UserTextSent)]
+        # No pre-commit (consumed_pos=0, at boundary). Text appears after user.
+        assert len(agent_texts) == 1
+        assert agent_texts[0].content == "Legal notice."
+        assert result.index(user_texts[0]) < result.index(agent_texts[0])
+
+    def test_multi_turn_no_retroactive_precommit(self):
+        """Uninterruptible text from turn 2 must NOT be retroactively
+        pre-committed before user events from turn 1.
+
+        Scenario:
+        - Turn 1: agent says "Hello" (interruptible), fully ack'd, user speaks
+        - Turn 2: agent says "Legal notice." (uninterruptible)
+        - User speaks again
+
+        Without the strict consumed_pos check, reprocessing would find the
+        uninterruptible chunk and pre-commit it before turn 1's user event.
+        """
+        chunks = [("Hello", True), ("Legal notice.", False)]
+        history = [
+            AgentTextSent(content="Hello"),  # full ack-back for turn 1
+            UserTextSent(content="Hi there"),  # user speaks after turn 1
+            AgentTextSent(content="Legalnotice."),  # ack-back for turn 2
+            UserTextSent(content="Thanks"),  # user speaks after turn 2
+        ]
+        result = _get_processed_history(chunks, history)
+        agent_texts = [e for e in result if isinstance(e, AgentTextSent)]
+        user_texts = [e for e in result if isinstance(e, UserTextSent)]
+        # Turn 1 agent text before turn 1 user text
+        assert result.index(agent_texts[0]) < result.index(user_texts[0])
+        # Turn 2 agent text should NOT appear before turn 1 user text
+        # (consumed_pos=5 is at chunk boundary, not strictly inside)
+        assert result.index(user_texts[0]) < result.index(agent_texts[1])
 
     @pytest.mark.asyncio
     async def test_late_ack_back_after_cancel_does_not_leak_into_processed_history(self):
@@ -696,225 +821,38 @@ class TestUninterruptibleMessages:
         await runner._start_agent_task(TurnEnv(), CallStarted())
         await first_turn_started.wait()
 
-        # Partial disclaimer ack-back arrives before the old task is canceled.
-        partial = runner._suppress_ack_back(AgentTextSent(content="Thiscallmay"))
-        assert partial is None
-        assert runner._suppression_buffer
-
         # UserTurnEnded starts a new LM run and cancels the old task.
         await runner._start_agent_task(TurnEnv(), UserTurnEnded())
-
-        # Late disclaimer ack-back chunk after cancel should still be suppressed.
-        late = runner._suppress_ack_back(AgentTextSent(content="berecorded."))
-        assert late is None
-        assert runner._suppression_buffer == ""
-
         if runner.agent_task:
             await runner.agent_task
 
-        history: List[InputEvent] = []
-        _, history = runner._process_input_event(history, CallStarted())
-        _, history = runner._process_input_event(history, UserTextSent(content="Hello?"))
-        _, history = runner._process_input_event(history, UserTurnEnded(content=[]))
-        processed_event, history = runner._process_input_event(history, AgentTextSent(content="Thankyou"))
-
-        assert isinstance(processed_event, AgentTextSent)
-        assert processed_event.content == "Thank you"
-
-        processed_history = processed_event.history or []
-        user_texts = [
-            evt for evt in processed_history if isinstance(evt, UserTextSent) and evt.content == "Hello?"
+        # Simulate the raw history as the run loop would produce it:
+        # partial ack-back, user events, late ack-back, then normal ack-back
+        history: List[InputEvent] = [
+            CallStarted(),
+            AgentTextSent(content="Thiscallmay"),  # partial ack-back before user
+            UserTextSent(content="Hello?"),
+            UserTurnEnded(content=[]),
+            AgentTextSent(content="berecorded."),  # late ack-back after user
+            AgentTextSent(content="Thankyou"),  # ack-back for second turn
         ]
+        processed = _get_processed_history(runner.emitted_agent_text, history)
+
+        # The uninterruptible disclaimer should be pre-committed before user text
+        agent_texts = [e for e in processed if isinstance(e, AgentTextSent)]
+        user_texts = [e for e in processed if isinstance(e, UserTextSent)]
         assert len(user_texts) == 1
+        assert user_texts[0].content == "Hello?"
 
-        leaked_disclaimer = [
-            evt
-            for evt in processed_history
-            if isinstance(evt, AgentTextSent) and "recorded" in evt.content.lower()
-        ]
-        assert leaked_disclaimer == []
-
-    def test_exact_ack_back_uninterruptible_text_is_suppressed(self):
-        """Exact ack-back matching emitted uninterruptible text is dropped."""
-        ws = create_mock_websocket()
-        runner = ConversationRunner(ws, noop_agent, env)
-
-        runner._suppression_buffer = "This call is recorded."
-        result = runner._suppress_ack_back(AgentTextSent(content="This call is recorded."))
-        assert result is None
-        assert runner._suppression_buffer == ""
-
-    def test_ack_back_uninterruptible_text_is_suppressed(self):
-        """Ack-back matching emitted uninterruptible text is dropped."""
-        ws = create_mock_websocket()
-        runner = ConversationRunner(ws, noop_agent, env)
-
-        runner._suppression_buffer = "This call is recorded."
-        result = runner._suppress_ack_back(AgentTextSent(content="Thiscallisrecorded."))
-        assert result is None
-        assert runner._suppression_buffer == ""
-
-    def test_ack_back_uninterruptible_prefix_is_suppressed_and_suffix_kept(self):
-        """Only the uninterruptible prefix is dropped when a chunk contains additional text."""
-        ws = create_mock_websocket()
-        runner = ConversationRunner(ws, noop_agent, env)
-
-        runner._suppression_buffer = "Legal notice."
-        result = runner._suppress_ack_back(AgentTextSent(content="Legalnotice.Hello"))
-
-        assert result is not None
-        assert result.content == "Hello"
-        assert runner._suppression_buffer == ""
-
-    def test_non_prefix_text_is_not_suppressed(self):
-        """Suppression requires prefix alignment and does not skip pending text."""
-        ws = create_mock_websocket()
-        runner = ConversationRunner(ws, noop_agent, env)
-
-        runner._suppression_buffer = "Legal Hello"
-        result = runner._suppress_ack_back(AgentTextSent(content="Hello"))
-
-        assert result is not None
-        assert result.content == "Hello"
-        assert runner._suppression_buffer == "Legal Hello"
-
-    def test_multichunk_ack_back_then_interruptible_text(self):
-        """After uninterruptible ack-back is consumed, following chunk passes through untouched."""
-        ws = create_mock_websocket()
-        runner = ConversationRunner(ws, noop_agent, env)
-
-        runner._suppression_buffer = "Legal notice."
-        first = runner._suppress_ack_back(AgentTextSent(content="Legalnotice."))
-        second = runner._suppress_ack_back(AgentTextSent(content="Hello there"))
-
-        assert first is None
-        assert second is not None
-        assert second.content == "Hello there"
-        assert runner._suppression_buffer == ""
-
-    def test_trailing_stripped_ack_back_chars_are_drained(self):
-        """Trailing pending chars stripped by harness do not get stuck in ack-back buffer."""
-        ws = create_mock_websocket()
-        runner = ConversationRunner(ws, noop_agent, env)
-
-        runner._suppression_buffer = "Legal notice. "
-        result = runner._suppress_ack_back(AgentTextSent(content="Legalnotice."))
-
-        assert result is None
-        assert runner._suppression_buffer == ""
-
-    def test_trailing_tts_full_stop_in_ack_back_is_consumed(self):
-        """TTS-injected trailing full stop should not leak through suppression."""
-        ws = create_mock_websocket()
-        runner = ConversationRunner(ws, noop_agent, env)
-
-        # Agent emitted "Hello" without a period, but TTS appended one
-        runner._suppression_buffer = "Hello"
-        result = runner._suppress_ack_back(AgentTextSent(content="Hello."))
-
-        assert result is None
-        assert runner._suppression_buffer == ""
-
-    @pytest.mark.asyncio
-    async def test_agent_exception_clears_suppression_buffer(self):
-        """Unhandled agent exceptions clear suppression buffer state."""
-        ws = create_mock_websocket()
-        ws.close = AsyncMock()
-
-        async def failing_agent(env, event):
-            if isinstance(event, CallStarted):
-                yield AgentSendText(text="Legal disclaimer.", interruptible=False)
-                raise RuntimeError("boom")
-
-        ws.receive_json.side_effect = [WebSocketDisconnect()]
-
-        runner = ConversationRunner(ws, failing_agent, env)
-        await runner.run()
-
-        assert runner._suppression_buffer == ""
-
-    @pytest.mark.asyncio
-    async def test_deferred_commit_interruptible_then_uninterruptible_before_user_event(self):
-        """Interruptible ack-back passes through; uninterruptible text is buffered
-        and committed before user event."""
-        ws = create_mock_websocket()
-        agent_yielded = asyncio.Event()
-
-        async def scripted_agent(env, event):
-            if isinstance(event, CallStarted):
-                yield AgentSendText(text="Hello there.", interruptible=True)
-                yield AgentSendText(text="This call is recorded.", interruptible=False)
-                agent_yielded.set()
-                await asyncio.Future()
-
-        msg_idx = 0
-
-        async def receive_messages():
-            nonlocal msg_idx
-            if msg_idx == 0:
-                await agent_yielded.wait()
-                msg_idx += 1
-                # Interruptible ack-back arrives before user event
-                return {"type": "agent_speech", "content": "Hellothere."}
-            if msg_idx == 1:
-                msg_idx += 1
-                return {"type": "user_state", "value": "speaking"}
-            if msg_idx == 2:
-                msg_idx += 1
-                return {"type": "transcription", "content": "Hi"}
-            raise WebSocketDisconnect()
-
-        ws.receive_json = receive_messages
-
-        runner = ConversationRunner(ws, scripted_agent, env)
-        await runner.run()
-
-        # Interruptible ack-back should appear in history (passed through)
-        # Uninterruptible text should be flushed before user event
-        agent_text_indices = []
-        user_turn_started_idx = None
-        for i, evt in enumerate(runner.history):
-            if isinstance(evt, AgentTextSent):
-                agent_text_indices.append(i)
-            if isinstance(evt, UserTurnStarted) and user_turn_started_idx is None:
-                user_turn_started_idx = i
-
-        # Both ack-back and deferred commit should be in history
-        assert len(agent_text_indices) >= 2
-        assert user_turn_started_idx is not None
-        # Deferred commit (uninterruptible) should appear before user event
-        assert agent_text_indices[-1] < user_turn_started_idx
-
-    @pytest.mark.asyncio
-    async def test_deferred_commit_tool_calls_between_texts(self):
-        """Tool calls between interruptible and uninterruptible text are preserved as separate commits."""
-        ws = create_mock_websocket()
-
-        async def scripted_agent(env, event):
-            if isinstance(event, CallStarted):
-                yield AgentSendText(text="Let me check.", interruptible=True)
-                yield AgentToolCalled(tool_call_id="tc1", tool_name="lookup", tool_args={})
-                yield AgentToolReturned(tool_call_id="tc1", tool_name="lookup", tool_args={}, result="found")
-                yield AgentSendText(text="Legal notice.", interruptible=False)
-                yield AgentSendText(text="How can I help?", interruptible=True)
-
-        runner = ConversationRunner(ws, scripted_agent, env)
-        await runner._start_agent_task(TurnEnv(), CallStarted())
-        if runner.agent_task:
-            await runner.agent_task
-
-        # Flush pending commits (simulating a user event arriving)
-        runner._flush_pending_commits()
-
-        # Pending commits should contain uninterruptible + subsequent interruptible
-        # (already flushed), so check history for individual entries
-        agent_texts = [e for e in runner.history if isinstance(e, AgentTextSent)]
+        # Should have disclaimer (pre-committed) and "Thank you" — no duplicates
         assert len(agent_texts) == 2
-        assert agent_texts[0].content == "Legal notice."
-        assert agent_texts[1].content == "How can I help?"
+        assert "recorded" in agent_texts[0].content
+        assert agent_texts[1].content == "Thank you"
 
-        # emitted_agent_text should contain all text for whitespace restoration
-        assert runner.emitted_agent_text == "Let me check.Legal notice.How can I help?"
+        # Disclaimer must appear before user text
+        disclaimer_idx = processed.index(agent_texts[0])
+        user_idx = processed.index(user_texts[0])
+        assert disclaimer_idx < user_idx
 
 
 # ============================================================
@@ -1111,127 +1049,6 @@ class TestConsumeExpectedAckBackAdversarial:
         assert consumed == 0
         assert remaining_c == "."
         assert remaining_p == " world"
-
-
-# ============================================================
-# Adversarial _suppress_ack_back integration tests
-# ============================================================
-
-
-class TestSuppressAckBackAdversarial:
-    """Integration tests: adversarial scenarios through the runner's suppress method."""
-
-    def test_pure_full_stop_ack_back_not_suppressed(self):
-        """A lone '.' ack-back must not be suppressed even when pending text exists."""
-        ws = create_mock_websocket()
-        runner = ConversationRunner(ws, noop_agent, env)
-
-        runner._suppression_buffer = "Hello world"
-        result = runner._suppress_ack_back(AgentTextSent(content="."))
-
-        assert result is not None
-        assert result.content == "."
-        # Pending must be untouched
-        assert runner._suppression_buffer == "Hello world"
-
-    def test_multi_chunk_with_interleaved_full_stop_noise(self):
-        """Real chunks suppress correctly even if a full-stop-only chunk appears between them."""
-        ws = create_mock_websocket()
-        runner = ConversationRunner(ws, noop_agent, env)
-
-        runner._suppression_buffer = "Hello world"
-
-        # Chunk 1: real content, partially drains pending
-        r1 = runner._suppress_ack_back(AgentTextSent(content="Hello"))
-        assert r1 is None
-        assert runner._suppression_buffer == "world"
-
-        # Chunk 2: TTS noise — must pass through, not corrupt pending
-        r2 = runner._suppress_ack_back(AgentTextSent(content="."))
-        assert r2 is not None
-        assert r2.content == "."
-        assert runner._suppression_buffer == "world"
-
-        # Chunk 3: real content, finishes draining
-        r3 = runner._suppress_ack_back(AgentTextSent(content="world"))
-        assert r3 is None
-        assert runner._suppression_buffer == ""
-
-    def test_unicode_ack_back_suppressed(self):
-        """Accented/unicode uninterruptible text is suppressed correctly."""
-        ws = create_mock_websocket()
-        runner = ConversationRunner(ws, noop_agent, env)
-
-        runner._suppression_buffer = "Héllo café"
-        result = runner._suppress_ack_back(AgentTextSent(content="Héllocafé"))
-
-        assert result is None
-        assert runner._suppression_buffer == ""
-
-    def test_emoji_in_pending_suppressed(self):
-        """Emoji in pending (harness-stripped) doesn't prevent suppression."""
-        ws = create_mock_websocket()
-        runner = ConversationRunner(ws, noop_agent, env)
-
-        runner._suppression_buffer = "Hello 👋 there"
-        result = runner._suppress_ack_back(AgentTextSent(content="Hellothere"))
-
-        assert result is None
-        assert runner._suppression_buffer == ""
-
-    def test_completely_unrelated_ack_back_passes_through(self):
-        """An ack-back with no character overlap passes through untouched."""
-        ws = create_mock_websocket()
-        runner = ConversationRunner(ws, noop_agent, env)
-
-        runner._suppression_buffer = "Hello"
-        result = runner._suppress_ack_back(AgentTextSent(content="XYZ"))
-
-        assert result is not None
-        assert result.content == "XYZ"
-        assert runner._suppression_buffer == "Hello"
-
-    def test_event_id_preserved_on_trimmed_ack_back(self):
-        """When only the prefix is suppressed, the returned event preserves the original event_id."""
-        ws = create_mock_websocket()
-        runner = ConversationRunner(ws, noop_agent, env)
-
-        runner._suppression_buffer = "Legal."
-        original = AgentTextSent(content="Legal.Hello")
-        result = runner._suppress_ack_back(original)
-
-        assert result is not None
-        assert result.content == "Hello"
-        assert result.event_id == original.event_id
-
-    def test_repeated_suppression_drains_long_pending(self):
-        """Multiple ack-back chunks progressively drain a long pending buffer."""
-        ws = create_mock_websocket()
-        runner = ConversationRunner(ws, noop_agent, env)
-
-        runner._suppression_buffer = "This call may be recorded for quality purposes"
-
-        r1 = runner._suppress_ack_back(AgentTextSent(content="Thiscallmaybe"))
-        assert r1 is None
-
-        r2 = runner._suppress_ack_back(AgentTextSent(content="recordedforquality"))
-        assert r2 is None
-
-        r3 = runner._suppress_ack_back(AgentTextSent(content="purposes"))
-        assert r3 is None
-        assert runner._suppression_buffer == ""
-
-    def test_trailing_tts_full_stop_with_interruptible_suffix(self):
-        """TTS adds '.' at uninterruptible boundary, followed by interruptible content."""
-        ws = create_mock_websocket()
-        runner = ConversationRunner(ws, noop_agent, env)
-
-        runner._suppression_buffer = "Hold"
-        result = runner._suppress_ack_back(AgentTextSent(content="Hold.Anyway"))
-
-        assert result is not None
-        assert result.content == "Anyway"
-        assert runner._suppression_buffer == ""
 
 
 # ============================================================
