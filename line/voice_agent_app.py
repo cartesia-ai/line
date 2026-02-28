@@ -911,6 +911,13 @@ def _consume_expected_ack_back_prefix(committed_text: str, pending_text: str) ->
         # sufficient to count as a prefix match.
         return 0, committed_text, pending_text
 
+    # Only accept if at least one side was fully consumed (true prefix
+    # relationship).  A partial match where both sides have leftover chars
+    # is a coincidental overlap (e.g. "bye" vs stale "bcd" matching only
+    # the leading 'b') and must be rejected to prevent transcript corruption.
+    if i < len(committed_text) and j < len(pending_text):
+        return 0, committed_text, pending_text
+
     if i == len(committed_text):
         # If committed text is fully consumed, drop trailing pending chars that
         # the harness would strip anyway so they don't get stuck forever.

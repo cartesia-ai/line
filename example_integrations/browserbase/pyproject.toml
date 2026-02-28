@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Voice agent that fills web forms using Stagehand browser automation (Line SDK)"
 requires-python = ">=3.10"
 dependencies = [
-    "cartesia-line==0.2.2",
+    "cartesia-line==0.2.3",
     "stagehand>=3.0.0",
     "google-genai>=1.26.0",
     "loguru>=0.7.0",

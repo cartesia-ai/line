@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Phone transfer example using Line SDK"
 requires-python = ">=3.10"
 dependencies = [
-    "cartesia-line==0.2.2",
+    "cartesia-line==0.2.3",
 ]
 
 [tool.setuptools]

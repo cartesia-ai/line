@@ -121,7 +121,7 @@ class History:
     def add_entry(
         self,
         content: str,
-        role: Literal["system", "user"] = "system",
+        role: Literal["system", "user"] = "user",
         *,
         before: Optional[HistoryEvent] = None,
         after: Optional[HistoryEvent] = None,

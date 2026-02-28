@@ -106,7 +106,7 @@ class CustomHistoryEntry(BaseModel):
     """
 
     type: Literal["custom_history_entry"] = "custom_history_entry"
-    role: Literal["system", "user"] = "system"
+    role: Literal["system", "user"] = "user"
     content: str
 
 

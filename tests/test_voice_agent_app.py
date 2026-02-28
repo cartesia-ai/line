@@ -1050,6 +1050,37 @@ class TestConsumeExpectedAckBackAdversarial:
         assert remaining_c == "."
         assert remaining_p == " world"
 
+    # -- Full-prefix match guard: reject coincidental partial overlaps --
+
+    def test_stale_dedup_coincidental_first_char_match(self):
+        """Stale pre_committed_dedup='bcd' must not corrupt unrelated ack-back 'bye'.
+
+        Scenario 1: Turn 1 pre-commits 'bcd', turn 2 ack-back is 'bye'.
+        The leading 'b' matches but this is coincidental — must reject.
+        """
+        consumed, remaining_c, remaining_p = _consume_expected_ack_back_prefix("bye", "bcd")
+        assert consumed == 0
+        assert remaining_c == "bye"
+        assert remaining_p == "bcd"
+
+    def test_stale_dedup_whitespace_induced_partial_match(self):
+        """Stale pre_committed_dedup=' world' must not corrupt unrelated ack-back 'wonderful'.
+
+        Scenario 5: Leading whitespace in pending is skipped, then 'wo' matches
+        coincidentally. Neither side is fully consumed — must reject.
+        """
+        consumed, remaining_c, remaining_p = _consume_expected_ack_back_prefix("wonderful", " world")
+        assert consumed == 0
+        assert remaining_c == "wonderful"
+        assert remaining_p == " world"
+
+    def test_partial_overlap_both_sides_leftover_rejected(self):
+        """Any partial overlap where both sides have remaining chars is rejected."""
+        consumed, remaining_c, remaining_p = _consume_expected_ack_back_prefix("abcXYZ", "abcDEF")
+        assert consumed == 0
+        assert remaining_c == "abcXYZ"
+        assert remaining_p == "abcDEF"
+
 
 # ============================================================
 # AgentUpdateCall -> ConfigOutput mapping tests

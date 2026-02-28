@@ -73,9 +73,8 @@ class LLMProvider:
         self._supports_reasoning_effort = "reasoning_effort" in supported
 
         # Determine the right default when no explicit reasoning_effort is configured.
-        # "none" is ideal (disables reasoning entirely) but not all providers support it.
-        # Probe litellm's own parameter mapping to find out: if mapping "none" through the
-        # provider's config raises, fall back to "low" (the lowest universally-supported level).
+        # Goal: use the absolute lowest reasoning level each provider supports.
+        # Almost all providers support "low", so start there and then check if we can do better.
         self._default_reasoning_effort = "low"
         if self._supports_reasoning_effort:
             try:
@@ -83,7 +82,12 @@ class LLMProvider:
                 get_optional_params(model=model, custom_llm_provider=provider, reasoning_effort="none")
                 self._default_reasoning_effort = "none"
             except Exception:
-                pass
+                # HACK: Anthropic's LiteLLM mapping annoyingly doesn't support `"none"` (the string) as a
+                # value for reasoning_effort, so None (omitting the param) is the correct way
+                # to skip the thinking block entirely; "low" would still enable a 1024-token
+                # thinking budget.
+                if "anthropic" in model.lower():
+                    self._default_reasoning_effort = None
 
     def chat(
         self,
