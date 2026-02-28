@@ -16,7 +16,6 @@ from typing import (
     Callable,
     Dict,
     List,
-    Literal,
     Optional,
     TypeVar,
     Union,
@@ -126,14 +125,6 @@ class LlmAgent:
     def set_config(self, config: LlmConfig) -> None:
         """Replace the agent's config."""
         self._config = _normalize_config(config)
-
-    def add_history_entry(self, content: str, role: Literal["system", "user"] = "system") -> None:
-        """Insert a CustomHistoryEntry event into local history.
-
-        The entry appears as a message with the given role ("system" by default) in the
-        LLM conversation
-        """
-        self.history.add_entry(content, role)
 
     async def process(
         self,
@@ -349,6 +340,24 @@ class LlmAgent:
 
             # ==== GENERATION CALL ==== #
             messages = await self._build_messages(context=context, history=history)
+
+            # Skip if no messages to send (e.g., empty history or all messages filtered)
+            if not messages:
+                logger.warning("Skipping LLM call: no messages to send")
+                break
+
+            # Validate last message for LLM API compatibility
+            # - Cannot end with assistant message (Anthropic requires user/tool to continue)
+            # - User messages must be non-empty (Anthropic rejects empty/whitespace user content)
+            # - Tool messages are valid (expected after tool_use for loopback)
+            last_msg = messages[-1]
+            if last_msg.role == "assistant":
+                logger.warning("Skipping LLM call: conversation cannot end with assistant message")
+                break
+            if last_msg.role == "user" and not last_msg.content.strip():
+                logger.warning("Skipping LLM call: last user message must be non-empty")
+                break
+
             tool_calls_dict: Dict[str, ToolCall] = {}
 
             # Build kwargs for LLM chat, including web_search_options if available
@@ -590,11 +599,15 @@ class LlmAgent:
         for event in full_history:
             # Handle InputEvent types
             if isinstance(event, UserTextSent):
-                messages.append(Message(role="user", content=event.content))
+                # Filter empty user messages - prevents invalid API calls from empty ASR
+                if event.content and event.content.strip():
+                    messages.append(Message(role="user", content=event.content))
             elif isinstance(event, AgentTextSent):
-                messages.append(Message(role="assistant", content=event.content))
+                if event.content and event.content.strip():
+                    messages.append(Message(role="assistant", content=event.content))
             # Handle CustomHistoryEntry (injected history entries)
             elif isinstance(event, CustomHistoryEntry):
+                # Don't filter - could create invalid message sequences
                 messages.append(Message(role=event.role, content=event.content))
             # Handle tool events from local_history
             elif isinstance(event, AgentToolCalled):
