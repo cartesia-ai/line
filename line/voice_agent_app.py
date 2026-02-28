@@ -704,7 +704,7 @@ def _get_processed_history(
             )
             if pre_commit:
                 committed_text = (committed_text or "") + pre_commit
-                pending_text = pending_text[len(pre_commit):]
+                pending_text = pending_text[len(pre_commit) :]
                 pre_committed_dedup += pre_commit
 
             if committed_text:
