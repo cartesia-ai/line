@@ -21,6 +21,7 @@ def _generate_event_id() -> str:
 class AgentSendText(BaseModel):
     type: Literal["agent_send_text"] = "agent_send_text"
     text: str
+    interruptible: bool = True
 
 
 class AgentToolCalled(BaseModel):

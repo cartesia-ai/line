@@ -16,7 +16,7 @@ import json
 import os
 import re
 import traceback
-from typing import Any, AsyncIterable, Awaitable, Callable, Dict, List, Optional
+from typing import Any, AsyncIterable, Awaitable, Callable, Dict, List, Optional, Tuple
 from urllib.parse import urlencode
 
 from dotenv import load_dotenv
@@ -282,9 +282,7 @@ class ConversationRunner:
         self.env = env
         self.shutdown_event = asyncio.Event()
         self.history: List[InputEvent] = []
-        self.emitted_agent_text: str = (
-            ""  # Buffer for all AgentSendText content (for whitespace interpolation)
-        )
+        self.emitted_agent_text: List[Tuple[str, bool]] = []  # (content, interruptible)
 
         self.agent_callable, self.run_filter, self.cancel_filter = self._prepare_agent(agent_spec)
         self.agent_task: Optional[asyncio.Task] = None
@@ -358,6 +356,8 @@ class ConversationRunner:
                 # Convert and process the input message
                 event = self._convert_input_message(input_msg)
                 ev, self.history = self._process_input_event(self.history, event)
+                if ev is None:
+                    continue
                 await self._handle_event(TurnEnv(), ev)
 
             except WebSocketDisconnect:
@@ -404,9 +404,8 @@ class ConversationRunner:
         async def runner():
             try:
                 async for output in self.agent_callable(turn_env, event):
-                    # Buffer AgentSendText content for whitespace interpolation
                     if isinstance(output, AgentSendText):
-                        self.emitted_agent_text += output.text
+                        self.emitted_agent_text.append((output.text, output.interruptible))
                     mapped = self._map_output_event(output)
 
                     if self.shutdown_event.is_set():
@@ -495,11 +494,14 @@ class ConversationRunner:
 
     def _process_input_event(
         self, history: List[InputEvent], raw_event: InputEvent
-    ) -> tuple[InputEvent, List[InputEvent]]:
+    ) -> tuple[Optional[InputEvent], List[InputEvent]]:
         """Create an InputEvent including history from an InputEvent (with history=None).
 
         The raw history is updated with the new event, but the history passed to
         the InputEvent is processed to restore whitespace in AgentTextSent events.
+
+        Returns None for the event when an AgentTextSent ack-back is consumed by
+        deduplication (already pre-committed as uninterruptible text).
         """
         raw_history = history + [raw_event]
         # Process history to restore whitespace before passing to agent
@@ -508,6 +510,10 @@ class ConversationRunner:
         # Extract base data excluding history (we'll set it explicitly)
         base_data = {k: v for k, v in processed_event.model_dump().items() if k != "history"}
         if type(processed_event) is not type(raw_event):
+            if isinstance(raw_event, AgentTextSent):
+                # Ack-back was consumed by dedup — skip it
+                logger.debug(f'Ack-back "{raw_event.content}" consumed by dedup (already pre-committed)')
+                return None, raw_history
             logger.warning(
                 f"Processed event type {type(processed_event).__name__} "
                 f"differs from raw event type {type(raw_event).__name__}"
@@ -589,8 +595,11 @@ class ConversationRunner:
     def _map_output_event(self, event: OutputEvent) -> OutputMessage:
         """Convert OutputEvent to websocket OutputMessage."""
         if isinstance(event, AgentSendText):
-            logger.info(f'<- 🤖🗣️ Agent said: "{event.text}"')
-            return MessageOutput(content=event.text)
+            if event.interruptible:
+                logger.info(f'<- 🤖🗣️ Agent said: "{event.text}"')
+            else:
+                logger.info(f'<- 🤖🔒 Agent said (uninterruptible): "{event.text}"')
+            return MessageOutput(content=event.text, interruptible=event.interruptible)
         if isinstance(event, AgentSendDtmf):
             logger.info(f"<- 🤖🔔 Agent DTMF sent: {event.button}")
             return DTMFOutput(button=event.button)
@@ -649,41 +658,73 @@ class ConversationRunner:
         return ErrorOutput(content=f"Unhandled output event type: {type(event).__name__}")
 
 
-def _get_processed_history(pending_text: str, history: List[InputEvent]) -> List[InputEvent]:
+def _get_processed_history(
+    emitted_chunks: List[Tuple[str, bool]],
+    history: List[InputEvent],
+) -> List[InputEvent]:
     """
-    Process history to reinterpolate whitespace into AgentTextSent events.
-
-    The TTS system strips whitespace when confirming what was spoken. This method
-    uses the buffered AgentSendText content to restore proper whitespace formatting
-    in the history passed to the agent's process method.
+    Process history to:
+    1. Restore whitespace in AgentTextSent events (TTS strips it)
+    2. Pre-commit uninterruptible text before user events
+    3. Deduplicate late ack-backs for pre-committed text
 
     Args:
-        pending_text: Accumulated text from AgentSendText events (with whitespace)
+        emitted_chunks: List of (text, interruptible) from AgentSendText events
         history: Raw history containing AgentTextSent with stripped whitespace
 
     Returns:
-        Processed history with whitespace restored in AgentTextSent events
+        Processed history with whitespace restored and uninterruptible text
+        correctly ordered before user events
     """
+    full_emitted = "".join(text for text, _ in emitted_chunks)
+
+    # Build chunk boundaries: (start, end, interruptible)
+    chunk_boundaries: List[Tuple[int, int, bool]] = []
+    pos = 0
+    for text, interruptible in emitted_chunks:
+        chunk_boundaries.append((pos, pos + len(text), interruptible))
+        pos += len(text)
+
     processed_events: List[InputEvent] = []
     committed_text_buffer = ""
+    pending_text = full_emitted
+    pre_committed_dedup = ""  # pre-committed text awaiting ack-back consumption
+
     for event in history:
         if isinstance(event, AgentTextSent):
-            committed_text_buffer += event.content
+            content = event.content
+            # Consume against pre-committed text to avoid double-counting
+            if pre_committed_dedup:
+                _, remaining_content, remaining_pre = _consume_expected_ack_back_prefix(
+                    content, pre_committed_dedup
+                )
+                pre_committed_dedup = remaining_pre
+                content = remaining_content
+            if content:
+                committed_text_buffer += content
         else:
             committed_text, committed_text_buffer, pending_text = _parse_committed(
                 committed_text_buffer, pending_text
             )
+
+            # Check if we need to pre-commit uninterruptible text
+            pre_commit = _compute_uninterruptible_precommit(
+                len(full_emitted) - len(pending_text), chunk_boundaries, full_emitted
+            )
+            if pre_commit:
+                committed_text = (committed_text or "") + pre_commit
+                pending_text = pending_text[len(pre_commit) :]
+                pre_committed_dedup += pre_commit
+
             if committed_text:
                 processed_events.append(AgentTextSent(content=committed_text))
             if isinstance(event, (AgentTurnEnded, CallEnded)) and committed_text_buffer:
                 logger.warning(
                     f"Unexpected committed text buffer at end of turn/call: '{committed_text_buffer}'"
                 )
-                # this is a hack to basically "throw up our hands" when we see the end of an agent turn"
-                # we commit all buffered text immediately, even if it doesn't match perfectly with
-                # pending_text. Since we can't _exactly_ know what text was dropped by Sonic's wordstamps
-                # (and therefore what text `AgentTextSent` events contain) we will inevitably have mismatches
-                # between our pending text and the committed text we get from `AgentTextSent` events.
+                # Commit all buffered text at turn/call boundaries even if it
+                # doesn't align perfectly with pending_text — inevitable mismatches
+                # from TTS wordstamp drops.
                 processed_events.append(AgentTextSent(content=committed_text_buffer))
                 committed_text_buffer = ""
             processed_events.append(event)
@@ -692,6 +733,56 @@ def _get_processed_history(pending_text: str, history: List[InputEvent]) -> List
     if committed_text:
         processed_events.append(AgentTextSent(content=committed_text))
     return processed_events
+
+
+def _compute_uninterruptible_precommit(
+    consumed_pos: int,
+    chunk_boundaries: List[Tuple[int, int, bool]],
+    full_emitted: str,
+) -> str:
+    """Compute text to pre-commit at a user event boundary.
+
+    We only pre-commit when consumed_pos falls strictly inside a chunk
+    (start < consumed_pos < end), meaning we have ack-back evidence that
+    the chunk was actively being spoken. This prevents retroactive
+    pre-commits of chunks from future turns whose text hasn't been
+    acknowledged yet.
+
+    If the current chunk is uninterruptible, we pre-commit the remainder
+    of it plus any consecutive uninterruptible chunks that follow.
+
+    Returns:
+        The text to pre-commit (empty string if nothing to pre-commit).
+    """
+    if not chunk_boundaries:
+        return ""
+
+    # Find the chunk strictly containing consumed_pos
+    current_idx = None
+    for i, (start, end, _) in enumerate(chunk_boundaries):
+        if start < consumed_pos < end:
+            current_idx = i
+            break
+
+    if current_idx is None:
+        return ""
+
+    _, current_end, current_interruptible = chunk_boundaries[current_idx]
+    if current_interruptible:
+        return ""
+
+    # Current chunk is uninterruptible — pre-commit the rest of it
+    precommit_end = current_end
+
+    # Also pre-commit consecutive uninterruptible chunks that follow
+    for i in range(current_idx + 1, len(chunk_boundaries)):
+        _, end, interruptible = chunk_boundaries[i]
+        if not interruptible:
+            precommit_end = end
+        else:
+            break
+
+    return full_emitted[consumed_pos:precommit_end]
 
 
 def _parse_committed(committed_buffer_text: str, pending_text: str) -> tuple[str, str, str]:
@@ -775,6 +866,58 @@ def _parse_committed(committed_buffer_text: str, pending_text: str) -> tuple[str
     remaining_pending = "".join(ws_buffer) + pending_text[j:]
 
     return committed_str, remaining_committed, remaining_pending
+
+
+def _consume_expected_ack_back_prefix(committed_text: str, pending_text: str) -> tuple[int, str, str]:
+    """Consume the longest strict prefix of committed_text that matches pending_text.
+
+    This is stricter than _parse_committed: it never skips arbitrary pending text
+    to find a later match. It only tolerates:
+    - characters stripped by the harness in pending_text (e.g. whitespace/emoji)
+    - full stops inserted by TTS in committed_text
+
+    Returns:
+        (consumed_chars, remaining_committed, remaining_pending)
+    """
+    if not committed_text or not pending_text:
+        return 0, committed_text, pending_text
+
+    i = 0  # pointer into committed_text
+    j = 0  # pointer into pending_text
+    matched = False  # whether at least one real character pair matched
+
+    while i < len(committed_text) and j < len(pending_text):
+        c = committed_text[i]
+        p = pending_text[j]
+
+        if c == p:
+            matched = True
+            i += 1
+            j += 1
+        elif _is_stripped_by_harness(p):
+            j += 1
+        elif c in FULL_STOP_CHARS:
+            i += 1
+        else:
+            break
+
+    # Skip any trailing TTS-inserted full stops in remaining committed text
+    # (mirrors the same sweep in _parse_committed).
+    while i < len(committed_text) and committed_text[i] in FULL_STOP_CHARS:
+        i += 1
+
+    if not matched:
+        # No real character matched; full stops and whitespace alone are not
+        # sufficient to count as a prefix match.
+        return 0, committed_text, pending_text
+
+    if i == len(committed_text):
+        # If committed text is fully consumed, drop trailing pending chars that
+        # the harness would strip anyway so they don't get stuck forever.
+        while j < len(pending_text) and _is_stripped_by_harness(pending_text[j]):
+            j += 1
+
+    return i, committed_text[i:], pending_text[j:]
 
 
 # Regex to match strings consisting entirely of emoji characters

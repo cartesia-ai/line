@@ -68,6 +68,7 @@ target-version = 'py39'
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+norecursedirs = ["line/llm_agent/scripts", ".claude"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "C4"]
