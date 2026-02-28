@@ -16,7 +16,6 @@ from typing import (
     Callable,
     Dict,
     List,
-    Literal,
     Optional,
     TypeVar,
     Union,
@@ -126,14 +125,6 @@ class LlmAgent:
     def set_config(self, config: LlmConfig) -> None:
         """Replace the agent's config."""
         self._config = _normalize_config(config)
-
-    def add_history_entry(self, content: str, role: Literal["system", "user"] = "system") -> None:
-        """Insert a CustomHistoryEntry event into local history.
-
-        The entry appears as a message with the given role ("system" by default) in the
-        LLM conversation
-        """
-        self.history.add_entry(content, role)
 
     async def process(
         self,
