@@ -356,6 +356,8 @@ class ConversationRunner:
                 # Convert and process the input message
                 event = self._convert_input_message(input_msg)
                 ev, self.history = self._process_input_event(self.history, event)
+                if ev is None:
+                    continue
                 await self._handle_event(TurnEnv(), ev)
 
             except WebSocketDisconnect:
@@ -492,11 +494,14 @@ class ConversationRunner:
 
     def _process_input_event(
         self, history: List[InputEvent], raw_event: InputEvent
-    ) -> tuple[InputEvent, List[InputEvent]]:
+    ) -> tuple[Optional[InputEvent], List[InputEvent]]:
         """Create an InputEvent including history from an InputEvent (with history=None).
 
         The raw history is updated with the new event, but the history passed to
         the InputEvent is processed to restore whitespace in AgentTextSent events.
+
+        Returns None for the event when an AgentTextSent ack-back is consumed by
+        deduplication (already pre-committed as uninterruptible text).
         """
         raw_history = history + [raw_event]
         # Process history to restore whitespace before passing to agent
@@ -505,6 +510,10 @@ class ConversationRunner:
         # Extract base data excluding history (we'll set it explicitly)
         base_data = {k: v for k, v in processed_event.model_dump().items() if k != "history"}
         if type(processed_event) is not type(raw_event):
+            if isinstance(raw_event, AgentTextSent):
+                # Ack-back was consumed by dedup — skip it
+                logger.debug(f'Ack-back "{raw_event.content}" consumed by dedup (already pre-committed)')
+                return None, raw_history
             logger.warning(
                 f"Processed event type {type(processed_event).__name__} "
                 f"differs from raw event type {type(raw_event).__name__}"
