@@ -50,7 +50,6 @@ from line._harness_types import (
 from line.agent import Agent, AgentSpec, EventFilter, TurnEnv
 from line.events import (
     AgentDtmfSent,
-    AgentEnableMultilingualSTT,
     AgentEndCall,
     AgentSendCustom,
     AgentSendDtmf,
@@ -62,7 +61,6 @@ from line.events import (
     AgentTurnEnded,
     AgentTurnStarted,
     AgentUpdateCall,
-    AgentUpdateTTS,
     CallEnded,
     CallStarted,
     InputEvent,
@@ -624,14 +622,6 @@ class ConversationRunner:
                 arguments=self._truncate_dict_for_ws(event.tool_args),
                 result=result_str,
             )
-        # Temporary: until Audio Harness changes for top-level language=multilingual are deployed
-        if isinstance(event, AgentEnableMultilingualSTT):
-            logger.info("<- ⚙️ Enable multilingual STT")
-            return ConfigOutput(stt=STTConfig(language=None))
-        # Temporary: until general multilingual language config is available
-        if isinstance(event, AgentUpdateTTS):
-            logger.info(f"<- ⚙️ Update TTS: voice_id={event.voice_id}, language={event.language}")
-            return ConfigOutput(tts=TTSConfig(voice_id=event.voice_id, language=event.language))
         if isinstance(event, AgentUpdateCall):
             # "multilingual" is a special sentinel: STT gets None (auto-detect),
             # TTS gets None (use voice default language).
