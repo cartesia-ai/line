@@ -78,6 +78,7 @@ class DTMFOutput(BaseModel):
 class MessageOutput(BaseModel):
     type: Literal["message"] = "message"
     content: str
+    interruptible: bool = True
 
 
 class ToolCallOutput(BaseModel):
