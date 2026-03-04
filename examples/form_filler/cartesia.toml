@@ -1,0 +1,11 @@
+[cartesia]
+name = "Doctor Appointment Scheduling"
+description = "Voice agent that helps patients schedule doctor appointments and complete intake forms"
+version = "0.1.0"
+
+[cartesia.server]
+port = 8000
+host = "0.0.0.0"
+
+[cartesia.environment]
+required_vars = ["GEMINI_API_KEY"]
