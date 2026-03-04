@@ -21,7 +21,6 @@ from typing import (
     Union,
 )
 
-from litellm import get_supported_openai_params
 from loguru import logger
 
 from line.agent import AgentCallable, TurnEnv
@@ -42,7 +41,7 @@ from line.events import (
 )
 from line.llm_agent.config import LlmConfig, _merge_configs, _normalize_config
 from line.llm_agent.history import _HISTORY_EVENT_TYPES, History
-from line.llm_agent.provider import LLMProvider, Message, ToolCall
+from line.llm_agent.provider import LlmProvider, Message, ToolCall
 from line.llm_agent.tools.system import EndCallTool, WebSearchTool
 from line.llm_agent.tools.utils import (
     FunctionTool,
@@ -80,19 +79,9 @@ class LlmAgent:
     ):
         if not api_key:
             raise ValueError("Missing API key in LLmAgent initialization")
-        supported_params = get_supported_openai_params(model=model)
-        if supported_params is None:
-            raise ValueError(
-                f"Model {model} is not supported. See https://models.litellm.ai/ for supported models."
-            )
 
         # Resolve the base config to insert default values for any _UNSET sentinels.
         effective_config = _normalize_config(config or LlmConfig())
-        if effective_config.reasoning_effort is not None and "reasoning_effort" not in supported_params:
-            raise ValueError(
-                f"Model {model} does not support reasoning_effort. "
-                "Remove reasoning_effort from your LlmConfig or use a model that supports it."
-            )
 
         self._model = model
         self._api_key = api_key
@@ -100,11 +89,13 @@ class LlmAgent:
         self._max_tool_iterations = max_tool_iterations
 
         self._tools: List[ToolSpec] = list(tools or [])
+        effective_tools, web_search_options = _normalize_tools(self._tools, model=model)
 
-        self._llm = LLMProvider(
-            model=self._model,
-            api_key=self._api_key,
-            config=self._config,
+        self._llm = LlmProvider(
+            model=model,
+            api_key=api_key,
+            config=effective_config,
+            tools=effective_tools,
         )
 
         self._introduction_sent = False
@@ -120,8 +111,7 @@ class LlmAgent:
         # Maps tool_call_id -> thought_signature
         self._tool_signatures: Dict[str, str] = {}
 
-        resolved_tools, web_search_options = _normalize_tools(self._tools, model=self._model)
-        tool_names = [t.name for t in resolved_tools] + (["web_search"] if web_search_options else [])
+        tool_names = [t.name for t in effective_tools] + (["web_search"] if web_search_options else [])
         logger.info(f"LlmAgent initialized with model={self._model}, tools={tool_names}")
 
     def set_tools(self, tools: List[ToolSpec]) -> None:
@@ -174,7 +164,7 @@ class LlmAgent:
 
         # Compute effective config and tools for this #process invocation
         effective_config = _merge_configs(self._config, config) if config else self._config
-        effective_tools = _merge_tools(self._tools, tools) if tools else self._tools
+        effective_tools = _merge_tools(self._tools, tools)
 
         # If handoff is active, call the handed-off process function
         if self._handoff_target is not None:
@@ -187,12 +177,19 @@ class LlmAgent:
 
         # Handle CallStarted
         if isinstance(event, CallStarted):
+            warmup_task = asyncio.create_task(self._llm.warmup(config=effective_config))
             if effective_config.introduction and not self._introduction_sent:
                 output = AgentSendText(text=effective_config.introduction)
                 self.history._append_local(output)
                 self._introduction_sent = True
                 yield output
             yield LogMetric(name="agent_turn_ms", value=(time.perf_counter() - turn_start_time) * 1000)
+            try:
+                await warmup_task
+            except asyncio.CancelledError:
+                raise  # Warmup task continues as a separate asyncio.Task
+            except Exception as e:
+                logger.warning(f"Provider warmup failed: {e}")
             return
 
         # Handle CallEnded
@@ -297,36 +294,35 @@ class LlmAgent:
                 config=config,
                 **chat_kwargs,
             )
-            async with stream:
-                async for chunk in stream:
-                    # Track time to first chunk (text or tool call)
-                    if not first_chunk_logged and (chunk.text or chunk.tool_calls):
-                        first_chunk_ms = (time.perf_counter() - response_start_time) * 1000
-                        logger.info(f"Time to first chunk: {first_chunk_ms:.2f}ms")
-                        yield LogMetric(name="llm_first_chunk_ms", value=first_chunk_ms)
-                        first_chunk_logged = True
+            async for chunk in stream:
+                # Track time to first chunk (text or tool call)
+                if not first_chunk_logged and (chunk.text or chunk.tool_calls):
+                    first_chunk_ms = (time.perf_counter() - response_start_time) * 1000
+                    logger.info(f"Time to first chunk: {first_chunk_ms:.2f}ms")
+                    yield LogMetric(name="llm_first_chunk_ms", value=first_chunk_ms)
+                    first_chunk_logged = True
 
-                    if chunk.text:
-                        output = AgentSendText(text=chunk.text)
-                        self.history._append_local(output)
+                if chunk.text:
+                    output = AgentSendText(text=chunk.text)
+                    self.history._append_local(output)
 
-                        # Track time to first text
-                        if not first_text_logged:
-                            first_text_ms = (time.perf_counter() - response_start_time) * 1000
-                            logger.info(f"Time to first text: {first_text_ms:.2f}ms")
-                            yield LogMetric(name="llm_first_text_ms", value=first_text_ms)
-                            first_text_logged = True
+                    # Track time to first text
+                    if not first_text_logged:
+                        first_text_ms = (time.perf_counter() - response_start_time) * 1000
+                        logger.info(f"Time to first text: {first_text_ms:.2f}ms")
+                        yield LogMetric(name="llm_first_text_ms", value=first_text_ms)
+                        first_text_logged = True
 
-                        yield output
+                    yield output
 
-                    if chunk.tool_calls:
-                        # Tool call streaming differs by provider:
-                        # - OpenAI: sends args incrementally ("{\"ci", "ty\":", "\"Tokyo\"}")
-                        # - Anthropic: incremental chunks like OpenAI
-                        # - Gemini: sends complete args each chunk ("{\"city\":\"Tokyo\"}")
-                        # Provider handles accumulation; we just replace with latest version.
-                        for tc in chunk.tool_calls:
-                            tool_calls_dict[tc.id] = tc
+                if chunk.tool_calls:
+                    # Tool call streaming differs by provider:
+                    # - OpenAI: sends args incrementally ("{\"ci", "ty\":", "\"Tokyo\"}")
+                    # - Anthropic: incremental chunks like OpenAI
+                    # - Gemini: sends complete args each chunk ("{\"city\":\"Tokyo\"}")
+                    # Provider handles accumulation; we just replace with latest version.
+                    for tc in chunk.tool_calls:
+                        tool_calls_dict[tc.id] = tc
             # ==== END GENERATION CALL ==== #
 
             # ==== TOOL CALLS ==== #

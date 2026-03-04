@@ -69,11 +69,6 @@ class MockStream:
             else:
                 yield chunk
 
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, *args):
-        pass
 
 
 class MockLLM:
@@ -97,6 +92,9 @@ class MockLLM:
             return MockStream(response)
         else:
             return MockStream([StreamChunk(is_final=True)])
+
+    async def warmup(self, config=None):
+        pass
 
     async def aclose(self):
         pass
