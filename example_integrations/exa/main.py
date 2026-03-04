@@ -58,6 +58,7 @@ async def web_search(
 
     try:
         client = Exa(api_key=api_key)
+        client.headers["x-exa-integration"] = "cartesia"
         results = await asyncio.to_thread(
             client.search_and_contents,
             query,
