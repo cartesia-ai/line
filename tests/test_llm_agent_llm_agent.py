@@ -70,7 +70,6 @@ class MockStream:
                 yield chunk
 
 
-
 class MockLLM:
     """Mock LLM that returns predefined responses."""
 
