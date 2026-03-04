@@ -164,12 +164,11 @@ async def stream_turn(
     ttft = None
     text_parts: list[str] = []
 
-    async with provider.chat(messages, config=config) as stream:
-        async for chunk in stream:
-            if chunk.text:
-                if ttft is None:
-                    ttft = (time.perf_counter() - t0) * 1000
-                text_parts.append(chunk.text)
+    async for chunk in provider.chat(messages, config=config):
+        if chunk.text:
+            if ttft is None:
+                ttft = (time.perf_counter() - t0) * 1000
+            text_parts.append(chunk.text)
 
     total = (time.perf_counter() - t0) * 1000
     return TurnResult(

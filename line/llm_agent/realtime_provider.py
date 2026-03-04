@@ -399,11 +399,8 @@ def _track_output_item(state: _ConversationState, item: Dict[str, Any]) -> None:
 def _message_to_item(msg: Message) -> Dict[str, Any]:
     """Convert a Message to a Realtime API conversation item dict.
 
-    Note: for assistant messages with multiple tool calls, only the first
-    tool call is converted.  The Realtime API represents each tool call as a
-    separate conversation item, but the diff algorithm tracks identity at the
-    message level.  Handling multi-tool-call expansion here would require
-    reworking the diff model.
+    Assistant tool-call messages must contain exactly one tool call; callers
+    are responsible for expanding multi-tool-call turns into separate messages.
     """
     if msg.role == "user":
         return {
@@ -414,13 +411,8 @@ def _message_to_item(msg: Message) -> Dict[str, Any]:
 
     if msg.role == "assistant":
         if msg.tool_calls:
-            if len(msg.tool_calls) > 1:
-                logger.warning(
-                    "Realtime API: assistant message has %d tool calls but only "
-                    "the first is converted (dropping %s)",
-                    len(msg.tool_calls),
-                    [tc.name for tc in msg.tool_calls[1:]],
-                )
+            if len(msg.tool_calls) != 1:
+                raise ValueError("Assistant tool-call message must contain exactly one tool call")
             tc = msg.tool_calls[0]
             return {
                 "type": "function_call",
@@ -464,7 +456,19 @@ def _diff_messages(
         if msg.role == "system":
             system_parts.append(msg.content or "")
         else:
-            non_system.append(msg)
+            if msg.role == "assistant" and msg.tool_calls and len(msg.tool_calls) > 1:
+                for tc in msg.tool_calls:
+                    non_system.append(
+                        Message(
+                            role="assistant",
+                            content=msg.content,
+                            tool_calls=[tc],
+                            tool_call_id=msg.tool_call_id,
+                            name=msg.name,
+                        )
+                    )
+            else:
+                non_system.append(msg)
 
     desired_instructions = "\n\n".join(system_parts) if system_parts else None
 

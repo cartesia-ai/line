@@ -447,19 +447,26 @@ def _common_prefix_len(a: List[tuple], b: List[tuple]) -> int:
 def _extract_model_output_identity(response: Dict[str, Any]) -> Optional[tuple]:
     """Derive a single message-level identity from a Responses API output.
 
-    Mirrors ``_message_identity``: if the model produced tool calls we key
-    on the first one; otherwise we key on the full text.
+    Mirrors ``_message_identity``: single-tool-call outputs use a compact key,
+    while multi-tool-call outputs include every call in order.
     """
     output_items = response.get("output", [])
     function_calls = [i for i in output_items if i.get("type") == "function_call"]
 
     if function_calls:
-        fc = function_calls[0]
+        if len(function_calls) == 1:
+            fc = function_calls[0]
+            return (
+                "assistant_tool_call",
+                fc.get("name", ""),
+                fc.get("arguments", ""),
+                fc.get("call_id", ""),
+            )
         return (
-            "assistant_tool_call",
-            fc.get("name", ""),
-            fc.get("arguments", ""),
-            fc.get("call_id", ""),
+            "assistant_tool_calls",
+            tuple(
+                (fc.get("name", ""), fc.get("arguments", ""), fc.get("call_id", "")) for fc in function_calls
+            ),
         )
 
     # Concatenate text across all message output items.

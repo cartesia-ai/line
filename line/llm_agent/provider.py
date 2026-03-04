@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from typing import Any, List, Optional, Protocol, Tuple, runtime_checkable
 
 from line.llm_agent.config import LlmConfig, _normalize_config
-from line.llm_agent.tools.utils import _normalize_tools
+from line.llm_agent.tools.utils import FunctionTool, _normalize_tools
 
 
 @dataclass
@@ -105,9 +105,8 @@ class LlmProvider:
     ):
         self._model = model
         normalized_config = _normalize_config(config or LlmConfig())
-        normalized_tools, _ = _normalize_tools(tools, model=model) if tools else (None, None)
         self._config = normalized_config
-        self._tools = normalized_tools or []
+        self._tools = _resolve_tools(tools, model=model)
 
         use_realtime = backend == "realtime" or (backend is None and _is_realtime_model(model))
         use_websocket = backend == "websocket" or (backend is None and _is_websocket_model(model))
@@ -140,7 +139,7 @@ class LlmProvider:
 
     def chat(self, messages, tools=None, config=None, **kwargs):
         cfg = _normalize_config(config) if config else self._config
-        effective_tools = _normalize_tools(tools, model=self._model)[0] if tools else self._tools
+        effective_tools = _resolve_tools(tools, model=self._model) if tools else self._tools
         return self._backend.chat(messages, effective_tools, config=cfg, **kwargs)
 
     async def warmup(self, config=None):
@@ -199,18 +198,29 @@ def _is_websocket_model(model: str) -> bool:
     return lower.startswith("gpt-5.2") or lower.startswith("gpt5.2")
 
 
+def _resolve_tools(tools: Optional[List[Any]], model: str) -> List[FunctionTool]:
+    """Resolve tools to FunctionTools, avoiding no-op re-normalization."""
+    if not tools:
+        return []
+    if all(isinstance(tool, FunctionTool) for tool in tools):
+        return list(tools)
+    return _normalize_tools(tools, model=model)[0]
+
+
 def _message_identity(msg: Message) -> tuple:
     """Compute an identity fingerprint for a single Message.
 
     Used by both WebSocket providers for divergence detection / diff-sync.
 
-    For assistant messages with tool calls, identity is derived from the
-    *first* tool call (mirrors how the server tracks multi-tool-call turns
-    as a single logical unit).
+    For assistant messages with tool calls, identity includes all tool calls
+    so divergence checks detect changes to any call in the turn.
     """
     if msg.tool_calls:
-        tc = msg.tool_calls[0]
-        return ("assistant_tool_call", tc.name, tc.arguments, tc.id)
+        if len(msg.tool_calls) == 1:
+            tc = msg.tool_calls[0]
+            return ("assistant_tool_call", tc.name, tc.arguments, tc.id)
+        tool_calls_key = tuple((tc.name, tc.arguments, tc.id) for tc in msg.tool_calls)
+        return ("assistant_tool_calls", tool_calls_key)
     return (msg.role, msg.content or "", msg.tool_call_id or "", msg.name or "")
 
 
