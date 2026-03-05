@@ -172,10 +172,19 @@ class EndCallTool:
         LlmAgent(tools=[end_call(description="End when the customer confirms their order.")])
     """
 
-    DEFAULT_DESCRIPTION = (
-        "ONLY end the call if the user explicitly says goodbye or indicates they are done. "
-        "Say a natural goodbye before calling this tool."
-    )
+    DEFAULT_DESCRIPTION = """Ends the conversation and hangs up.
+
+Use when:
+- User says goodbye or signals they're finished
+- ONLY after you have naturally said goodbye to the user
+
+Don't use when:
+- User requests to hold or pause
+- User wants to transfer to someone else
+- User's intent isn't clear
+
+Note: This action is irreversible. Once invoked, the call terminates and no further communication
+is possible."""
 
     def __init__(
         self,

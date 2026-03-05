@@ -19,7 +19,7 @@ from loguru import logger
 
 from line.agent import AgentClass, TurnEnv
 from line.events import AgentSendText, CallEnded, InputEvent, OutputEvent, UserTextSent
-from line.llm_agent import LlmAgent, LlmConfig, ToolEnv, end_call, loopback_tool, web_search
+from line.llm_agent import LlmAgent, LlmConfig, ToolEnv, loopback_tool, web_search
 from line.voice_agent_app import AgentEnv, CallRequest, VoiceAgentApp
 
 MODEL = "anthropic/claude-haiku-4-5-20251001"
@@ -159,7 +159,6 @@ class SalesWithLeadsAgent(AgentClass):
             tools=[
                 self.extract_leads,
                 self.research_company,
-                end_call,
             ],
             config=LlmConfig(
                 system_prompt=SALES_SYSTEM_PROMPT,
@@ -404,9 +403,6 @@ The conversation has the following parts parts:
 1. [Introduction] Introduce yourself and ask how you can help them
 2. [Discovery] Talking about Cartesia's voice agents
 3. [Collecting contact information]
-4. [Saying goodbye]
-
-If the user indicates they want to end the call, you may exit the conversation early.
 
 ## Conversation structure
 You should weave these questions naturally into the conversation and you can modify them into your own words. See the section on ### Your tone for specifics. You should assume that the user has no experience with voice agents. You should try to cite relevant case studies, partners of cartesia, or customers of cartesia examples when appropriate.
@@ -439,9 +435,6 @@ You should make sure you ask:
 5. What is your name? (if not asked already)
 6. What company are you? (if not asked already)
 8. What is your phone number?
-
-[Saying goodbye]
-When you have answered all of their questions, have collected their contact info (name, company, and phone number), and have confirmed they are ready to wrap up, you should ask for permission to end the call. If the user agrees, you should say something and then use the end_call tool. It is important that you do not decide to end_call prematurely, as it will be a bad experience for the user.
 
 If you're still missing information to collect (especially phone), gently and politely ask: "Before
 we wrap up, what's the best reach out with more information about how Cartesia can help your team?".
@@ -483,16 +476,6 @@ Remember, you're on the phone and representing Cartesia's exceptional quality:
 - **extract_leads**: Call this after each user response. It extracts and accumulates lead info (name, company, phone, email, interest level, pain points, budget, next steps, notes). Returns current state and what's missing.
 
 - **research_company**: Call this when you learn a company name. It searches for company info, news, and opportunities to help personalize the conversation.
-
-- **end_call**: Use this to end the call. See the CRITICAL section below for when to use this.
-
-## CRITICAL: End Call Tool Usage
-
-NEVER use the end_call tool unless ALL of these conditions are met:
-1. You have fully answered their questions about Cartesia's voice agents
-2. You have collected complete contact information (name, company, phone number)
-3. The user has explicitly indicated they want to end the conversation
-4. You have confirmed they are ready to wrap up
 """
 
 LEADS_EXTRACTION_PROMPT = """You are an expert data extraction specialist. Analyze conversations and extract lead information.

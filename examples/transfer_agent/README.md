@@ -26,7 +26,6 @@ The example creates two agents:
 spanish_agent = LlmAgent(
     model="anthropic/claude-haiku-4-5-20251001",
     api_key=os.getenv("ANTHROPIC_API_KEY"),
-    tools=[end_call],
     config=LlmConfig(
         system_prompt="Eres un asistente amable y servicial...",
         introduction="¡Hola! Soy tu asistente de IA...",
@@ -37,7 +36,6 @@ return LlmAgent(
     model="anthropic/claude-haiku-4-5-20251001",
     api_key=os.getenv("ANTHROPIC_API_KEY"),
     tools=[
-        end_call,
         agent_as_handoff(
             spanish_agent,
             handoff_message="Transferring you to our Spanish-speaking agent now...",

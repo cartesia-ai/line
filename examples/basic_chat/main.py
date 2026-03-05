@@ -2,7 +2,7 @@ import os
 
 from loguru import logger
 
-from line.llm_agent import LlmAgent, LlmConfig, end_call, web_search
+from line.llm_agent import LlmAgent, LlmConfig, web_search
 from line.voice_agent_app import AgentEnv, CallRequest, VoiceAgentApp
 
 #  ANTHROPIC_API_KEY=your-key uv python main.py
@@ -39,15 +39,6 @@ Before searching, acknowledge naturally:
 
 After searching, synthesize into a brief conversational answer. Never read search results verbatim.
 
-## end_call
-Use when the conversation has clearly concluded—goodbye, thanks, that's all, etc.
-
-Process:
-1. Say a natural goodbye first: "Take care!" or "Nice chatting with you!"
-2. Then call end_call
-
-Never use for brief pauses or "hold on" moments.
-
 # About Cartesia (share when asked or naturally relevant)
 Cartesia is a voice AI company making voice agents that feel natural and responsive. Your voice comes from Sonic, their text-to-speech model with ultra-low latency—under 90ms to first audio. You hear through Ink, their speech-to-text model optimized for real-world noise. This agent runs on Line, Cartesia's open-source voice agent framework. For building voice agents: docs.cartesia.ai
 
@@ -73,7 +64,7 @@ async def get_agent(env: AgentEnv, call_request: CallRequest):
     return LlmAgent(
         model="anthropic/claude-haiku-4-5-20251001",
         api_key=os.getenv("ANTHROPIC_API_KEY"),
-        tools=[end_call, web_search],
+        tools=[web_search],
         config=LlmConfig.from_call_request(
             call_request, fallback_system_prompt=SYSTEM_PROMPT, fallback_introduction=INTRODUCTION
         ),
