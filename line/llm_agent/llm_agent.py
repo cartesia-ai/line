@@ -464,6 +464,7 @@ class LlmAgent:
                     self.history._append_local(tool_called_output)
                     yield tool_called_output
 
+                    tool_returned = False
                     try:
                         async for evt in normalized_func(ctx, **tool_args):
                             self.history._append_local(evt)
@@ -476,6 +477,7 @@ class LlmAgent:
                             result="success",
                         )
                         self.history._append_local(tool_returned_output)
+                        tool_returned = True
                         yield tool_returned_output
                     except Exception as e:
                         # Use negative limit to show last 10 frames (most relevant)
@@ -488,7 +490,19 @@ class LlmAgent:
                             result=f"error: {e}",
                         )
                         self.history._append_local(tool_returned_output)
+                        tool_returned = True
                         yield tool_returned_output
+                    finally:
+                        if not tool_returned:
+                            # CancelledError (BaseException) - ensure history stays consistent
+                            self.history._append_local(
+                                AgentToolReturned(
+                                    tool_call_id=tc.id,
+                                    tool_name=tc.name,
+                                    tool_args=tool_args,
+                                    result="cancelled",
+                                )
+                            )
 
                 elif tool.tool_type == ToolType.HANDOFF:
                     # Emit AgentToolCalled before executing
@@ -507,6 +521,7 @@ class LlmAgent:
                         **{k: v for k, v in handed_off_event.model_dump().items() if k != "history"},
                     )
                     self.history._append_local(event)
+                    tool_returned = False
                     try:
                         async for item in normalized_func(ctx, **tool_args, event=event):
                             self.history._append_local(item)
@@ -519,6 +534,7 @@ class LlmAgent:
                             result="success",
                         )
                         self.history._append_local(tool_returned_output)
+                        tool_returned = True
                         yield tool_returned_output
 
                         # Format the handoff target to be called on all future events
@@ -544,7 +560,19 @@ class LlmAgent:
                             result=f"error: {e}",
                         )
                         self.history._append_local(tool_returned_output)
+                        tool_returned = True
                         yield tool_returned_output
+                    finally:
+                        if not tool_returned:
+                            # CancelledError (BaseException) - ensure history stays consistent
+                            self.history._append_local(
+                                AgentToolReturned(
+                                    tool_call_id=tc.id,
+                                    tool_name=tc.name,
+                                    tool_args=tool_args,
+                                    result="cancelled",
+                                )
+                            )
 
             # ==== END TOOL CALLS ==== #
 
