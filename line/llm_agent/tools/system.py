@@ -185,8 +185,7 @@ Don't use when:
 - User's intent isn't clear
 
 Note: This action is irreversible. Once invoked, the call terminates and no further communication 
-is possible.
-"""
+is possible."""
 
     def __init__(
         self,
