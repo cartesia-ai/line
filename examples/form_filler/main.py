@@ -104,7 +104,31 @@ async def get_agent(env: AgentEnv, call_request: CallRequest):
     agent = LlmAgent(
         model="gemini/gemini-2.5-flash",
         api_key=os.getenv("GEMINI_API_KEY"),
-        tools=[*intake_tools, *scheduler_tools, end_call],
+        tools=[
+            *intake_tools,
+            *scheduler_tools,
+            end_call(
+                description="""Ends the current call and disconnects.
+
+  Call when ALL of the following are true:
+  - The intake form has been fully completed and submitted.
+  - The appointment has been successfully booked.
+  - The user explicitly says goodbye or indicates they are done.
+  - You have said a natural goodbye to the user.
+
+  Do not call when:
+  - The intake form is incomplete.
+  - The appointment has not been booked yet.
+  - The user gives a short affirmative like 'yes', 'okay', or 'sounds good' without an explicit
+  goodbye.
+  - The user asks to hold, pause, or reschedule.
+
+  If the form or booking is incomplete, guide the user to finish before ending.
+
+  This is the final action—no further interaction is possible after calling.
+  """
+            ),
+        ],
         config=LlmConfig(
             system_prompt=system_prompt,
             introduction=introduction,
