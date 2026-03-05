@@ -6,7 +6,7 @@ Run with: ANTHROPIC_API_KEY=your-key uv run python main.py
 
 import os
 
-from line.llm_agent import LlmAgent, LlmConfig, end_call, send_dtmf, transfer_call
+from line.llm_agent import LlmAgent, LlmConfig, send_dtmf, transfer_call
 from line.voice_agent_app import AgentEnv, CallRequest, VoiceAgentApp
 
 SYSTEM_PROMPT = """You are a helpful phone assistant that can navigate automated phone systems \
@@ -41,7 +41,7 @@ async def get_agent(env: AgentEnv, call_request: CallRequest):
     return LlmAgent(
         model="anthropic/claude-haiku-4-5-20251001",
         api_key=os.getenv("ANTHROPIC_API_KEY"),
-        tools=[send_dtmf, transfer_call, end_call],
+        tools=[send_dtmf, transfer_call],
         config=LlmConfig(
             system_prompt=SYSTEM_PROMPT,
             introduction=INTRODUCTION,

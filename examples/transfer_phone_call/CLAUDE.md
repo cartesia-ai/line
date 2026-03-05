@@ -14,7 +14,7 @@ from line.llm_agent import LlmAgent, LlmConfig, end_call, send_dtmf, transfer_ca
 agent = LlmAgent(
     model="anthropic/claude-haiku-4-5-20251001",
     api_key=os.getenv("ANTHROPIC_API_KEY"),
-    tools=[send_dtmf, transfer_call, end_call],
+    tools=[send_dtmf, transfer_call],
     config=LlmConfig(
         system_prompt=SYSTEM_PROMPT,
         introduction=INTRODUCTION,

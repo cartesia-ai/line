@@ -172,10 +172,23 @@ class EndCallTool:
         LlmAgent(tools=[end_call(description="End when the customer confirms their order.")])
     """
 
-    DEFAULT_DESCRIPTION = (
-        "ONLY end the call if the user explicitly says goodbye or indicates they are done. "
-        "Say a natural goodbye before calling this tool."
-    )
+    DEFAULT_DESCRIPTION = """Ends the current call and disconnects.
+
+    Call when ALL of the following are true:
+    - The user's objective is fully complete—not just acknowledged.
+    - The user explicitly says goodbye or indicates they are done (e.g., 'that's all, thanks').
+    - You have said a natural goodbye to the user.
+
+    Do not call when:
+    - The user gives a short affirmative like 'yes', 'okay', 'sure', or 'sounds good' without an explicit goodbye.
+    - The user's objective is only partially complete.
+    - The user asks to hold, pause, or transfer.
+    - Intent is unclear.
+
+    If unsure whether the objective is complete, ask: 'Is there anything else I can help you with?'
+
+    This is the final action—no further interaction is possible after calling.
+    """
 
     def __init__(
         self,

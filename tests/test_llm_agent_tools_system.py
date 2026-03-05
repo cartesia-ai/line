@@ -176,7 +176,8 @@ async def test_send_dtmf_hash(mock_ctx, anyio_backend):
 async def test_end_call_default_description(mock_ctx, anyio_backend):
     """Test that default end_call has a conservative default description."""
     assert end_call.description == EndCallTool.DEFAULT_DESCRIPTION
-    assert "ONLY end" in end_call.description
+    assert "Call when ALL of the following are true:" in end_call.description
+    assert "Do not call when:" in end_call.description
 
 
 async def test_end_call_yields_agent_end_call(mock_ctx, anyio_backend):

@@ -47,7 +47,7 @@ class ChatSupervisorAgent(AgentClass):
         self._chatter = LlmAgent(
             model="anthropic/claude-haiku-4-5",
             api_key=self._api_key,
-            tools=[self.ask_supervisor, end_call],
+            tools=[self.ask_supervisor],
             config=LlmConfig(
                 system_prompt=CHAT_SYSTEM_PROMPT,
                 introduction=CHAT_INTRODUCTION,
