@@ -176,8 +176,7 @@ class EndCallTool:
 
 Use when:
 - User says goodbye or signals they're finished
-- Conversation objectives have been completed
-- Agent has said a natural goodbye to the user
+- ONLY after you have naturally said goodbye to the user
 
 Don't use when:
 - User requests to hold or pause
