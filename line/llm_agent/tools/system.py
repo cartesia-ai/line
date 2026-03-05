@@ -180,7 +180,7 @@ class EndCallTool:
     - You have said a natural goodbye to the user.
 
     Do not call when:
-    - The user gives a short affirmative like 'yes', 'okay', 'sure', or 'sounds good' without an explicit goodbye.
+    - The user gives a short affirmative like 'yes', 'okay', or 'sounds good' without an explicit goodbye.
     - The user's objective is only partially complete.
     - The user asks to hold, pause, or transfer.
     - Intent is unclear.
