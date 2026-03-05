@@ -181,10 +181,10 @@ Use when:
 
 Don't use when:
 - User requests to hold or pause
-- User wants to transfer to someone else  
+- User wants to transfer to someone else
 - User's intent isn't clear
 
-Note: This action is irreversible. Once invoked, the call terminates and no further communication 
+Note: This action is irreversible. Once invoked, the call terminates and no further communication
 is possible."""
 
     def __init__(
