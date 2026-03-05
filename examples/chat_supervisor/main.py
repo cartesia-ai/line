@@ -9,7 +9,7 @@ from line.events import (
     OutputEvent,
     UserTextSent,
 )
-from line.llm_agent import LlmAgent, LlmConfig, ToolEnv, end_call, loopback_tool
+from line.llm_agent import LlmAgent, LlmConfig, ToolEnv, loopback_tool
 from line.voice_agent_app import AgentEnv, CallRequest, VoiceAgentApp
 
 
@@ -38,7 +38,6 @@ class ChatSupervisorAgent(AgentClass):
             api_key=self._api_key,
             tools=[
                 self.ask_supervisor,
-                end_call,
             ],
             config=LlmConfig(
                 system_prompt=CHAT_SYSTEM_PROMPT,
@@ -136,15 +135,6 @@ When you call it:
 If it's taking time: "Still working on this..." or "Almost there..."
 When you get the response: Synthesize it into natural, conversational language.
 Break complex explanations into digestible pieces.
-
-## end_call
-Use when the caller says goodbye, thanks, or is clearly done.
-
-Process:
-1. Say goodbye naturally: "Take care!" or "Nice talking with you!"
-2. Then call end_call
-
-Never use for brief pauses or "hold on" moments.
 
 # Response style
 

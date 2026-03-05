@@ -21,7 +21,7 @@ ANTHROPIC_API_KEY=your-key uv run python main.py
 │  │  - name         │      │  Tools:                              │          │
 │  │  - company      │      │  ├── extract_leads ──────────────────┼─────┐    │
 │  │  - phone        │      │  ├── research_company ───────────────┼────┐│    │
-│  │  - email        │      │  └── end_call                        │    ││    │
+│  │  - email        │      │                                      │    ││    │
 │  │  - interest     │      └──────────────────────────────────────┘    ││    │
 │  │  - pain_points  │                                                  ││    │
 │  │  - budget       │◀─────────────────────────────────────────────────┘│    │
@@ -83,7 +83,7 @@ class SalesWithLeadsAgent(AgentClass):
         # Main chat agent
         self._chatter = LlmAgent(
             model="anthropic/claude-haiku-4-5-20251001",
-            tools=[self.extract_leads, self.research_company, end_call],
+            tools=[self.extract_leads, self.research_company],
             config=LlmConfig(system_prompt=SALES_SYSTEM_PROMPT),
         )
 
