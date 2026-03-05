@@ -168,7 +168,12 @@ def function_tool_to_litellm(tool: FunctionTool, *, strict: bool = True) -> Dict
     """
     params_schema = build_parameters_schema(tool.parameters)
 
-    if strict:
+    # Disable strict mode if any parameters are optional, since OpenAI strict
+    # mode requires every property to be listed in 'required'.
+    has_optional = any(not p.required for p in tool.parameters.values())
+    use_strict = strict and not has_optional
+
+    if use_strict:
         params_schema["additionalProperties"] = False
 
     result: Dict[str, Any] = {
@@ -179,7 +184,7 @@ def function_tool_to_litellm(tool: FunctionTool, *, strict: bool = True) -> Dict
             "parameters": params_schema,
         },
     }
-    if strict:
+    if use_strict:
         result["function"]["strict"] = True
     return result
 

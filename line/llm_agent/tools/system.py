@@ -334,7 +334,6 @@ class _McpServer:
                         await session.initialize()
                         yield session
             else:
-                # dunno if we need to support this?
                 command = self.server_config.get("command")
                 if not command:
                     raise ValueError(f"mcp_tool(name='{self.name}'): provide server_url or command.")

@@ -423,8 +423,8 @@ async def test_mcp_tool_execution(model: str, api_key: str):
 # =============================================================================
 
 MODELS = [
-    ("OPENAI_API_KEY", "gpt-4o-mini"),
-    ("ANTHROPIC_API_KEY", "anthropic/claude-sonnet-4-20250514"),
+    ("OPENAI_API_KEY", "openai/gpt-5.2"),
+    ("ANTHROPIC_API_KEY", "anthropic/claude-haiku-4-5"),
     ("GEMINI_API_KEY", "gemini/gemini-2.5-flash"),
     ("GEMINI_API_KEY", "gemini/gemini-3-flash-preview"),
 ]
@@ -462,7 +462,7 @@ def parse_args():
         "--model",
         type=str,
         default=None,
-        help="Only test specific model (e.g., 'gpt-4o-mini')",
+        help="Only test specific model (e.g., 'openai/gpt-5-2')",
     )
     return parser.parse_args()
 
