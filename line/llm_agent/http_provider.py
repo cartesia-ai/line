@@ -152,7 +152,7 @@ class _HttpProvider:
             result.append(llm_msg)
         return result
 
-    async def warmup(self, config: LlmConfig, tools=None, websearch_options=None) -> None:
+    async def warmup(self, config: LlmConfig, tools=None, web_search_options=None) -> None:
         """No-op for stateless HTTP provider."""
         pass
 

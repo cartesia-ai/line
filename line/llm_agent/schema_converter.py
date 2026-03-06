@@ -20,7 +20,7 @@ Example:
 """
 
 from enum import Enum
-from typing import Any, Dict, List, Literal, Type, Union, get_args, get_origin
+from typing import Any, Dict, List, Literal, Optional, Type, Union, get_args, get_origin
 
 from line.llm_agent.tools.utils import FunctionTool, ParameterInfo
 
@@ -135,6 +135,28 @@ def build_parameters_schema(parameters: Dict[str, ParameterInfo]) -> Dict[str, A
     return schema
 
 
+def _build_function_tool_payload(tool: FunctionTool, *, strict: bool = True) -> Dict[str, Any]:
+    """Build the shared OpenAI-style function payload for a FunctionTool."""
+    params_schema = build_parameters_schema(tool.parameters)
+
+    # Disable strict mode if any parameters are optional, since OpenAI strict
+    # mode requires every property to be listed in 'required'.
+    has_optional = any(not p.required for p in tool.parameters.values())
+    use_strict = strict and not has_optional
+
+    if use_strict:
+        params_schema["additionalProperties"] = False
+
+    payload: Dict[str, Any] = {
+        "name": tool.name,
+        "description": tool.description,
+        "parameters": params_schema,
+    }
+    if use_strict:
+        payload["strict"] = True
+    return payload
+
+
 def function_tool_to_litellm(tool: FunctionTool, *, strict: bool = True) -> Dict[str, Any]:
     """
     Convert a FunctionTool to LiteLLM (OpenAI Chat Completions) tool format.
@@ -166,27 +188,29 @@ def function_tool_to_litellm(tool: FunctionTool, *, strict: bool = True) -> Dict
         # }
         ```
     """
-    params_schema = build_parameters_schema(tool.parameters)
-
-    # Disable strict mode if any parameters are optional, since OpenAI strict
-    # mode requires every property to be listed in 'required'.
-    has_optional = any(not p.required for p in tool.parameters.values())
-    use_strict = strict and not has_optional
-
-    if use_strict:
-        params_schema["additionalProperties"] = False
-
-    result: Dict[str, Any] = {
+    return {
         "type": "function",
-        "function": {
-            "name": tool.name,
-            "description": tool.description,
-            "parameters": params_schema,
-        },
+        "function": _build_function_tool_payload(tool, strict=strict),
     }
-    if use_strict:
-        result["function"]["strict"] = True
-    return result
+
+
+def function_tool_to_openai(
+    tool: FunctionTool,
+    *,
+    strict: bool = True,
+    responses_api: bool = False,
+) -> Dict[str, Any]:
+    """Convert a FunctionTool to OpenAI/Realtimes API tool format."""
+    payload = _build_function_tool_payload(tool, strict=strict)
+    if responses_api:
+        return {
+            "type": "function",
+            **payload,
+        }
+    return {
+        "type": "function",
+        "function": payload,
+    }
 
 
 def tools_to_litellm(tools: List[FunctionTool], *, strict: bool = True) -> List[Dict[str, Any]]:
@@ -201,3 +225,31 @@ def tools_to_litellm(tools: List[FunctionTool], *, strict: bool = True) -> List[
         List of tool definitions.
     """
     return [function_tool_to_litellm(t, strict=strict) for t in tools]
+
+
+def function_tools_to_openai(
+    tools: List[FunctionTool],
+    *,
+    strict: bool = True,
+    responses_api: bool = False,
+) -> List[Dict[str, Any]]:
+    """Convert a list of FunctionTools to OpenAI/Realtimes API tool format."""
+    return [function_tool_to_openai(t, strict=strict, responses_api=responses_api) for t in tools]
+
+
+def build_openai_tool_defs(
+    tools: Optional[List[FunctionTool]] = None,
+    *,
+    web_search_options: Optional[Dict[str, Any]] = None,
+    strict: bool = True,
+    responses_api: bool = False,
+) -> Optional[List[Dict[str, Any]]]:
+    """Build OpenAI/Realtimes tool definitions including native web search.
+
+    WebSocket-mode backends do not use LiteLLM's ``web_search_options`` knob, so
+    native web search must be expressed as an OpenAI tool definition instead.
+    """
+    tool_defs = function_tools_to_openai(tools, strict=strict, responses_api=responses_api) if tools else []
+    if web_search_options is not None:
+        tool_defs.append({"type": "web_search", "name": "web_search", **web_search_options})
+    return tool_defs or None

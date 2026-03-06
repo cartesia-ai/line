@@ -149,6 +149,7 @@ class LlmProvider:
         self._tools = list(tools or [])
         normalized_config = _normalize_config(config or LlmConfig())
         self._config = normalized_config
+        self._http_fallback_backend: Optional[ProviderProtocol] = None
 
         use_realtime = _is_realtime_model(model)
         use_websocket = _is_websocket_model(model)
@@ -162,11 +163,18 @@ class LlmProvider:
                 api_key=api_key,
             )
         elif use_websocket:
+            from line.llm_agent.http_provider import _HttpProvider
             from line.llm_agent.websocket_provider import _WebSocketProvider
 
             self._backend = _WebSocketProvider(
                 model=model,
                 api_key=api_key,
+                default_reasoning_effort=default_reasoning_effort,
+            )
+            self._http_fallback_backend = _HttpProvider(
+                model=model,
+                api_key=api_key,
+                supports_reasoning_effort=supports_reasoning_effort,
                 default_reasoning_effort=default_reasoning_effort,
             )
         else:
@@ -190,11 +198,12 @@ class LlmProvider:
         effective_tools, web_search_options = _normalize_tools(
             _merge_tools(self._tools, tools), model=self._model
         )
+        backend = self._select_backend(effective_config)
 
         if web_search_options is not None:
             kwargs = {**kwargs, "web_search_options": web_search_options}
 
-        return self._backend.chat(messages, effective_tools, config=effective_config, **kwargs)
+        return backend.chat(messages, effective_tools, config=effective_config, **kwargs)
 
     def _set_tools(self, tools: Optional[List[Any]]) -> None:
         """Replace the provider's default tool specs."""
@@ -209,7 +218,8 @@ class LlmProvider:
         effective_tools, web_search_options = _normalize_tools(
             _merge_tools(self._tools, tools), model=self._model
         )
-        await self._backend.warmup(
+        backend = self._select_backend(effective_config)
+        await backend.warmup(
             config=effective_config,
             tools=effective_tools,
             web_search_options=web_search_options,
@@ -217,6 +227,31 @@ class LlmProvider:
 
     async def aclose(self) -> None:
         await self._backend.aclose()
+        if self._http_fallback_backend is not None:
+            await self._http_fallback_backend.aclose()
+
+    def _select_backend(self, config: LlmConfig) -> ProviderProtocol:
+        """Use HTTP for websocket-incompatible config fields.
+
+        WebSocket mode is lower latency, but it cannot preserve every field on
+        ``LlmConfig``. Fall back to the HTTP backend when callers rely on
+        request options that only the LiteLLM/HTTP path currently supports.
+        """
+        if self._http_fallback_backend is None:
+            return self._backend
+
+        if (
+            config.stop is not None
+            or config.seed is not None
+            or config.presence_penalty is not None
+            or config.frequency_penalty is not None
+            or config.fallbacks
+            or config.timeout is not None
+            or config.extra
+        ):
+            return self._http_fallback_backend
+
+        return self._backend
 
 
 def _detect_reasoning_effort(model: str) -> Tuple[bool, Optional[str]]:
