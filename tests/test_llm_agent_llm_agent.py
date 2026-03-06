@@ -69,12 +69,6 @@ class MockStream:
             else:
                 yield chunk
 
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, *args):
-        pass
-
 
 class MockLLM:
     """Mock LLM that returns predefined responses."""
@@ -84,6 +78,7 @@ class MockLLM:
         self._call_count = 0
         self._recorded_messages: List[List[Message]] = []
         self._recorded_tools: List[Optional[List[FunctionTool]]] = []
+        self._warmup_calls = []
 
     def chat(
         self, messages: List[Message], tools: Optional[List[FunctionTool]] = None, **kwargs
@@ -97,6 +92,12 @@ class MockLLM:
             return MockStream(response)
         else:
             return MockStream([StreamChunk(is_final=True)])
+
+    async def warmup(self, config=None, tools=None):
+        self._warmup_calls.append({"config": config, "tools": tools})
+
+    def _set_tools(self, tools):
+        self._tools = tools
 
     async def aclose(self):
         pass
@@ -181,6 +182,52 @@ async def build_messages_with(agent, input_history, local_history, current_event
 def turn_env():
     """Create a basic TurnEnv."""
     return TurnEnv()
+
+
+# =============================================================================
+# Tests: Constructor Validation
+# =============================================================================
+
+
+async def test_init_rejects_unsupported_model(monkeypatch, anyio_backend):
+    """Test that invalid models are rejected at construction time."""
+    monkeypatch.setattr("line.llm_agent.llm_agent._supported_openai_params", lambda model: None)
+
+    with pytest.raises(ValueError, match="is not supported"):
+        LlmAgent(model="definitely-not-a-real-model", api_key="test-key")
+
+
+async def test_init_rejects_unsupported_reasoning_effort(monkeypatch, anyio_backend):
+    """Test that reasoning_effort is rejected for models that do not support it."""
+    monkeypatch.setattr("line.llm_agent.llm_agent._supported_openai_params", lambda model: [])
+
+    with pytest.raises(ValueError, match="does not support reasoning_effort"):
+        LlmAgent(
+            model="gpt-4o",
+            api_key="test-key",
+            config=LlmConfig(reasoning_effort="high"),
+        )
+
+
+async def test_call_started_warmup_uses_effective_tools(turn_env):
+    responses = []
+    agent, mock_llm = create_agent_with_mock(responses)
+
+    @loopback_tool
+    async def extra_tool(ctx, query: Annotated[str, "Search query"]) -> str:
+        return query
+
+    outputs = await collect_outputs(
+        agent,
+        turn_env,
+        CallStarted(history=[]),
+        include_metrics=True,
+        tools=[extra_tool],
+    )
+
+    assert outputs[-1].name == "agent_turn_ms"
+    assert len(mock_llm._warmup_calls) == 1
+    assert [tool.name for tool in mock_llm._warmup_calls[0]["tools"]] == ["extra_tool"]
 
 
 # =============================================================================
@@ -1454,6 +1501,27 @@ async def test_process_replaces_tools_with_same_name(turn_env):
     # Should use the override version, not the original
     assert tool_result.result == "Override: 85°F in NYC"
     assert "Original" not in tool_result.result
+
+
+async def test_set_tools_forwards_to_provider(turn_env):
+    """Test that set_tools() updates both the agent and the underlying provider."""
+
+    @loopback_tool
+    async def original_tool(ctx) -> str:
+        """Original tool."""
+        return "original"
+
+    @loopback_tool
+    async def replacement_tool(ctx) -> str:
+        """Replacement tool."""
+        return "replacement"
+
+    agent, mock_llm = create_agent_with_mock([], tools=[original_tool])
+
+    agent.set_tools([replacement_tool])
+
+    assert agent._tools == [replacement_tool]
+    assert mock_llm._tools == [replacement_tool]
 
 
 async def test_process_replaces_config(turn_env):
