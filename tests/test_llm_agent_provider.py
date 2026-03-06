@@ -1,6 +1,224 @@
-"""Tests for line.llm_agent.provider — specifically _feed_tool_args."""
+"""Tests for provider internals and facade behavior."""
 
-from line.llm_agent.provider import _feed_tool_args
+import asyncio
+from typing import Annotated, Any, AsyncIterable, List, Optional, get_type_hints
+
+from line.llm_agent.config import LlmConfig, _normalize_config
+from line.llm_agent.http_provider import _HttpProvider, _feed_tool_args
+from line.llm_agent.provider import LlmProvider, Message, StreamChunk
+from line.llm_agent.tools.system import web_search
+
+
+class _DummyBackend:
+    def __init__(self):
+        self.calls = []
+        self.warmup_calls = []
+
+    def chat(self, messages, tools=None, *, config, **kwargs):
+        self.calls.append(
+            {
+                "messages": messages,
+                "tools": tools,
+                "config": config,
+                "kwargs": kwargs,
+            }
+        )
+        return "ok"
+
+    async def warmup(self, config, tools=None, **kwargs):
+        self.warmup_calls.append(
+            {
+                "config": config,
+                "tools": tools,
+                "kwargs": kwargs,
+            }
+        )
+
+    async def aclose(self):
+        pass
+
+
+def test_llm_provider_preserves_native_web_search_defaults(monkeypatch):
+    import litellm
+
+    monkeypatch.setattr(litellm, "supports_web_search", lambda model: True)
+
+    provider = LlmProvider(
+        model="gpt-4o",
+        api_key="test-key",
+        tools=[web_search(search_context_size="high")],
+    )
+    backend = _DummyBackend()
+    provider._backend = backend
+
+    result = provider.chat([Message(role="user", content="hi")])
+
+    assert result == "ok"
+    assert len(backend.calls) == 1
+    assert backend.calls[0]["tools"] == []
+    assert backend.calls[0]["kwargs"]["web_search_options"] == {"search_context_size": "high"}
+
+
+def test_llm_provider_web_search_override_replaces_default(monkeypatch):
+    import litellm
+
+    monkeypatch.setattr(litellm, "supports_web_search", lambda model: False)
+
+    async def web_search_override(ctx, query: Annotated[str, "Search query"]) -> str:
+        return f"override: {query}"
+
+    web_search_override.__name__ = "web_search"
+
+    provider = LlmProvider(
+        model="gpt-4o",
+        api_key="test-key",
+        tools=[web_search(search_context_size="high")],
+    )
+    backend = _DummyBackend()
+    provider._backend = backend
+
+    result = provider.chat(
+        [Message(role="user", content="hi")],
+        tools=[web_search_override],
+    )
+
+    assert result == "ok"
+    assert len(backend.calls) == 1
+    assert [tool.name for tool in backend.calls[0]["tools"]] == ["web_search"]
+    assert backend.calls[0]["tools"][0].description == ""
+    assert "web_search_options" not in backend.calls[0]["kwargs"]
+
+
+def test_llm_provider__set_tools_replaces_default_tools(monkeypatch):
+    import litellm
+
+    monkeypatch.setattr(litellm, "supports_web_search", lambda model: False)
+
+    async def original_tool(ctx, query: Annotated[str, "Search query"]) -> str:
+        return f"original: {query}"
+
+    async def replacement_tool(ctx, query: Annotated[str, "Search query"]) -> str:
+        return f"replacement: {query}"
+
+    provider = LlmProvider(
+        model="gpt-4o",
+        api_key="test-key",
+        tools=[original_tool],
+    )
+    backend = _DummyBackend()
+    provider._backend = backend
+
+    provider._set_tools([replacement_tool])
+    result = provider.chat([Message(role="user", content="hi")])
+
+    assert result == "ok"
+    assert len(backend.calls) == 1
+    assert [tool.name for tool in backend.calls[0]["tools"]] == ["replacement_tool"]
+
+
+def test_llm_provider_warmup_normalizes_current_default_tools(monkeypatch):
+    import litellm
+
+    monkeypatch.setattr(litellm, "supports_web_search", lambda model: False)
+
+    async def original_tool(ctx, query: Annotated[str, "Search query"]) -> str:
+        return f"original: {query}"
+
+    async def replacement_tool(ctx, query: Annotated[str, "Search query"]) -> str:
+        return f"replacement: {query}"
+
+    provider = LlmProvider(
+        model="gpt-4o",
+        api_key="test-key",
+        tools=[original_tool],
+    )
+    backend = _DummyBackend()
+    provider._backend = backend
+
+    provider._set_tools([replacement_tool])
+    asyncio.run(provider.warmup())
+
+    assert len(backend.warmup_calls) == 1
+    assert [tool.name for tool in backend.warmup_calls[0]["tools"]] == ["replacement_tool"]
+
+
+def test_llm_provider_warmup_preserves_native_web_search_defaults(monkeypatch):
+    import litellm
+
+    monkeypatch.setattr(litellm, "supports_web_search", lambda model: True)
+
+    provider = LlmProvider(
+        model="gpt-4o",
+        api_key="test-key",
+        tools=[web_search(search_context_size="high")],
+    )
+    backend = _DummyBackend()
+    provider._backend = backend
+
+    asyncio.run(provider.warmup())
+
+    assert len(backend.warmup_calls) == 1
+    assert backend.warmup_calls[0]["tools"] == []
+    assert backend.warmup_calls[0]["kwargs"]["web_search_options"] == {"search_context_size": "high"}
+
+
+def test_llm_provider_requires_api_key():
+    try:
+        LlmProvider(model="gpt-4o", api_key="")
+    except ValueError as exc:
+        assert "Missing API key" in str(exc)
+    else:
+        raise AssertionError("Expected LlmProvider to reject missing api_key")
+
+
+def test_llm_provider_public_methods_have_type_hints():
+    chat_hints = get_type_hints(LlmProvider.chat)
+    assert chat_hints["messages"] == List[Message]
+    assert chat_hints["tools"] == Optional[List[Any]]
+    assert chat_hints["config"] == Optional[LlmConfig]
+    assert chat_hints["kwargs"] is Any
+    assert chat_hints["return"] == AsyncIterable[StreamChunk]
+
+    warmup_hints = get_type_hints(LlmProvider.warmup)
+    assert warmup_hints["config"] == Optional[LlmConfig]
+    assert warmup_hints["tools"] == Optional[List[Any]]
+    assert warmup_hints["return"] is type(None)
+
+    aclose_hints = get_type_hints(LlmProvider.aclose)
+    assert aclose_hints["return"] is type(None)
+
+
+def test_http_chat_stream_awaits_response_aclose(monkeypatch):
+    closed = False
+
+    class _FakeResponse:
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            raise StopAsyncIteration
+
+        async def aclose(self):
+            nonlocal closed
+            closed = True
+
+    async def _fake_acompletion(**kwargs):
+        return _FakeResponse()
+
+    monkeypatch.setattr("line.llm_agent.http_provider.acompletion", _fake_acompletion)
+
+    provider = _HttpProvider(model="gpt-4o")
+
+    async def _consume():
+        async for _ in provider.chat(
+            [Message(role="user", content="hi")], config=_normalize_config(LlmConfig())
+        ):
+            pass
+
+    asyncio.run(_consume())
+
+    assert closed
+
 
 # ---------------------------------------------------------------------------
 # OpenAI / Anthropic: incremental fragments → concatenate
