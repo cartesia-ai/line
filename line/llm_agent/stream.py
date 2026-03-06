@@ -3,19 +3,140 @@ Shared stream utilities for WebSocket-based providers.
 
 Contains ``_WsEventStream`` — the unified event→chunk translator used by both
 ``RealtimeProvider`` and ``WebSocketProvider`` — along with
-``_ManagedStream`` (the lifecycle wrapper returned by ``chat()``) and the
+``_iterate_ws_query`` (shared per-request lifecycle management) and the
 ``WS_DRAIN_TIMEOUT`` constant.
 """
 
 import asyncio
 import json
-from typing import Any, AsyncIterator, Callable, Dict
+from typing import Any, AsyncIterator, Awaitable, Callable, Dict, List, Optional, Tuple
 
 from loguru import logger
 import websockets
 from websockets.protocol import State as WsState
 
-from line.llm_agent.provider import StreamChunk, ToolCall
+from line.llm_agent.provider import Message, StreamChunk, ToolCall
+
+ExpandedItem = Tuple[Dict[str, Any], tuple]
+ConversationEntry = Tuple[tuple, Optional[str]]  # (identity, opaque_id | None)
+
+
+def _context_identity(
+    instructions: Optional[str],
+    tool_defs: Optional[List[Dict[str, Any]]],
+    *,
+    temperature: Optional[float] = None,
+    max_tokens: Optional[int] = None,
+) -> tuple:
+    """Identity fingerprint for shared WebSocket context/session configuration."""
+    tools_key = tuple(json.dumps(t, sort_keys=True) for t in (tool_defs or []))
+    return ("__context__", instructions or "", tools_key, temperature, max_tokens)
+
+
+def _message_identity(msg: Message) -> tuple:
+    """Compute an identity fingerprint for a single Message.
+
+    Used by both WebSocket providers for divergence detection / diff-sync.
+
+    For assistant messages with tool calls, all calls are included so that
+    parallel tool-call turns are fully distinguished.
+    """
+    if msg.tool_calls:
+        tc_keys = tuple((tc.name, tc.arguments, tc.id) for tc in msg.tool_calls)
+        return ("assistant_tool_call", tc_keys)
+    return (msg.role, msg.content or "", msg.tool_call_id or "", msg.name or "")
+
+
+def _expand_message(
+    msg: Message,
+    *,
+    assistant_text_type: str,
+) -> List[ExpandedItem]:
+    """Expand one Message into provider item payloads plus identities.
+
+    The WebSocket Responses and Realtime providers share the same logical
+    message expansion; only the assistant text part type differs
+    (``output_text`` vs ``text``).
+    """
+    if msg.role == "user":
+        item = {
+            "type": "message",
+            "role": "user",
+            "content": [{"type": "input_text", "text": msg.content or ""}],
+        }
+        return [(item, _message_identity(msg))]
+
+    if msg.role == "assistant":
+        pairs: List[ExpandedItem] = []
+        if msg.content:
+            item = {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": assistant_text_type, "text": msg.content}],
+            }
+            pairs.append((item, ("assistant", msg.content, "", "")))
+        if msg.tool_calls:
+            for tc in msg.tool_calls:
+                item = {
+                    "type": "function_call",
+                    "call_id": tc.id,
+                    "name": tc.name,
+                    "arguments": tc.arguments,
+                }
+                identity = ("assistant_tool_call", ((tc.name, tc.arguments, tc.id),))
+                pairs.append((item, identity))
+        if pairs:
+            return pairs
+
+        item = {
+            "type": "message",
+            "role": "assistant",
+            "content": [{"type": assistant_text_type, "text": msg.content or ""}],
+        }
+        return [(item, _message_identity(msg))]
+
+    if msg.role == "tool":
+        item = {
+            "type": "function_call_output",
+            "call_id": msg.tool_call_id or "",
+            "output": msg.content or "",
+        }
+        return [(item, _message_identity(msg))]
+
+    raise ValueError(f"Unsupported message role for WebSocket item conversion: {msg.role}")
+
+
+def _expand_messages(
+    messages: List[Message],
+    *,
+    assistant_text_type: str,
+) -> List[ExpandedItem]:
+    """Expand a message list into provider item payloads plus identities."""
+    pairs: List[ExpandedItem] = []
+    for msg in messages:
+        pairs.extend(_expand_message(msg, assistant_text_type=assistant_text_type))
+    return pairs
+
+
+def _compute_divergence(
+    current_identities: List[tuple],
+    desired_pairs: List[ExpandedItem],
+) -> Tuple[int, List[ExpandedItem]]:
+    """Compute divergence between current identities and desired expanded items.
+
+    Returns ``(prefix_len, after_divergence)`` where ``prefix_len`` is the
+    length of the shared item-identity prefix between the current state and the
+    desired expanded item stream.
+    """
+    desired_identities = [identity for _, identity in desired_pairs]
+    prefix_len = 0
+    for i in range(min(len(current_identities), len(desired_identities))):
+        if current_identities[i] == desired_identities[i]:
+            prefix_len = i + 1
+        else:
+            break
+    return prefix_len, desired_pairs[prefix_len:]
+
 
 # Timeout for draining events after cancelling a response (seconds).
 WS_DRAIN_TIMEOUT = 5
@@ -173,37 +294,23 @@ class _WsEventStream:
             raise RuntimeError(f"WebSocket connection closed during streaming: {e}") from e
 
 
-class _ManagedStream:
-    """Lifecycle wrapper for WebSocket-based provider streams.
+async def _iterate_ws_query(setup: Awaitable[tuple[Any, Any, asyncio.Lock]]) -> AsyncIterator[StreamChunk]:
+    """Run one WebSocket query/response stream with shared cleanup.
 
-    Returned by ``WebSocketProvider.chat()`` and ``RealtimeProvider.chat()``.
-    All setup, iteration, and cleanup happen inside ``__aiter__`` — no
-    ``async with`` is needed.  Breaking out of ``async for`` triggers
-    ``GeneratorExit`` which runs the ``finally`` block (cancel, drain,
-    release lock).
+    ``setup`` must yield ``(_WsEventStream, ws, lock)``. The lock is always
+    released, and unfinished responses are cancelled and drained so the next
+    request on the socket starts from a clean state.
     """
-
-    def __init__(self, setup: Any):
-        # setup is a coroutine that returns (_WsEventStream, ws, asyncio.Lock)
-        self._setup = setup
-
-    async def __aenter__(self) -> "_ManagedStream":
-        return self
-
-    async def __aexit__(self, *args) -> None:
-        pass
-
-    async def __aiter__(self):
-        stream, ws, lock = await self._setup
+    stream, ws, lock = await setup
+    try:
+        async for chunk in stream:
+            yield chunk
+    finally:
         try:
-            async for chunk in stream:
-                yield chunk
+            if not stream.done:
+                await _cancel_and_drain(stream, ws)
         finally:
-            try:
-                if not stream.done:
-                    await _cancel_and_drain(stream, ws)
-            finally:
-                lock.release()
+            lock.release()
 
 
 async def _cancel_and_drain(stream: Any, ws: Any) -> None:

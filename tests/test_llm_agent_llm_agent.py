@@ -28,6 +28,7 @@ from line.llm_agent.config import LlmConfig
 from line.llm_agent.llm_agent import LlmAgent
 from line.llm_agent.provider import Message, StreamChunk, ToolCall
 from line.llm_agent.tools.decorators import handoff_tool, loopback_tool, passthrough_tool
+from line.llm_agent.tools.system import web_search
 from line.llm_agent.tools.utils import FunctionTool
 
 # Use anyio for async test support with asyncio backend only (trio not installed)
@@ -197,6 +198,17 @@ async def test_init_rejects_unsupported_model(monkeypatch, anyio_backend):
         LlmAgent(model="definitely-not-a-real-model", api_key="test-key")
 
 
+async def test_init_accepts_direct_openai_websocket_model(monkeypatch, anyio_backend):
+    """Direct OpenAI WebSocket models stay accepted even if LiteLLM doesn't know them yet."""
+    monkeypatch.setattr(
+        "line.llm_agent.llm_agent._supported_openai_params",
+        lambda model: ["reasoning_effort"] if model == "gpt-5-mini" else None,
+    )
+
+    agent = LlmAgent(model="gpt-5-mini", api_key="test-key")
+    assert agent._model == "gpt-5-mini"
+
+
 async def test_init_rejects_unsupported_reasoning_effort(monkeypatch, anyio_backend):
     """Test that reasoning_effort is rejected for models that do not support it."""
     monkeypatch.setattr("line.llm_agent.llm_agent._supported_openai_params", lambda model: [])
@@ -228,6 +240,45 @@ async def test_call_started_warmup_uses_effective_tools(turn_env):
     assert outputs[-1].name == "agent_turn_ms"
     assert len(mock_llm._warmup_calls) == 1
     assert [tool.name for tool in mock_llm._warmup_calls[0]["tools"]] == ["extra_tool"]
+
+
+async def test_call_started_warmup_preserves_default_native_web_search(monkeypatch, turn_env):
+    import litellm
+
+    monkeypatch.setattr(litellm, "supports_web_search", lambda model: True)
+
+    agent = LlmAgent(
+        model="gpt-5-mini",
+        api_key="test-key",
+        tools=[web_search(search_context_size="high")],
+    )
+
+    class _DummyBackend:
+        def __init__(self):
+            self.warmup_calls = []
+
+        def chat(self, *args, **kwargs):
+            raise AssertionError("chat should not be called during CallStarted warmup")
+
+        async def warmup(self, config, tools=None, **kwargs):
+            self.warmup_calls.append({"config": config, "tools": tools, "kwargs": kwargs})
+
+        async def aclose(self):
+            pass
+
+    backend = _DummyBackend()
+    agent._llm._backend = backend
+
+    await collect_outputs(
+        agent,
+        turn_env,
+        CallStarted(history=[]),
+        include_metrics=True,
+    )
+
+    assert len(backend.warmup_calls) == 1
+    assert backend.warmup_calls[0]["tools"] == []
+    assert backend.warmup_calls[0]["kwargs"]["web_search_options"] == {"search_context_size": "high"}
 
 
 # =============================================================================
