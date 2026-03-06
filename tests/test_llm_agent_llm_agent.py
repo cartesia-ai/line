@@ -971,17 +971,15 @@ async def test_loopback_tool_returns_bare_value(turn_env):
 
 async def test_plain_function_wrapped_as_loopback_tool():
     """Test that plain functions are wrapped as loopback tools when resolved."""
-    from line.llm_agent.tools.utils import ToolType
+    from line.llm_agent.tools.utils import ToolType, _normalize_tools
 
     # Plain function without any decorator
     async def my_tool(ctx, query: Annotated[str, "Search query"]) -> str:
         """Search for something."""
         return f"Results for: {query}"
 
-    agent = LlmAgent(model="gpt-4o", api_key="test-key")
-
     # Resolve tools - this is where wrapping happens
-    resolved_tools, _ = agent._resolve_tools([my_tool])
+    resolved_tools, _ = _normalize_tools([my_tool], model="gpt-4o")
 
     # Verify the tool was wrapped
     assert len(resolved_tools) == 1
@@ -1063,7 +1061,7 @@ async def test_plain_function_works_as_loopback_tool(turn_env):
 
 async def test_mixed_decorated_and_plain_functions(turn_env):
     """Test that decorated and plain functions can be mixed and both resolve to loopback tools."""
-    from line.llm_agent.tools.utils import ToolType
+    from line.llm_agent.tools.utils import ToolType, _normalize_tools
 
     @loopback_tool
     async def decorated_tool(ctx) -> str:
@@ -1074,10 +1072,8 @@ async def test_mixed_decorated_and_plain_functions(turn_env):
         """A plain tool."""
         return "plain"
 
-    agent = LlmAgent(model="gpt-4o", api_key="test-key")
-
     # Resolve tools - plain functions get wrapped here
-    resolved_tools, _ = agent._resolve_tools([decorated_tool, plain_tool])
+    resolved_tools, _ = _normalize_tools([decorated_tool, plain_tool], model="gpt-4o")
 
     assert len(resolved_tools) == 2
 

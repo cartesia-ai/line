@@ -43,9 +43,14 @@ from line.events import (
 from line.llm_agent.config import LlmConfig, _merge_configs, _normalize_config
 from line.llm_agent.history import _HISTORY_EVENT_TYPES, History
 from line.llm_agent.provider import LLMProvider, Message, ToolCall
-from line.llm_agent.tools.decorators import loopback_tool
 from line.llm_agent.tools.system import EndCallTool, WebSearchTool
-from line.llm_agent.tools.utils import FunctionTool, ToolEnv, ToolType, construct_function_tool
+from line.llm_agent.tools.utils import (
+    FunctionTool,
+    ToolEnv,
+    ToolType,
+    _merge_tools,
+    _normalize_tools,
+)
 
 T = TypeVar("T")
 
@@ -114,7 +119,7 @@ class LlmAgent:
         # Maps tool_call_id -> thought_signature
         self._tool_signatures: Dict[str, str] = {}
 
-        resolved_tools, web_search_options = self._resolve_tools(self._tools)
+        resolved_tools, web_search_options = _normalize_tools(self._tools, model=self._model)
         tool_names = [t.name for t in resolved_tools] + (["web_search"] if web_search_options else [])
         logger.info(f"LlmAgent initialized with model={self._model}, tools={tool_names}")
 
@@ -168,7 +173,7 @@ class LlmAgent:
 
         # Compute effective config and tools for this #process invocation
         effective_config = _merge_configs(self._config, config) if config else self._config
-        effective_tools = self._merge_tools(self._tools, tools) if tools else self._tools
+        effective_tools = _merge_tools(self._tools, tools) if tools else self._tools
 
         # If handoff is active, call the handed-off process function
         if self._handoff_target is not None:
@@ -202,83 +207,6 @@ class LlmAgent:
 
         yield LogMetric(name="agent_turn_ms", value=(time.perf_counter() - turn_start_time) * 1000)
 
-    def _get_tool_name(self, tool: ToolSpec) -> str:
-        """Extract the name from a ToolSpec.
-
-        Args:
-            tool: A ToolSpec (FunctionTool, WebSearchTool, EndCallTool, McpTool, or Callable)
-
-        Returns:
-            The name of the tool
-        """
-        if isinstance(tool, WebSearchTool):
-            return "web_search"
-        elif isinstance(tool, EndCallTool):
-            return tool.name
-        elif isinstance(tool, FunctionTool):
-            return tool.name
-        else:  # Plain callable
-            return tool.__name__
-
-    def _merge_tools(
-        self, base_tools: List[ToolSpec], override_tools: Optional[List[ToolSpec]]
-    ) -> List[ToolSpec]:
-        """Merge two tool lists, with override_tools replacing base_tools by name.
-
-        Args:
-            base_tools: The base list of tools (typically self._tools)
-            override_tools: Tools to merge in, replacing any with matching names
-
-        Returns:
-            A merged list where tools from override_tools replace those in base_tools
-            that have the same name, and all other base_tools are preserved.
-        """
-        if not override_tools:
-            return base_tools
-
-        # Build a set of names from override_tools
-        override_names = {self._get_tool_name(tool) for tool in override_tools}
-
-        # Filter base_tools to exclude any with names in override_names
-        filtered_base = [tool for tool in base_tools if self._get_tool_name(tool) not in override_names]
-
-        # Return filtered base + override tools
-        return filtered_base + override_tools
-
-    def _resolve_tools(
-        self, tool_specs: List[ToolSpec]
-    ) -> tuple[List[FunctionTool], Optional[Dict[str, Any]]]:
-        """Resolve ToolSpecs into FunctionTools and web_search_options.
-
-        Separates WebSearchTool from other tools, converts plain callables to
-        FunctionTools via loopback_tool, and decides whether to use native web
-        search or a fallback tool based on model support.
-
-        Returns:
-            (function_tools, web_search_options)
-        """
-        function_tools: List[FunctionTool] = []
-        web_search_tool: Optional[WebSearchTool] = None
-
-        for tool in tool_specs:
-            if isinstance(tool, WebSearchTool):
-                web_search_tool = tool
-            elif isinstance(tool, EndCallTool):
-                function_tools.append(tool.as_function_tool())
-            elif isinstance(tool, FunctionTool):
-                function_tools.append(tool)
-            else:
-                function_tools.append(loopback_tool(tool))
-
-        web_search_options: Optional[Dict[str, Any]] = None
-        if web_search_tool is not None:
-            if _check_web_search_support(self._model) and not function_tools:
-                web_search_options = web_search_tool.get_web_search_options()
-            else:
-                function_tools.append(_web_search_tool_to_function_tool(web_search_tool))
-
-        return function_tools, web_search_options
-
     async def _generate_response(
         self,
         env: TurnEnv,
@@ -299,7 +227,7 @@ class LlmAgent:
             context: Extra context to append to history for the current #process invocation only.
             history: Override history for the current #process invocation only.
         """
-        tools, web_search_options = self._resolve_tools(tool_specs)
+        tools, web_search_options = _normalize_tools(tool_specs, model=self._model)
         tool_map: Dict[str, FunctionTool] = {t.name: t for t in tools}
 
         is_first_iteration = True
@@ -819,36 +747,6 @@ class LlmAgent:
                         f"(e.g. UserTextSent, AgentTextSent, AgentToolCalled, CustomHistoryEntry), "
                         f"got {type(item).__name__}"
                     )
-
-
-def _check_web_search_support(model: str) -> bool:
-    """Check if a model supports native web search via litellm.
-
-    Returns True if the model supports web_search_options, False otherwise.
-    """
-    try:
-        import litellm
-
-        return litellm.supports_web_search(model=model)
-    except (ImportError, AttributeError, Exception):
-        # If litellm doesn't have supports_web_search or any error occurs,
-        # fall back to the tool-based approach
-        return False
-
-
-def _web_search_tool_to_function_tool(web_search_tool: WebSearchTool) -> FunctionTool:
-    """Convert a WebSearchTool to a FunctionTool for use as a fallback.
-
-    When the LLM doesn't support native web search, we use the WebSearchTool's
-    search method as a regular loopback tool.
-    """
-    return construct_function_tool(
-        func=web_search_tool.search,
-        name="web_search",
-        description="Search the web for real-time information."
-        + " Use this when you need current information that may not be in your training data.",
-        tool_type=ToolType.LOOPBACK,
-    )
 
 
 async def _normalize_result(

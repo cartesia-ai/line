@@ -60,6 +60,7 @@ class WebSearchTool:
         LlmAgent(tools=[web_search(search_context_size="high")])
     """
 
+    name: str = "web_search"
     search_context_size: Literal["low", "medium", "high"] = "medium"
     extra: Dict[str, Any] = field(default_factory=dict)
 
@@ -82,6 +83,7 @@ class WebSearchTool:
             A new WebSearchTool instance with the specified configuration.
         """
         return WebSearchTool(
+            name=self.name,
             search_context_size=search_context_size,
             extra=extra,
         )
