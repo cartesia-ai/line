@@ -143,6 +143,23 @@ class ParameterInfo:
     enum: Optional[List[Any]] = None
 
 
+def _get_tool_name(tool: Any) -> str:
+    """Extract the name from a tool (FunctionTool, WebSearchTool, EndCallTool, or Callable)."""
+    if hasattr(tool, "name"):
+        return tool.name
+    if hasattr(tool, "__name__"):
+        return tool.__name__
+    # Fallback for class instances without a name attr (e.g. WebSearchTool)
+    return type(tool).__name__
+
+
+def _merge_tools(base_tools: Optional[List[Any]], override_tools: Optional[List[Any]]) -> List[Any]:
+    """Merge two tool lists, with override_tools replacing base_tools by name."""
+    override_names = {_get_tool_name(t) for t in (override_tools or [])}
+    filtered_base = [t for t in (base_tools or []) if _get_tool_name(t) not in override_names]
+    return filtered_base + (override_tools or [])
+
+
 # -------------------------
 # Parameter Extraction Helpers
 # -------------------------
@@ -273,6 +290,88 @@ def construct_function_tool(func, name, description, tool_type, is_background=Fa
     )
 
 
+def _normalize_tools(
+    tool_specs: List[Any],
+    model: str,
+) -> tuple[List[FunctionTool], Optional[Dict[str, Any]]]:
+    """Resolve tool specs into FunctionTools and optional web_search_options.
+
+    Converts any tool spec to a FunctionTool:
+    - FunctionTool → pass through
+    - EndCallTool → .as_function_tool()
+    - WebSearchTool → native web search (if model supports it and no other tools)
+                      or fallback DuckDuckGo FunctionTool
+    - Callable → loopback_tool(callable)
+
+    Uses lazy imports to avoid circular dependencies.
+
+    Args:
+        tool_specs: List of tools (FunctionTool, EndCallTool, WebSearchTool, or callable).
+        model: Model name, used for native web search support detection.
+
+    Returns:
+        (function_tools, web_search_options) — web_search_options is set only
+        when the model supports native web search and there are no other
+        function tools; otherwise WebSearchTool is converted to a fallback
+        FunctionTool in the first list.
+    """
+    from line.llm_agent.tools.decorators import loopback_tool
+    from line.llm_agent.tools.system import EndCallTool, WebSearchTool
+
+    function_tools: List[FunctionTool] = []
+    web_search_tool: Optional[Any] = None
+
+    for tool in tool_specs:
+        if isinstance(tool, FunctionTool):
+            function_tools.append(tool)
+        elif isinstance(tool, EndCallTool):
+            function_tools.append(tool.as_function_tool())
+        elif isinstance(tool, WebSearchTool):
+            web_search_tool = tool
+        elif callable(tool):
+            function_tools.append(loopback_tool(tool))
+        else:
+            raise TypeError(
+                f"Unsupported tool type: {type(tool).__name__}. "
+                f"Expected FunctionTool, EndCallTool, WebSearchTool, or callable."
+            )
+
+    web_search_options: Optional[Dict[str, Any]] = None
+    if web_search_tool is not None:
+        if _check_web_search_support(model) and not function_tools:
+            web_search_options = web_search_tool.get_web_search_options()
+        else:
+            function_tools.append(_web_search_tool_to_function_tool(web_search_tool))
+
+    return function_tools, web_search_options
+
+
+def _check_web_search_support(model: str) -> bool:
+    """Check if a model supports native web search via litellm.
+
+    Returns True if the model supports web_search_options, False otherwise.
+    """
+    try:
+        import litellm
+
+        return litellm.supports_web_search(model=model)
+    except (ImportError, AttributeError, Exception):
+        # If litellm doesn't have supports_web_search or any error occurs,
+        # fall back to the tool-based approach
+        return False
+
+
+def _web_search_tool_to_function_tool(web_search_tool: Any) -> FunctionTool:
+    """Convert a WebSearchTool to a FunctionTool for use as a fallback."""
+    return construct_function_tool(
+        func=web_search_tool.search,
+        name="web_search",
+        description="Search the web for real-time information."
+        + " Use this when you need current information that may not be in your training data.",
+        tool_type=ToolType.LOOPBACK,
+    )
+
+
 __all__ = [
     # Tool context
     "ToolEnv",
@@ -285,4 +384,6 @@ __all__ = [
     "ParameterInfo",
     # constructor
     "construct_function_tool",
+    # resolution
+    "_normalize_tools",
 ]
