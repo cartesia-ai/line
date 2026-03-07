@@ -17,6 +17,7 @@ from typing import (
     Dict,
     List,
     Optional,
+    Tuple,
     TypeVar,
     Union,
 )
@@ -113,13 +114,23 @@ class LlmAgent:
         self.history = History()
         self._handoff_target: Optional[AgentCallable] = None  # Normalized process function
         # Queue for events from backgrounded tools that need to trigger loopback
-        self._background_queue: BackgroundQueue[tuple[AgentToolCalled, AgentToolReturned]] = BackgroundQueue()
+        # Lazy-init: asyncio.Queue() requires a running event loop on Python 3.9.
+        self._background_event_queue: Optional[BackgroundQueue[tuple[AgentToolCalled, AgentToolReturned]]] = (
+            None
+        )
         # Cache for thought signatures (Gemini 3+ models)
         # Maps tool_call_id -> thought_signature
         self._tool_signatures: Dict[str, str] = {}
 
         tool_names = [t.name for t in effective_tools] + (["web_search"] if web_search_options else [])
         logger.info(f"LlmAgent initialized with model={self._model}, tools={tool_names}")
+
+    def _get_background_event_queue(
+        self,
+    ) -> "BackgroundQueue[tuple[AgentToolCalled, AgentToolReturned]]":
+        if self._background_event_queue is None:
+            self._background_event_queue = BackgroundQueue()
+        return self._background_event_queue
 
     def set_tools(self, tools: List[ToolSpec]) -> None:
         """Replace the agent's tools with a new list."""
@@ -252,13 +263,13 @@ class LlmAgent:
             # These events were produced since the last iteration (or from previous process() invocations)
             if is_first_iteration or should_loopback:
                 # Drain any immediately available events (non-blocking)
-                while (pair := self._background_queue.get_nowait()) is not None:
+                while (pair := self._get_background_event_queue().get_nowait()) is not None:
                     called_evt, returned_evt = pair
                     yield called_evt
                     yield returned_evt
             else:
                 # Otherwise wait for either: all sources complete OR new event arrives
-                result = await self._background_queue.get()
+                result = await self._get_background_event_queue().get()
                 if result is None:
                     # All background sources completed with no more events
                     # this generation process is completed - exit loop
@@ -511,7 +522,7 @@ class LlmAgent:
 
             # ==== END TOOL CALLS ==== #
 
-            if not (should_loopback or self._background_queue.is_active):
+            if not (should_loopback or self._get_background_event_queue().is_active):
                 break
 
     async def _build_messages(
@@ -635,7 +646,7 @@ class LlmAgent:
         when yielded after a new process() call has started.
         """
 
-        async def generate_events() -> AsyncIterable[tuple[AgentToolCalled, AgentToolReturned]]:
+        async def generate_events() -> AsyncIterable[Tuple[AgentToolCalled, AgentToolReturned]]:
             n = 0
             try:
                 async for value in normalized_func(ctx, **tool_args):
@@ -652,12 +663,12 @@ class LlmAgent:
                 self.history._append_local(returned)
                 yield (called, returned)
 
-        self._background_queue.subscribe(generate_events())
+        self._get_background_event_queue().subscribe(generate_events())
 
     async def cleanup(self) -> None:
         """Clean up resources."""
         self._handoff_target = None
-        await self._background_queue.wait()
+        await self._get_background_event_queue().wait()
         await self._llm.aclose()
 
     # ------------------------------------------------------------------

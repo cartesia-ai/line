@@ -38,6 +38,7 @@ from typing import (
     List,
     Optional,
     Protocol,
+    Tuple,
     Type,
     Union,
     get_args,
@@ -293,7 +294,7 @@ def construct_function_tool(func, name, description, tool_type, is_background=Fa
 def _normalize_tools(
     tool_specs: List[Any],
     model: str,
-) -> tuple[List[FunctionTool], Optional[Dict[str, Any]]]:
+) -> Tuple[List[FunctionTool], Optional[Dict[str, Any]]]:
     """Resolve tool specs into FunctionTools and optional web_search_options.
 
     Converts any tool spec to a FunctionTool:

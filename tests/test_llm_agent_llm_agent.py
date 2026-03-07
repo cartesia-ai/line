@@ -2248,7 +2248,7 @@ async def test_background_tool_event_not_lost_on_cancellation(turn_env):
     tool_can_complete.set()
 
     # Wait for the background tool to yield its success result
-    await asyncio.wait_for(agent._background_queue.wait(), timeout=5.0)
+    await asyncio.wait_for(agent._get_background_event_queue().wait(), timeout=5.0)
 
     # Second process() call - should pick up the success event
     second_event = UserTextSent(
