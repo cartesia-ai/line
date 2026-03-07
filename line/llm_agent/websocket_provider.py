@@ -86,7 +86,13 @@ class _WebSocketProvider:
         self._history: List[tuple] = []
 
         # Lock to serialise WS operations (connect, send request, stream iteration)
-        self._lock = asyncio.Lock()
+        # Lazy-init: asyncio.Lock() requires a running event loop on Python 3.9.
+        self._lock: Optional[asyncio.Lock] = None
+
+    def _get_lock(self) -> asyncio.Lock:
+        if self._lock is None:
+            self._lock = asyncio.Lock()
+        return self._lock
 
     # --- Connection management ---
 
@@ -200,7 +206,7 @@ class _WebSocketProvider:
         web_search_options: Optional[Dict[str, Any]] = None,
     ) -> tuple:
         """Async setup for a single chat stream attempt."""
-        await self._lock.acquire()
+        await self._get_lock().acquire()
         try:
             await self._ensure_connected()
 
@@ -257,7 +263,7 @@ class _WebSocketProvider:
             await self._ws.send(json.dumps(request))
 
         except BaseException:
-            self._lock.release()
+            self._get_lock().release()
             raise
 
         # Lock ownership transfers to the stream — released in __aexit__
@@ -268,7 +274,7 @@ class _WebSocketProvider:
                 self._finalize_response(response, continuation_idx, desired_ids)
 
         event_stream = _WsEventStream(self._ws, on_response_done)
-        return event_stream, self._ws, self._lock
+        return event_stream, self._ws, self._get_lock()
 
     async def warmup(
         self,
@@ -285,7 +291,7 @@ class _WebSocketProvider:
         context identity slot) so the first ``chat()`` call chains from it
         via normal prefix matching.
         """
-        async with self._lock:
+        async with self._get_lock():
             await self._ensure_connected()
             instructions = config.system_prompt or None
             tool_defs = build_openai_tool_defs(
@@ -331,7 +337,7 @@ class _WebSocketProvider:
         Acquires the lock so that an in-flight ``chat()`` stream finishes
         (or is drained) before the connection is torn down.
         """
-        async with self._lock:
+        async with self._get_lock():
             await self._close_ws()
 
 

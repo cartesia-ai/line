@@ -114,8 +114,9 @@ class LlmAgent:
         # Background task for backgrounded tools - None means no pending work
         self._background_task: Optional[asyncio.Task[None]] = None
         # Queue for events from backgrounded tools that need to trigger loopback
-        self._background_event_queue: asyncio.Queue[tuple[AgentToolCalled, AgentToolReturned]] = (
-            asyncio.Queue()
+        # Lazy-init: asyncio.Queue() requires a running event loop on Python 3.9.
+        self._background_event_queue: Optional[asyncio.Queue[tuple[AgentToolCalled, AgentToolReturned]]] = (
+            None
         )
         # Cache for thought signatures (Gemini 3+ models)
         # Maps tool_call_id -> thought_signature
@@ -123,6 +124,13 @@ class LlmAgent:
 
         tool_names = [t.name for t in effective_tools] + (["web_search"] if web_search_options else [])
         logger.info(f"LlmAgent initialized with model={self._model}, tools={tool_names}")
+
+    def _get_background_event_queue(
+        self,
+    ) -> "asyncio.Queue[tuple[AgentToolCalled, AgentToolReturned]]":
+        if self._background_event_queue is None:
+            self._background_event_queue = asyncio.Queue()
+        return self._background_event_queue
 
     def set_tools(self, tools: List[ToolSpec]) -> None:
         """Replace the agent's tools with a new list."""
@@ -255,8 +263,8 @@ class LlmAgent:
             # These events were produced since the last iteration (or from previous process() invocations)
             if is_first_iteration or should_loopback:
                 # Drain any immediately available events (non-blocking)
-                while not self._background_event_queue.empty():
-                    called_evt, returned_evt = self._background_event_queue.get_nowait()
+                while not self._get_background_event_queue().empty():
+                    called_evt, returned_evt = self._get_background_event_queue().get_nowait()
                     yield called_evt
                     yield returned_evt
             else:
@@ -486,7 +494,7 @@ class LlmAgent:
 
             # ==== END TOOL CALLS ==== #
 
-            has_background_events = not self._background_event_queue.empty()
+            has_background_events = not self._get_background_event_queue().empty()
             has_background_tasks = self._background_task is not None and not self._background_task.done()
             if not (should_loopback or has_background_events or has_background_tasks):
                 break
@@ -627,7 +635,7 @@ class LlmAgent:
                     self.history._append_local_with_event_id(called, triggering_event_id)
                     self.history._append_local_with_event_id(returned, triggering_event_id)
                     # Add to queue for loopback processing
-                    await self._background_event_queue.put((called, returned))
+                    await self._get_background_event_queue().put((called, returned))
                     n += 1
             except Exception as e:
                 # Use negative limit to show last 10 frames (most relevant)
@@ -666,7 +674,7 @@ class LlmAgent:
         if self._background_task is None:
             return None
 
-        get_event_task = asyncio.ensure_future(self._background_event_queue.get())
+        get_event_task = asyncio.ensure_future(self._get_background_event_queue().get())
         done, _ = await asyncio.wait(
             [get_event_task, self._background_task],
             return_when=asyncio.FIRST_COMPLETED,
