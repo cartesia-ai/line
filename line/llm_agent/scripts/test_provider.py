@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Test script for LLMProvider integration with real API keys.
+Test script for LlmProvider integration with real API keys.
 
 Usage:
     uv run python line/llm_agent/scripts/test_provider.py [OPTIONS]
@@ -62,7 +62,7 @@ from line.llm_agent import (
     mcp_tool,
     web_search,
 )
-from line.llm_agent.provider import LLMProvider, Message
+from line.llm_agent.provider import LlmProvider, Message
 
 # =============================================================================
 # Test Tools
@@ -108,16 +108,15 @@ async def test_api_key(model: str, api_key: str) -> bool:
     print(f"Testing API key for {model}")
     print("=" * 60)
 
-    provider = LLMProvider(model=model, api_key=api_key)
+    provider = LlmProvider(model=model, api_key=api_key)
 
     messages = [Message(role="user", content="Say 'ok'")]
 
     try:
-        async with provider.chat(messages) as stream:
-            async for chunk in stream:
-                if chunk.text:
-                    print(f"✓ API key valid - got response: {chunk.text.strip()}")
-                    return True
+        async for chunk in provider.chat(messages):
+            if chunk.text:
+                print(f"✓ API key valid - got response: {chunk.text.strip()}")
+                return True
         print("✓ API key valid")
         return True
     except Exception as e:
@@ -131,15 +130,14 @@ async def test_streaming_text(model: str, api_key: str):
     print(f"Testing streaming text with {model}")
     print("=" * 60)
 
-    provider = LLMProvider(model=model, api_key=api_key)
+    provider = LlmProvider(model=model, api_key=api_key)
 
     messages = [Message(role="user", content="Say 'Hello, World!' and nothing else.")]
 
     print("Response: ", end="", flush=True)
-    async with provider.chat(messages) as stream:
-        async for chunk in stream:
-            if chunk.text:
-                print(chunk.text, end="", flush=True)
+    async for chunk in provider.chat(messages):
+        if chunk.text:
+            print(chunk.text, end="", flush=True)
     print("\n✓ Streaming text test passed")
 
 
@@ -443,7 +441,7 @@ AVAILABLE_TESTS = [
 def parse_args():
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
-        description="Test LLMProvider integration with real API keys.",
+        description="Test LlmProvider integration with real API keys.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
@@ -574,6 +572,7 @@ if __name__ == "__main__":
         exit_code = 1
     finally:
         # Suppress SSL cleanup errors on exit
-        sys.stderr = open(os.devnull, "w")
+        devnull = open(os.devnull, "w")
+        sys.stderr = devnull
 
     sys.exit(exit_code)
