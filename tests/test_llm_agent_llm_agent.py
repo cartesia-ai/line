@@ -26,7 +26,7 @@ from line.events import (
 )
 from line.llm_agent.config import LlmConfig
 from line.llm_agent.llm_agent import LlmAgent
-from line.llm_agent.provider import Message, StreamChunk, ToolCall
+from line.llm_agent.provider import Message, StreamChunk, ToolCall, _ModelConfig
 from line.llm_agent.tools.decorators import handoff_tool, loopback_tool, passthrough_tool
 from line.llm_agent.tools.system import web_search
 from line.llm_agent.tools.utils import FunctionTool
@@ -190,9 +190,13 @@ def turn_env():
 # =============================================================================
 
 
+def _unsupported_model_config(model):
+    return None
+
+
 async def test_init_rejects_unsupported_model(monkeypatch, anyio_backend):
     """Test that invalid models are rejected at construction time."""
-    monkeypatch.setattr("line.llm_agent.llm_agent._supported_openai_params", lambda model: None)
+    monkeypatch.setattr("line.llm_agent.llm_agent._get_model_config", _unsupported_model_config)
 
     with pytest.raises(ValueError, match="is not supported"):
         LlmAgent(model="definitely-not-a-real-model", api_key="test-key")
@@ -200,10 +204,17 @@ async def test_init_rejects_unsupported_model(monkeypatch, anyio_backend):
 
 async def test_init_accepts_direct_openai_websocket_model(monkeypatch, anyio_backend):
     """Direct OpenAI WebSocket models stay accepted even if LiteLLM doesn't know them yet."""
-    monkeypatch.setattr(
-        "line.llm_agent.llm_agent._supported_openai_params",
-        lambda model: ["reasoning_effort"] if model == "gpt-5-mini" else None,
-    )
+
+    def _ws_or_unsupported(model):
+        if model == "gpt-5-mini":
+            return _ModelConfig(
+                backend="websocket",
+                supports_reasoning_effort=True,
+                default_reasoning_effort="low",
+            )
+        return _unsupported_model_config(model)
+
+    monkeypatch.setattr("line.llm_agent.llm_agent._get_model_config", _ws_or_unsupported)
 
     agent = LlmAgent(model="gpt-5-mini", api_key="test-key")
     assert agent._model == "gpt-5-mini"
@@ -211,7 +222,14 @@ async def test_init_accepts_direct_openai_websocket_model(monkeypatch, anyio_bac
 
 async def test_init_rejects_unsupported_reasoning_effort(monkeypatch, anyio_backend):
     """Test that reasoning_effort is rejected for models that do not support it."""
-    monkeypatch.setattr("line.llm_agent.llm_agent._supported_openai_params", lambda model: [])
+    monkeypatch.setattr(
+        "line.llm_agent.llm_agent._get_model_config",
+        lambda model: _ModelConfig(
+            backend="http",
+            supports_reasoning_effort=False,
+            default_reasoning_effort=None,
+        ),
+    )
 
     with pytest.raises(ValueError, match="does not support reasoning_effort"):
         LlmAgent(

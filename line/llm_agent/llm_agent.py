@@ -43,7 +43,7 @@ from line.events import (
 from line.llm_agent.background_queue import BackgroundQueue
 from line.llm_agent.config import LlmConfig, _merge_configs, _normalize_config
 from line.llm_agent.history import _HISTORY_EVENT_TYPES, History
-from line.llm_agent.provider import LlmProvider, Message, ToolCall, _supported_openai_params
+from line.llm_agent.provider import LlmProvider, Message, ToolCall, _get_model_config
 from line.llm_agent.tools.system import EndCallTool, WebSearchTool
 from line.llm_agent.tools.utils import (
     FunctionTool,
@@ -81,15 +81,15 @@ class LlmAgent:
         if not api_key:
             raise ValueError("Missing API key in LLmAgent initialization")
 
-        supported_params = _supported_openai_params(model)
-        if supported_params is None:
+        model_config = _get_model_config(model)
+        if model_config is None:
             raise ValueError(
                 f"Model {model} is not supported. See https://models.litellm.ai/ for supported models."
             )
 
         # Resolve the base config to insert default values for any _UNSET sentinels.
         effective_config = _normalize_config(config or LlmConfig())
-        if effective_config.reasoning_effort is not None and "reasoning_effort" not in supported_params:
+        if effective_config.reasoning_effort is not None and not model_config.supports_reasoning_effort:
             raise ValueError(
                 f"Model {model} does not support reasoning_effort. "
                 "Remove reasoning_effort from your LlmConfig or use a model that supports it."

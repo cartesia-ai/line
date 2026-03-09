@@ -1,4 +1,4 @@
-"""Tests for provider internals and facade behavior."""
+"""Tests for the LlmProvider facade and HTTP backend."""
 
 import asyncio
 from typing import Annotated, Any, AsyncIterable, List, Optional, get_type_hints
@@ -9,25 +9,13 @@ from line.llm_agent.provider import (
     LlmProvider,
     Message,
     StreamChunk,
-    ToolCall,
     _extract_instructions_and_messages,
+    _get_model_config,
     _is_realtime_model,
-    _is_supported_model,
     _is_websocket_model,
 )
-from line.llm_agent.realtime_provider import (
-    _diff_messages,
-    _SessionUpdateOp,
-    _track_output_item,
-)
 from line.llm_agent.schema_converter import build_openai_tool_defs
-from line.llm_agent.stream import _compute_divergence, _context_identity, _expand_messages
 from line.llm_agent.tools.system import web_search
-from line.llm_agent.websocket_provider import (
-    _build_request,
-    _extract_model_output_identities,
-    _WebSocketProvider,
-)
 
 
 class _DummyBackend:
@@ -57,6 +45,11 @@ class _DummyBackend:
 
     async def aclose(self):
         pass
+
+
+# ---------------------------------------------------------------------------
+# LlmProvider facade
+# ---------------------------------------------------------------------------
 
 
 def test_llm_provider_preserves_native_web_search_defaults(monkeypatch):
@@ -173,7 +166,7 @@ def test_llm_provider_warmup_preserves_native_web_search_defaults(monkeypatch):
     monkeypatch.setattr(litellm, "supports_web_search", lambda model: True)
 
     provider = LlmProvider(
-        model="gpt-5-mini",
+        model="gpt-5.2-mini",
         api_key="test-key",
         tools=[web_search(search_context_size="high")],
     )
@@ -189,7 +182,7 @@ def test_llm_provider_warmup_preserves_native_web_search_defaults(monkeypatch):
 
 def test_llm_provider_routes_websocket_models_with_unsupported_config_to_http_backend():
     provider = LlmProvider(
-        model="gpt-5-mini",
+        model="gpt-5.2-mini",
         api_key="test-key",
     )
     websocket_backend = _DummyBackend()
@@ -209,7 +202,7 @@ def test_llm_provider_routes_websocket_models_with_unsupported_config_to_http_ba
 
 def test_llm_provider_keeps_websocket_backend_for_supported_config():
     provider = LlmProvider(
-        model="gpt-5-mini",
+        model="gpt-5.2-mini",
         api_key="test-key",
     )
     websocket_backend = _DummyBackend()
@@ -229,7 +222,7 @@ def test_llm_provider_keeps_websocket_backend_for_supported_config():
 
 def test_llm_provider_warmup_routes_unsupported_websocket_config_to_http_backend():
     provider = LlmProvider(
-        model="gpt-5-mini",
+        model="gpt-5.2-mini",
         api_key="test-key",
     )
     websocket_backend = _DummyBackend()
@@ -243,52 +236,6 @@ def test_llm_provider_warmup_routes_unsupported_websocket_config_to_http_backend
     assert len(http_backend.warmup_calls) == 1
 
 
-def test_realtime_diff_updates_session_for_sampling_changes():
-    state = [(_context_identity("stay concise", None, temperature=0.2, max_tokens=100), None)]
-    messages = [Message(role="system", content="stay concise"), Message(role="user", content="hi")]
-
-    ops = _diff_messages(
-        state,
-        messages,
-        tools=None,
-        config=LlmConfig(temperature=0.9, max_tokens=200),
-    )
-
-    assert isinstance(ops[0], _SessionUpdateOp)
-    assert ops[0].instructions == "stay concise"
-    assert ops[0].tools is None
-    assert ops[0].temperature == 0.9
-    assert ops[0].max_tokens == 200
-
-
-def test_realtime_diff_clears_session_fields():
-    state = [
-        (
-            _context_identity(
-                "old instructions",
-                [{"type": "function", "name": "old_tool", "parameters": {"type": "object"}}],
-                temperature=0.7,
-                max_tokens=400,
-            ),
-            None,
-        )
-    ]
-    messages = [Message(role="user", content="hi")]
-
-    ops = _diff_messages(
-        state,
-        messages,
-        tools=None,
-        config=LlmConfig(temperature=None, max_tokens=None),
-    )
-
-    assert isinstance(ops[0], _SessionUpdateOp)
-    assert ops[0].instructions is None
-    assert ops[0].tools is None
-    assert ops[0].temperature is None
-    assert ops[0].max_tokens is None
-
-
 def test_extract_instructions_includes_config_system_prompt():
     instructions, non_system = _extract_instructions_and_messages(
         [Message(role="system", content="call-specific"), Message(role="user", content="hi")],
@@ -298,31 +245,6 @@ def test_extract_instructions_includes_config_system_prompt():
     assert instructions == "base\n\ncall-specific"
     assert len(non_system) == 1
     assert non_system[0].role == "user"
-
-
-def test_realtime_diff_uses_config_system_prompt_without_system_message():
-    ops = _diff_messages(
-        [],
-        [Message(role="user", content="hi")],
-        tools=None,
-        config=LlmConfig(system_prompt="stay concise"),
-    )
-
-    assert isinstance(ops[0], _SessionUpdateOp)
-    assert ops[0].instructions == "stay concise"
-
-
-def test_realtime_diff_includes_native_web_search_tool():
-    ops = _diff_messages(
-        [],
-        [Message(role="user", content="hi")],
-        tools=None,
-        config=LlmConfig(),
-        web_search_options={"search_context_size": "high"},
-    )
-
-    assert isinstance(ops[0], _SessionUpdateOp)
-    assert ops[0].tools == [{"type": "web_search", "name": "web_search", "search_context_size": "high"}]
 
 
 def test_build_openai_tool_defs_adds_native_web_search():
@@ -342,10 +264,12 @@ def test_llm_provider_requires_api_key():
 
 
 def test_llm_provider_rejects_unsupported_model(monkeypatch):
-    monkeypatch.setattr("line.llm_agent.provider._supported_openai_params", lambda model: None)
+    import litellm
+
+    monkeypatch.setattr(litellm, "get_supported_openai_params", lambda model: None)
 
     try:
-        LlmProvider(model="definitely-not-a-real-model", api_key="test-key")
+        LlmProvider(model="fake-provider/definitely-not-a-real-model", api_key="test-key")
     except ValueError as exc:
         assert "is not supported" in str(exc)
     else:
@@ -356,269 +280,52 @@ def test_is_supported_model_accepts_direct_openai_websocket_model(monkeypatch):
     import litellm
 
     monkeypatch.setattr(litellm, "get_supported_openai_params", lambda model: None)
-    assert _is_supported_model("gpt-5-mini")
+    assert _get_model_config("gpt-5.2-mini") is not None
 
 
-def test_websocket_extract_model_output_identities_reads_output_text():
-    response = {
-        "output": [
-            {
-                "type": "message",
-                "content": [
-                    {"type": "output_text", "text": "Hello"},
-                    {"type": "output_text", "text": ", world!"},
-                ],
-            }
-        ]
-    }
+def test_backend_override_http_for_websocket_model():
+    provider = LlmProvider(model="gpt-5.2-mini", api_key="test-key", backend="http")
+    from line.llm_agent.http_provider import _HttpProvider
 
-    assert _extract_model_output_identities(response) == [("assistant", "Hello, world!", "", "")]
+    assert isinstance(provider._backend, _HttpProvider)
 
 
-def test_expand_messages_preserves_assistant_text_before_tool_call_for_responses_api():
-    message = Message(
-        role="assistant",
-        content="Let me check. ",
-        tool_calls=[
-            ToolCall(id="call_1", name="get_weather", arguments='{"city":"NYC"}'),
-        ],
-    )
-
-    assert _expand_messages([message], assistant_text_type="output_text") == [
-        (
-            {
-                "type": "message",
-                "role": "assistant",
-                "content": [{"type": "output_text", "text": "Let me check. "}],
-            },
-            ("assistant", "Let me check. ", "", ""),
-        ),
-        (
-            {
-                "type": "function_call",
-                "call_id": "call_1",
-                "name": "get_weather",
-                "arguments": '{"city":"NYC"}',
-            },
-            ("assistant_tool_call", (("get_weather", '{"city":"NYC"}', "call_1"),)),
-        ),
-    ]
+def test_backend_override_realtime_rejects_non_realtime_model():
+    try:
+        LlmProvider(model="gpt-4o", api_key="test-key", backend="realtime")
+    except ValueError as exc:
+        assert "realtime" in str(exc).lower()
+    else:
+        raise AssertionError("Expected ValueError for non-realtime model with realtime backend")
 
 
-def test_compute_divergence_preserves_assistant_text_before_tool_call():
-    message = Message(
-        role="assistant",
-        content="Let me check. ",
-        tool_calls=[
-            ToolCall(id="call_1", name="get_weather", arguments='{"city":"NYC"}'),
-        ],
-    )
-    desired_pairs = _expand_messages([message], assistant_text_type="output_text")
-    prefix_len, after = _compute_divergence(
-        current_identities=[("assistant", "Let me check. ", "", "")],
-        desired_pairs=desired_pairs,
-    )
-
-    assert after == [
-        (
-            {
-                "type": "function_call",
-                "call_id": "call_1",
-                "name": "get_weather",
-                "arguments": '{"city":"NYC"}',
-            },
-            ("assistant_tool_call", (("get_weather", '{"city":"NYC"}', "call_1"),)),
-        )
-    ]
-    assert prefix_len == 1
+def test_backend_override_websocket_rejects_non_websocket_model():
+    try:
+        LlmProvider(model="gpt-4o", api_key="test-key", backend="websocket")
+    except ValueError as exc:
+        assert "websocket" in str(exc).lower()
+    else:
+        raise AssertionError("Expected ValueError for non-websocket model with websocket backend")
 
 
-def test_websocket_finalize_response_preserves_text_then_tool_call_outputs():
-    provider = _WebSocketProvider(model="gpt-5-mini")
-    context_id = ("__context__", "", ())
-    provider._history = [(context_id, "warmup")]
-
-    response = {
-        "id": "resp_1",
-        "output": [
-            {
-                "type": "message",
-                "role": "assistant",
-                "content": [{"type": "output_text", "text": "Let me check. "}],
-            },
-            {
-                "type": "function_call",
-                "name": "get_weather",
-                "arguments": '{"city":"NYC"}',
-                "call_id": "call_1",
-            },
-        ],
-    }
-
-    provider._finalize_response(
-        response=response,
-        continuation_idx=1,
-        desired_ids=[context_id, ("user", "Weather?", "", "")],
-    )
-
-    assert provider._history == [
-        (context_id, "warmup"),
-        (("user", "Weather?", "", ""), None),
-        (("assistant", "Let me check. ", "", ""), "resp_1"),
-        (("assistant_tool_call", (("get_weather", '{"city":"NYC"}', "call_1"),)), "resp_1"),
-    ]
+def test_backend_override_invalid_value():
+    try:
+        LlmProvider(model="gpt-4o", api_key="test-key", backend="banana")
+    except ValueError as exc:
+        assert "Invalid backend" in str(exc)
+    else:
+        raise AssertionError("Expected ValueError for invalid backend value")
 
 
-def test_realtime_track_output_item_preserves_text_then_tool_call_outputs():
-    history = []
-
-    _track_output_item(
-        history,
-        {
-            "id": "msg_1",
-            "type": "message",
-            "role": "assistant",
-            "content": [{"type": "text", "text": "Let me check. "}],
-        },
-    )
-    _track_output_item(
-        history,
-        {
-            "id": "fc_1",
-            "type": "function_call",
-            "name": "get_weather",
-            "arguments": '{"city":"NYC"}',
-            "call_id": "call_1",
-        },
-    )
-
-    assert [identity for identity, _ in history] == [
-        ("assistant", "Let me check. ", "", ""),
-        ("assistant_tool_call", (("get_weather", '{"city":"NYC"}', "call_1"),)),
-    ]
-
-
-def test_expand_messages_preserves_assistant_text_before_tool_call_for_realtime():
-    message = Message(
-        role="assistant",
-        content="Let me check. ",
-        tool_calls=[
-            ToolCall(id="call_1", name="get_weather", arguments='{"city":"NYC"}'),
-        ],
-    )
-
-    assert _expand_messages([message], assistant_text_type="text") == [
-        (
-            {
-                "type": "message",
-                "role": "assistant",
-                "content": [{"type": "text", "text": "Let me check. "}],
-            },
-            ("assistant", "Let me check. ", "", ""),
-        ),
-        (
-            {
-                "type": "function_call",
-                "call_id": "call_1",
-                "name": "get_weather",
-                "arguments": '{"city":"NYC"}',
-            },
-            ("assistant_tool_call", (("get_weather", '{"city":"NYC"}', "call_1"),)),
-        ),
-    ]
-
-
-def test_websocket_build_request_strips_openai_prefix_from_model():
-    request = _build_request(
-        model="openai/gpt-5-mini",
-        default_reasoning_effort="none",
-        instructions=None,
-        tool_defs=None,
-        cfg=LlmConfig(),
-    )
-
-    assert request["model"] == "gpt-5-mini"
-
-
-def test_websocket_context_identity_accepts_native_web_search_tool():
-    tool_defs = build_openai_tool_defs(
-        web_search_options={"search_context_size": "high"},
-        responses_api=True,
-    )
-
-    assert _context_identity(None, tool_defs, temperature=None, max_tokens=None) == (
-        "__context__",
-        "",
-        ('{"name": "web_search", "search_context_size": "high", "type": "web_search"}',),
-        None,
-        None,
-    )
-
-
-def test_websocket_context_identity_changes_when_native_web_search_options_change():
-    high = build_openai_tool_defs(
-        web_search_options={"search_context_size": "high"},
-        responses_api=True,
-    )
-    low = build_openai_tool_defs(
-        web_search_options={"search_context_size": "low"},
-        responses_api=True,
-    )
-
-    assert _context_identity(None, high, temperature=None, max_tokens=None) != _context_identity(
-        None, low, temperature=None, max_tokens=None
-    )
-
-
-def test_websocket_chat_retries_previous_response_not_found():
-    provider = _WebSocketProvider(model="gpt-5-mini")
-    attempts = 0
-
-    class _FakeStream:
-        def __init__(self, *, fail: bool):
-            self._fail = fail
-            self.done = False
-
-        async def __aiter__(self):
-            self.done = True
-            if self._fail:
-                provider._reset_response_state()
-                raise RuntimeError(
-                    "OpenAI API error (previous_response_not_found): previous response was not found"
-                )
-            yield StreamChunk(text="hello")
-            yield StreamChunk(is_final=True)
-
-    async def _fake_setup():
-        nonlocal attempts
-        attempts += 1
-        lock = asyncio.Lock()
-        await lock.acquire()
-        return _FakeStream(fail=attempts == 1), object(), lock
-
-    provider._setup_chat = lambda *args, **kwargs: _fake_setup()
-    chunks: List[StreamChunk] = []
-
-    async def _consume():
-        async for chunk in provider.chat(
-            [Message(role="user", content="hi")],
-            config=LlmConfig(),
-        ):
-            chunks.append(chunk)
-
-    asyncio.run(_consume())
-
-    assert attempts == 2
-    assert [chunk.text for chunk in chunks if chunk.text] == ["hello"]
-
-
-def test_is_websocket_model_matches_all_gpt5_variants():
-    assert _is_websocket_model("gpt-5-nano")
-    assert _is_websocket_model("openai/gpt-5-mini")
+def test_is_websocket_model_matches_gpt52_variants():
     assert _is_websocket_model("gpt-5.2")
+    assert _is_websocket_model("gpt-5.2-mini")
+    assert _is_websocket_model("openai/gpt-5.2-mini")
     assert _is_websocket_model("gpt5.2")
-    assert not _is_websocket_model("azure/gpt-5-mini")
-    assert not _is_websocket_model("openrouter/gpt-5-mini")
+    assert not _is_websocket_model("gpt-5-nano")
+    assert not _is_websocket_model("gpt-5-mini")
+    assert not _is_websocket_model("azure/gpt-5.2-mini")
+    assert not _is_websocket_model("openrouter/gpt-5.2-mini")
     assert not _is_websocket_model("gpt-4o")
 
 
@@ -644,6 +351,11 @@ def test_llm_provider_public_methods_have_type_hints():
 
     aclose_hints = get_type_hints(LlmProvider.aclose)
     assert aclose_hints["return"] is type(None)
+
+
+# ---------------------------------------------------------------------------
+# HTTP provider
+# ---------------------------------------------------------------------------
 
 
 def test_http_chat_stream_awaits_response_aclose(monkeypatch):
@@ -679,7 +391,7 @@ def test_http_chat_stream_awaits_response_aclose(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# OpenAI / Anthropic: incremental fragments → concatenate
+# _feed_tool_args
 # ---------------------------------------------------------------------------
 
 
@@ -687,13 +399,11 @@ class TestIncrementalConcatenation:
     """OpenAI and Anthropic stream arguments as small JSON fragments."""
 
     def test_single_fragment_complete_object(self):
-        """A single fragment that is already a complete JSON object."""
         state = _feed_tool_args(None, '{"city": "Tokyo"}')
         assert state.args == '{"city": "Tokyo"}'
         assert state.depth == 0
 
     def test_two_fragments(self):
-        """Two incremental fragments that together form a complete object."""
         s1 = _feed_tool_args(None, '{"ci')
         assert s1.args == '{"ci'
         assert s1.depth == 1
@@ -703,7 +413,6 @@ class TestIncrementalConcatenation:
         assert s2.depth == 0
 
     def test_many_small_fragments(self):
-        """Simulates typical OpenAI streaming with many tiny fragments."""
         fragments = ["{", '"name"', ": ", '"', "Alice", '"', ", ", '"age"', ": ", "30", "}"]
         state = None
         for frag in fragments:
@@ -715,7 +424,6 @@ class TestIncrementalConcatenation:
         assert state.escape_next is False
 
     def test_empty_object(self):
-        """Tool with no parameters: {}."""
         s1 = _feed_tool_args(None, "{")
         assert s1.depth == 1
 
@@ -724,16 +432,10 @@ class TestIncrementalConcatenation:
         assert s2.depth == 0
 
 
-# ---------------------------------------------------------------------------
-# Gemini: complete objects repeated → replace
-# ---------------------------------------------------------------------------
-
-
 class TestGeminiReplace:
     """Gemini sends complete JSON objects, possibly repeated or growing."""
 
     def test_identical_resend(self):
-        """Same complete object sent twice — should replace, not double."""
         s1 = _feed_tool_args(None, '{"city": "Tokyo"}')
         assert s1.depth == 0
 
@@ -742,7 +444,6 @@ class TestGeminiReplace:
         assert s2.depth == 0
 
     def test_progressive_update(self):
-        """Gemini sends progressively larger complete objects."""
         s1 = _feed_tool_args(None, '{"city": "Tokyo"}')
         assert s1.depth == 0
 
@@ -751,7 +452,6 @@ class TestGeminiReplace:
         assert s2.depth == 0
 
     def test_three_resends(self):
-        """Multiple consecutive replacements."""
         s = _feed_tool_args(None, '{"a": 1}')
         s = _feed_tool_args(s, '{"a": 1, "b": 2}')
         s = _feed_tool_args(s, '{"a": 1, "b": 2, "c": 3}')
@@ -759,14 +459,8 @@ class TestGeminiReplace:
         assert s.depth == 0
 
 
-# ---------------------------------------------------------------------------
-# Nested objects
-# ---------------------------------------------------------------------------
-
-
 class TestNestedObjects:
     def test_nested_braces_incremental(self):
-        """Nested objects tracked correctly across incremental fragments."""
         s = _feed_tool_args(None, '{"a": {')
         assert s.depth == 2
 
@@ -778,21 +472,14 @@ class TestNestedObjects:
         assert s.depth == 0
 
     def test_deeply_nested(self):
-        """Three levels of nesting in one fragment."""
         obj = '{"a": {"b": {"c": 1}}}'
         s = _feed_tool_args(None, obj)
         assert s.args == obj
         assert s.depth == 0
 
 
-# ---------------------------------------------------------------------------
-# Braces and special chars inside strings
-# ---------------------------------------------------------------------------
-
-
 class TestBracesInStrings:
     def test_braces_inside_string_value(self):
-        """Braces inside a JSON string must not affect depth tracking."""
         obj = '{"template": "{hello}"}'
         s = _feed_tool_args(None, obj)
         assert s.args == obj
@@ -800,18 +487,13 @@ class TestBracesInStrings:
 
     def test_braces_in_string_across_fragments(self):
         s = _feed_tool_args(None, '{"t": "{')
-        assert s.depth == 1  # only the outer { counts
+        assert s.depth == 1
         assert s.in_string is True
 
         s = _feed_tool_args(s, 'x}"}')
         assert s.args == '{"t": "{x}"}'
         assert s.depth == 0
         assert s.in_string is False
-
-
-# ---------------------------------------------------------------------------
-# Escape sequences
-# ---------------------------------------------------------------------------
 
 
 class TestEscapeSequences:
@@ -825,7 +507,6 @@ class TestEscapeSequences:
 
     def test_escaped_backslash_before_quote(self):
         r"""Value ending with \\ followed by closing quote."""
-        # JSON: {"p": "\\"} — the value is a single backslash
         obj = '{"p": "\\\\"}'
         s = _feed_tool_args(None, obj)
         assert s.args == obj
@@ -834,7 +515,6 @@ class TestEscapeSequences:
 
     def test_escaped_backslash_then_escaped_quote(self):
         r"""\\\" inside a string: literal backslash + literal quote."""
-        # JSON: {"p": "\\\""} — the value is \"
         obj = '{"p": "\\\\\\""}'
         s = _feed_tool_args(None, obj)
         assert s.args == obj
@@ -843,7 +523,7 @@ class TestEscapeSequences:
 
     def test_unicode_escape(self):
         r"""\uXXXX escapes must not confuse the parser."""
-        obj = '{"ch": "\\u0022"}'  # \u0022 is "
+        obj = '{"ch": "\\u0022"}'
         s = _feed_tool_args(None, obj)
         assert s.args == obj
         assert s.depth == 0
@@ -869,19 +549,12 @@ class TestEscapeSequences:
         assert s.escape_next is False
 
 
-# ---------------------------------------------------------------------------
-# Edge cases
-# ---------------------------------------------------------------------------
-
-
 class TestEdgeCases:
     def test_first_fragment_is_empty_string(self):
-        """Empty first fragment should be a no-op, next fragment concatenates."""
         s = _feed_tool_args(None, "")
         assert s.args == ""
         assert s.depth == 0
 
-        # Next real fragment should concatenate (args is falsy → else branch)
         s = _feed_tool_args(s, '{"a": 1}')
         assert s.args == '{"a": 1}'
         assert s.depth == 0
@@ -892,10 +565,8 @@ class TestEdgeCases:
         assert s.depth == 0
 
     def test_negative_depth_does_not_trigger_replace(self):
-        """Malformed JSON with extra } — depth goes negative, no false replace."""
         s = _feed_tool_args(None, '{"a": 1}}')
         assert s.depth == -1
-        # Next fragment should concatenate (depth != 0)
         s = _feed_tool_args(s, "extra")
         assert s.args == '{"a": 1}}extra'
         assert s.depth == -1
@@ -907,7 +578,6 @@ class TestEdgeCases:
         assert s.depth == 0
 
     def test_array_values(self):
-        """Arrays inside object values — [ ] should not affect brace depth."""
         obj = '{"items": [1, 2, {"nested": true}]}'
         s = _feed_tool_args(None, obj)
         assert s.args == obj
