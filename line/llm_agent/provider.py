@@ -140,7 +140,8 @@ class LlmProvider:
     ):
         if not api_key:
             raise ValueError("Missing API key in LlmProvider initialization")
-        if not _is_supported_model(model):
+        mcfg = _get_model_config(model)
+        if mcfg is None:
             raise ValueError(
                 f"Model {model} is not supported. See https://models.litellm.ai/ for supported models."
             )
@@ -151,31 +152,28 @@ class LlmProvider:
         self._config = normalized_config
         self._http_fallback_backend: Optional[ProviderProtocol] = None
 
-        use_realtime = _is_realtime_model(model)
-        use_websocket = _is_websocket_model(model)
-        supports_reasoning_effort, default_reasoning_effort = _detect_reasoning_effort(model)
 
-        if use_realtime:
+        if mcfg.backend == "realtime":
             from line.llm_agent.realtime_provider import _RealtimeProvider
 
             self._backend: ProviderProtocol = _RealtimeProvider(
                 model=model,
                 api_key=api_key,
             )
-        elif use_websocket:
+        elif mcfg.backend == "websocket":
             from line.llm_agent.http_provider import _HttpProvider
             from line.llm_agent.websocket_provider import _WebSocketProvider
 
             self._backend = _WebSocketProvider(
                 model=model,
                 api_key=api_key,
-                default_reasoning_effort=default_reasoning_effort,
+                default_reasoning_effort=mcfg.default_reasoning_effort,
             )
             self._http_fallback_backend = _HttpProvider(
                 model=model,
                 api_key=api_key,
-                supports_reasoning_effort=supports_reasoning_effort,
-                default_reasoning_effort=default_reasoning_effort,
+                supports_reasoning_effort=mcfg.supports_reasoning_effort,
+                default_reasoning_effort=mcfg.default_reasoning_effort,
             )
         else:
             from line.llm_agent.http_provider import _HttpProvider
@@ -183,8 +181,8 @@ class LlmProvider:
             self._backend = _HttpProvider(
                 model=model,
                 api_key=api_key,
-                supports_reasoning_effort=supports_reasoning_effort,
-                default_reasoning_effort=default_reasoning_effort,
+                supports_reasoning_effort=mcfg.supports_reasoning_effort,
+                default_reasoning_effort=mcfg.default_reasoning_effort,
             )
 
     def chat(
@@ -254,24 +252,56 @@ class LlmProvider:
         return self._backend
 
 
-def _detect_reasoning_effort(model: str) -> Tuple[bool, Optional[str]]:
-    """Detect whether *model* supports ``reasoning_effort`` and find the best default.
+@dataclass
+class _ModelConfig:
+    """Pre-computed model configuration returned by :func:`_get_model_config`.
 
-    Returns ``(supports_reasoning_effort, default_reasoning_effort)``.
-
-    "none" is ideal (disables reasoning entirely) but not all providers
-    support it.  We probe litellm's own parameter mapping to find out: if
-    mapping "none" through the provider's config raises, fall back to "low"
-    (the lowest universally-supported level).
+    Centralizes backend selection, reasoning-effort detection, and supported
+    parameter discovery so that every call-site uses the same precedence.
     """
-    from litellm import get_llm_provider, get_supported_openai_params
-    from litellm.utils import get_optional_params
 
-    supported = get_supported_openai_params(model=model) or []
+    backend: str  # "realtime" | "websocket" | "http"
+    supports_reasoning_effort: bool
+    default_reasoning_effort: Optional[str]
+
+
+def _get_model_config(model: str) -> Optional[_ModelConfig]:
+    """Return the unified configuration for *model*, or ``None`` if unsupported.
+
+    This is the **single source of truth** for backend routing, reasoning-effort
+    support, and supported OpenAI parameter lists.  Precedence:
+
+    1. Realtime models  → ``_RealtimeProvider``, no reasoning effort.
+    2. WebSocket models → ``_WebSocketProvider``, reasoning effort supported.
+    3. Everything else  → ``_HttpProvider`` via LiteLLM.
+    """
+    if _is_realtime_model(model):
+        return _ModelConfig(
+            backend="realtime",
+            supports_reasoning_effort=False,
+            default_reasoning_effort=None,
+        )
+
+    if _is_websocket_model(model):
+        return _ModelConfig(
+            backend="websocket",
+            supports_reasoning_effort=True,
+            default_reasoning_effort="low",
+        )
+
+    # HTTP / LiteLLM path — probe litellm for capabilities.
+    from litellm import get_supported_openai_params
+
+    supported = get_supported_openai_params(model=model)
+    if supported is None:
+        return None
+
     supports = "reasoning_effort" in supported
-
-    default = "low"
+    default: Optional[str] = "low"
     if supports:
+        from litellm import get_llm_provider
+        from litellm.utils import get_optional_params
+
         try:
             _, provider, _, _ = get_llm_provider(model=model)
             get_optional_params(model=model, custom_llm_provider=provider, reasoning_effort="none")
@@ -284,29 +314,11 @@ def _detect_reasoning_effort(model: str) -> Tuple[bool, Optional[str]]:
             if "anthropic" in model.lower():
                 default = None
 
-    return supports, default
-
-
-def _supported_openai_params(model: str) -> Optional[List[str]]:
-    """Return supported OpenAI-style params for accepted public model names.
-
-    Direct OpenAI WebSocket/realtime models are accepted even when LiteLLM does
-    not yet know about them, because they do not route through the HTTP/LiteLLM
-    backend.
-    """
-    if _is_websocket_model(model):
-        return ["reasoning_effort"]
-    if _is_realtime_model(model):
-        return []
-
-    from litellm import get_supported_openai_params
-
-    return get_supported_openai_params(model=model)
-
-
-def _is_supported_model(model: str) -> bool:
-    """Return True if ``model`` is accepted by the public provider surface."""
-    return _supported_openai_params(model) is not None
+    return _ModelConfig(
+        backend="http",
+        supports_reasoning_effort=supports,
+        default_reasoning_effort=default,
+    )
 
 
 def _is_direct_openai_model(model: str) -> bool:

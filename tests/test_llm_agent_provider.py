@@ -11,8 +11,8 @@ from line.llm_agent.provider import (
     StreamChunk,
     ToolCall,
     _extract_instructions_and_messages,
+    _get_model_config,
     _is_realtime_model,
-    _is_supported_model,
     _is_websocket_model,
 )
 from line.llm_agent.realtime_provider import (
@@ -342,7 +342,10 @@ def test_llm_provider_requires_api_key():
 
 
 def test_llm_provider_rejects_unsupported_model(monkeypatch):
-    monkeypatch.setattr("line.llm_agent.provider._supported_openai_params", lambda model: None)
+    monkeypatch.setattr(
+        "line.llm_agent.provider._get_model_config",
+        lambda model: None,
+    )
 
     try:
         LlmProvider(model="definitely-not-a-real-model", api_key="test-key")
@@ -356,7 +359,7 @@ def test_is_supported_model_accepts_direct_openai_websocket_model(monkeypatch):
     import litellm
 
     monkeypatch.setattr(litellm, "get_supported_openai_params", lambda model: None)
-    assert _is_supported_model("gpt-5-mini")
+    assert _get_model_config("gpt-5-mini") is not None
 
 
 def test_websocket_extract_model_output_identities_reads_output_text():
