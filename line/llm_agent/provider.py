@@ -152,7 +152,6 @@ class LlmProvider:
         self._config = normalized_config
         self._http_fallback_backend: Optional[ProviderProtocol] = None
 
-
         if mcfg.backend == "realtime":
             from line.llm_agent.realtime_provider import _RealtimeProvider
 

@@ -204,6 +204,7 @@ async def test_init_rejects_unsupported_model(monkeypatch, anyio_backend):
 
 async def test_init_accepts_direct_openai_websocket_model(monkeypatch, anyio_backend):
     """Direct OpenAI WebSocket models stay accepted even if LiteLLM doesn't know them yet."""
+
     def _ws_or_unsupported(model):
         if model == "gpt-5-mini":
             return _ModelConfig(
