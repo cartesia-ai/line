@@ -311,7 +311,7 @@ class LlmAgent:
 
             stream = self._llm.chat(
                 messages,
-                tools or None,
+                tools,
                 config=config,
                 **chat_kwargs,
             )
