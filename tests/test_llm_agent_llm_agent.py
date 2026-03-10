@@ -2074,7 +2074,11 @@ async def test_background_tool_event_not_lost_on_cancellation(turn_env):
         [
             StreamChunk(text="Starting transaction..."),
             StreamChunk(
-                tool_calls=[ToolCall(id="tc1", name="slow_background_tool", arguments='{"value":"test"}', is_complete=True)]
+                tool_calls=[
+                    ToolCall(
+                        id="tc1", name="slow_background_tool", arguments='{"value":"test"}', is_complete=True
+                    )
+                ]
             ),
             StreamChunk(is_final=True),
         ],
@@ -2095,7 +2099,9 @@ async def test_background_tool_event_not_lost_on_cancellation(turn_env):
     agent, mock_llm = create_agent_with_mock(responses, tools=[slow_background_tool])
 
     # First process() call - initiates the tool
-    first_event = UserTextSent(content="Start transaction", history=[UserTextSent(content="Start transaction")])
+    first_event = UserTextSent(
+        content="Start transaction", history=[UserTextSent(content="Start transaction")]
+    )
 
     async def run_first_process():
         outputs = []
