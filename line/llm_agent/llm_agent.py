@@ -782,12 +782,17 @@ class LlmAgent:
         except asyncio.CancelledError:
             # If we're cancelled externally (e.g., user started speaking),
             # ensure get_event_task is cancelled so it doesn't consume
-            # events meant for the next process() call
+            # events meant for the next process() call.
+            # However, if get_event_task already completed (consumed an event),
+            # we must re-enqueue it so the next process() call can pick it up.
             get_event_task.cancel()
             try:
                 await get_event_task
             except asyncio.CancelledError:
                 pass
+            else:
+                # get_event_task completed before cancel took effect - re-enqueue the event
+                self._background_event_queue.put_nowait(get_event_task.result())
             raise
 
     async def cleanup(self) -> None:
