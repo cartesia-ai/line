@@ -702,9 +702,12 @@ class LlmAgent:
         Events are added to _background_event_queue for loopback processing.
         If the caller is cancelled, events continue to be produced and queued
         for processing on the next process() call.
+
+        Events are tagged with the CURRENT event_id at yield time (not the triggering
+        event_id). This ensures that when a background tool yields after user spoke
+        and a new process() started, the tool result appears at the END of the
+        conversation history, not in the middle where it was originally triggered.
         """
-        # Capture the event_id at the start - this is the triggering event
-        triggering_event_id = self.history._current_event_id
 
         async def generate_events() -> None:
             n = 0
@@ -713,9 +716,11 @@ class LlmAgent:
                     call_id = f"{tc_id}-{n}"
                     called, returned = _construct_tool_events(call_id, tc_name, tool_args, value)
 
-                    # Add to local history with the triggering event_id
-                    self.history._append_local_with_event_id(called, triggering_event_id)
-                    self.history._append_local_with_event_id(returned, triggering_event_id)
+                    # Add to local history with the CURRENT event_id (at yield time).
+                    # This ensures background tool results appear at the end of history
+                    # when yielded after a new process() call has started.
+                    self.history._append_local(called)
+                    self.history._append_local(returned)
                     # Add to queue for loopback processing
                     await self._background_event_queue.put((called, returned))
                     n += 1
@@ -723,9 +728,9 @@ class LlmAgent:
                 # Use negative limit to show last 10 frames (most relevant)
                 logger.error(f"Error in Tool Call {tc_name}: {e}\n{traceback.format_exc(limit=-10)}")
                 called, returned = _construct_tool_events(f"{tc_id}-{n}", tc_name, tool_args, f"error: {e}")
-                # Add to local history with the triggering event_id
-                self.history._append_local_with_event_id(called, triggering_event_id)
-                self.history._append_local_with_event_id(returned, triggering_event_id)
+                # Add to local history with the CURRENT event_id
+                self.history._append_local(called)
+                self.history._append_local(returned)
                 # Add to queue for loopback processing
                 await self._background_event_queue.put((called, returned))
 
