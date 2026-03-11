@@ -4,7 +4,6 @@ LlmAgent - An Agent implementation wrapping 100+ LLM providers via LiteLLM.
 See README.md for examples and documentation.
 """
 
-import asyncio
 import inspect
 import json
 import time
@@ -40,6 +39,7 @@ from line.events import (
     OutputEvent,
     UserTextSent,
 )
+from line.llm_agent.background_queue import BackgroundQueue
 from line.llm_agent.config import LlmConfig, _merge_configs, _normalize_config
 from line.llm_agent.history import _HISTORY_EVENT_TYPES, History
 from line.llm_agent.provider import LLMProvider, Message, ToolCall
@@ -104,12 +104,8 @@ class LlmAgent:
         self._introduction_sent = False
         self.history = History()
         self._handoff_target: Optional[AgentCallable] = None  # Normalized process function
-        # Background task for backgrounded tools - None means no pending work
-        self._background_task: Optional[asyncio.Task[None]] = None
         # Queue for events from backgrounded tools that need to trigger loopback
-        self._background_event_queue: asyncio.Queue[tuple[AgentToolCalled, AgentToolReturned]] = (
-            asyncio.Queue()
-        )
+        self._background_queue: BackgroundQueue[tuple[AgentToolCalled, AgentToolReturned]] = BackgroundQueue()
         # Cache for thought signatures (Gemini 3+ models)
         # Maps tool_call_id -> thought_signature
         self._tool_signatures: Dict[str, str] = {}
@@ -316,15 +312,15 @@ class LlmAgent:
             # These events were produced since the last iteration (or from previous process() invocations)
             if is_first_iteration or should_loopback:
                 # Drain any immediately available events (non-blocking)
-                while not self._background_event_queue.empty():
-                    called_evt, returned_evt = self._background_event_queue.get_nowait()
+                while (pair := self._background_queue.get_nowait()) is not None:
+                    called_evt, returned_evt = pair
                     yield called_evt
                     yield returned_evt
             else:
-                # Otherwise wait for either: background task completes OR new event arrives
-                result = await self._maybe_await_background_event()
+                # Otherwise wait for either: all sources complete OR new event arrives
+                result = await self._background_queue.get()
                 if result is None:
-                    # Background task completed with no more events
+                    # All background sources completed with no more events
                     # this generation process is completed - exit loop
                     break
                 called_evt, returned_evt = result
@@ -576,9 +572,7 @@ class LlmAgent:
 
             # ==== END TOOL CALLS ==== #
 
-            has_background_events = not self._background_event_queue.empty()
-            has_background_tasks = self._background_task is not None and not self._background_task.done()
-            if not (should_loopback or has_background_events or has_background_tasks):
+            if not (should_loopback or self._background_queue.is_active):
                 break
 
     async def _build_messages(
@@ -690,118 +684,41 @@ class LlmAgent:
         tc_id: str,
         tc_name: str,
     ) -> None:
-        """Execute a backgroundable tool in a shielded task, streaming events.
-
-        The task is protected from cancellation. If the calling coroutine is
-        cancelled, the task continues running and stores results to local_history.
+        """Execute a backgroundable tool via the background queue.
 
         Each value yielded by the tool produces a pair of:
         - AgentToolCalled with tool_call_id = "{tc_id}-{n}"
         - AgentToolReturned with the same tool_call_id
 
-        Events are added to _background_event_queue for loopback processing.
-        If the caller is cancelled, events continue to be produced and queued
-        for processing on the next process() call.
-
-        Events are tagged with the CURRENT event_id at yield time (not the triggering
-        event_id). This ensures that when a background tool yields after user spoke
-        and a new process() started, the tool result appears at the END of the
-        conversation history, not in the middle where it was originally triggered.
+        The source is subscribed to the background queue, which shields it
+        from cancellation. Events are tagged with the CURRENT event_id at
+        yield time so background tool results appear at the end of history
+        when yielded after a new process() call has started.
         """
 
-        async def generate_events() -> None:
+        async def generate_events() -> AsyncIterable[tuple[AgentToolCalled, AgentToolReturned]]:
             n = 0
             try:
                 async for value in normalized_func(ctx, **tool_args):
                     call_id = f"{tc_id}-{n}"
                     called, returned = _construct_tool_events(call_id, tc_name, tool_args, value)
-
-                    # Add to local history with the CURRENT event_id (at yield time).
-                    # This ensures background tool results appear at the end of history
-                    # when yielded after a new process() call has started.
                     self.history._append_local(called)
                     self.history._append_local(returned)
-                    # Add to queue for loopback processing
-                    await self._background_event_queue.put((called, returned))
+                    yield (called, returned)
                     n += 1
             except Exception as e:
-                # Use negative limit to show last 10 frames (most relevant)
                 logger.error(f"Error in Tool Call {tc_name}: {e}\n{traceback.format_exc(limit=-10)}")
                 called, returned = _construct_tool_events(f"{tc_id}-{n}", tc_name, tool_args, f"error: {e}")
-                # Add to local history with the CURRENT event_id
                 self.history._append_local(called)
                 self.history._append_local(returned)
-                # Add to queue for loopback processing
-                await self._background_event_queue.put((called, returned))
+                yield (called, returned)
 
-        # Chain this task after the current background task
-        # Use shield to protect from cancellation
-        future = asyncio.shield(generate_events())
-        old_background_task = self._background_task
-
-        async def _new_background_task() -> None:
-            if old_background_task is not None:
-                await old_background_task
-            await future
-
-        self._background_task = asyncio.ensure_future(_new_background_task())
-
-    async def _maybe_await_background_event(self) -> Union[None, tuple[AgentToolCalled, AgentToolReturned]]:
-        """Wait for either a background event or background task completion.
-
-        Cleans up get_event if the background task completes first.
-        Intentionally does not clean up the background task if get_event completes first,
-        since #cleanup handles that
-
-        Returns:
-            - (AgentToolCalled, AgentToolReturned) if a new event is available
-            - None if the background task completed with no more events
-        """
-        # If no background task, there's nothing to wait for
-        if self._background_task is None:
-            return None
-
-        get_event_task = asyncio.ensure_future(self._background_event_queue.get())
-        try:
-            done, _ = await asyncio.wait(
-                [get_event_task, self._background_task],
-                return_when=asyncio.FIRST_COMPLETED,
-            )
-
-            # Check if the get_event task completed
-            if get_event_task in done:
-                return get_event_task.result()
-
-            # Background task completed first - cancel the get_event task
-            get_event_task.cancel()
-            try:
-                await get_event_task
-            except asyncio.CancelledError:
-                pass
-            return None
-        except asyncio.CancelledError:
-            # If we're cancelled externally (e.g., user started speaking),
-            # ensure get_event_task is cancelled so it doesn't consume
-            # events meant for the next process() call.
-            # However, if get_event_task already completed (consumed an event),
-            # we must re-enqueue it so the next process() call can pick it up.
-            get_event_task.cancel()
-            try:
-                await get_event_task
-            except asyncio.CancelledError:
-                pass
-            else:
-                # get_event_task completed before cancel took effect - re-enqueue the event
-                self._background_event_queue.put_nowait(get_event_task.result())
-            raise
+        self._background_queue.subscribe(generate_events())
 
     async def cleanup(self) -> None:
         """Clean up resources."""
         self._handoff_target = None
-        # Wait for any remaining background task to complete
-        if self._background_task is not None:
-            await self._background_task
-
+        await self._background_queue.wait()
         await self._llm.aclose()
 
     # ------------------------------------------------------------------
