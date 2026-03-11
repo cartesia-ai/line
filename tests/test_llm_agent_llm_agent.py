@@ -2031,3 +2031,124 @@ class TestEmptyMessageHandling:
 
         # LLM should not have been called
         assert mock_llm._call_count == 0
+
+
+# =============================================================================
+# Tests: Background tool cancellation handling
+# =============================================================================
+
+
+async def test_background_tool_event_not_lost_on_cancellation(turn_env):
+    """Test that background tool events aren't lost when process() is cancelled.
+
+    This tests a specific bug where if process() was cancelled while waiting
+    in _maybe_await_background_event(), an orphaned queue.get() task could
+    consume events meant for the next process() call.
+
+    Scenario:
+    1. User initiates a background tool (e.g., sell_stock)
+    2. Tool yields "pending" status, agent responds
+    3. User speaks again, cancelling the current process()
+    4. Tool completes and yields "success"
+    5. New process() should see the "success" event
+    """
+    import asyncio
+
+    # Track tool execution state
+    tool_started = asyncio.Event()
+    tool_can_complete = asyncio.Event()
+
+    @loopback_tool(is_background=True)
+    async def slow_background_tool(ctx, value: Annotated[str, "A value"]):
+        """A background tool that yields pending, waits, then yields success."""
+        yield {"status": "pending", "value": value}
+        tool_started.set()
+        await tool_can_complete.wait()
+        yield {"status": "success", "value": value}
+
+    # Response 1: LLM calls the tool
+    # Response 2: LLM responds to pending status
+    # Response 3: LLM responds to user's second message
+    # Response 4: LLM responds to success status
+    responses = [
+        [
+            StreamChunk(text="Starting transaction..."),
+            StreamChunk(
+                tool_calls=[
+                    ToolCall(
+                        id="tc1", name="slow_background_tool", arguments='{"value":"test"}', is_complete=True
+                    )
+                ]
+            ),
+            StreamChunk(is_final=True),
+        ],
+        [
+            StreamChunk(text="Please wait..."),
+            StreamChunk(is_final=True),
+        ],
+        [
+            StreamChunk(text="I understand, still waiting..."),
+            StreamChunk(is_final=True),
+        ],
+        [
+            StreamChunk(text="Transaction complete!"),
+            StreamChunk(is_final=True),
+        ],
+    ]
+
+    agent, mock_llm = create_agent_with_mock(responses, tools=[slow_background_tool])
+
+    # First process() call - initiates the tool
+    first_event = UserTextSent(
+        content="Start transaction", history=[UserTextSent(content="Start transaction")]
+    )
+
+    async def run_first_process():
+        outputs = []
+        async for output in agent.process(turn_env, first_event):
+            if not isinstance(output, LogMetric):
+                outputs.append(output)
+        return outputs
+
+    first_task = asyncio.create_task(run_first_process())
+
+    # Wait for tool to start and yield pending
+    await asyncio.wait_for(tool_started.wait(), timeout=5.0)
+
+    # Give some time for the agent to process the pending status
+    await asyncio.sleep(0.1)
+
+    # Cancel the first process (simulating user speaking)
+    first_task.cancel()
+    try:
+        await first_task
+    except asyncio.CancelledError:
+        pass
+
+    # Now allow the tool to complete
+    tool_can_complete.set()
+
+    # Give time for the background tool to yield its success result
+    await asyncio.sleep(0.1)
+
+    # Second process() call - should pick up the success event
+    second_event = UserTextSent(
+        content="What's the status?",
+        history=[
+            UserTextSent(content="Start transaction"),
+            AgentTextSent(content="Starting transaction..."),
+            AgentTextSent(content="Please wait..."),
+            UserTextSent(content="What's the status?"),
+        ],
+    )
+
+    second_outputs = await collect_outputs(agent, turn_env, second_event)
+
+    # The second process should have received the success tool result
+    tool_returned_events = [o for o in second_outputs if isinstance(o, AgentToolReturned)]
+    success_events = [e for e in tool_returned_events if e.result.get("status") == "success"]
+
+    assert len(success_events) >= 1, (
+        f"Expected to find 'success' tool result in second process(), "
+        f"but only found: {[e.result for e in tool_returned_events]}"
+    )
