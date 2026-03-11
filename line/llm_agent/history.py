@@ -99,7 +99,6 @@ class History:
     Private API (called by LlmAgent):
         _set_input(input_history, current_event_id) — set merge sources
         _append_local(event) — append event tagged with current event id
-        _append_local_with_event_id(event, event_id) — append with explicit id
         _current_event_id — property for the current triggering event id
     """
 
@@ -228,11 +227,6 @@ class History:
     def _append_local(self, event: _LocalEvent) -> None:
         """Append an event to local history tagged with the current event id."""
         self._local_history.append((self._current_event_id, event))
-        self._cache = None  # invalidate cache
-
-    def _append_local_with_event_id(self, event: _LocalEvent, event_id: str) -> None:
-        """Append an event to local history with an explicit event id."""
-        self._local_history.append((event_id, event))
         self._cache = None  # invalidate cache
 
     # ------------------------------------------------------------------

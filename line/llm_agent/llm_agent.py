@@ -312,7 +312,8 @@ class LlmAgent:
             # These events were produced since the last iteration (or from previous process() invocations)
             if is_first_iteration or should_loopback:
                 # Drain any immediately available events (non-blocking)
-                for called_evt, returned_evt in self._background_queue.get_nowait():
+                while (pair := self._background_queue.get_nowait()) is not None:
+                    called_evt, returned_evt = pair
                     yield called_evt
                     yield returned_evt
             else:

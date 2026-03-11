@@ -2115,8 +2115,12 @@ async def test_background_tool_event_not_lost_on_cancellation(turn_env):
     # Wait for tool to start and yield pending
     await asyncio.wait_for(tool_started.wait(), timeout=5.0)
 
-    # Give some time for the agent to process the pending status
-    await asyncio.sleep(0.1)
+    # Wait for agent to process the pending status (tool call + pending response = 2 LLM calls)
+    for _ in range(100):
+        if mock_llm._call_count >= 2:
+            break
+        await asyncio.sleep(0)
+    assert mock_llm._call_count >= 2, f"Expected >= 2 LLM calls, got {mock_llm._call_count}"
 
     # Cancel the first process (simulating user speaking)
     first_task.cancel()
@@ -2128,8 +2132,8 @@ async def test_background_tool_event_not_lost_on_cancellation(turn_env):
     # Now allow the tool to complete
     tool_can_complete.set()
 
-    # Give time for the background tool to yield its success result
-    await asyncio.sleep(0.1)
+    # Wait for the background tool to yield its success result
+    await asyncio.wait_for(agent._background_queue.wait(), timeout=5.0)
 
     # Second process() call - should pick up the success event
     second_event = UserTextSent(

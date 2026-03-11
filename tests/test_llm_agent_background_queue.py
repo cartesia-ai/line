@@ -16,13 +16,19 @@ async def _aiter(*items):
         yield item
 
 
+async def _aiter_then_raise(*items):
+    for item in items:
+        yield item
+    raise ValueError("source failed")
+
+
 # ------------------------------------------------------------------
-# Basic functionality
+# get()
 # ------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_single_source():
+async def test_get_single_source():
     q = BackgroundQueue[int]()
     q.subscribe(_aiter(1, 2, 3))
     results = []
@@ -35,7 +41,7 @@ async def test_single_source():
 
 
 @pytest.mark.asyncio
-async def test_multiple_sources():
+async def test_get_multiple_sources():
     q = BackgroundQueue[str]()
     q.subscribe(_aiter("a", "b"))
     q.subscribe(_aiter("c", "d"))
@@ -49,52 +55,13 @@ async def test_multiple_sources():
 
 
 @pytest.mark.asyncio
-async def test_no_sources_returns_none_immediately():
+async def test_get_no_sources_returns_none():
     q = BackgroundQueue[int]()
     assert await q.get() is None
 
 
 @pytest.mark.asyncio
-async def test_get_nowait_drains_buffer():
-    q = BackgroundQueue[int]()
-    q.subscribe(_aiter(1, 2, 3))
-    # Let the source task run to completion
-    await q.wait()
-    items = q.get_nowait()
-    assert items == [1, 2, 3]
-    # Second call returns empty
-    assert q.get_nowait() == []
-
-
-@pytest.mark.asyncio
-async def test_is_active():
-    q = BackgroundQueue[int]()
-    assert not q.is_active
-
-    q.subscribe(_aiter(1))
-    assert q.is_active
-
-    await q.wait()
-    # Source done, but items still buffered
-    assert q.is_active
-
-    q.get_nowait()
-    assert not q.is_active
-
-
-# ------------------------------------------------------------------
-# Error propagation
-# ------------------------------------------------------------------
-
-
-async def _aiter_then_raise(*items):
-    for item in items:
-        yield item
-    raise ValueError("source failed")
-
-
-@pytest.mark.asyncio
-async def test_error_propagated_via_get():
+async def test_get_raises_on_queued_error():
     q = BackgroundQueue[int]()
     q.subscribe(_aiter_then_raise(1, 2))
     assert await q.get() == 1
@@ -104,36 +71,7 @@ async def test_error_propagated_via_get():
 
 
 @pytest.mark.asyncio
-async def test_error_propagated_via_wait():
-    q = BackgroundQueue[int]()
-    q.subscribe(_aiter_then_raise())
-    with pytest.raises(ValueError, match="source failed"):
-        await q.wait()
-
-
-@pytest.mark.asyncio
-async def test_error_does_not_prevent_buffered_items():
-    """Items buffered before the error should still be retrievable via get_nowait."""
-    q = BackgroundQueue[int]()
-    q.subscribe(_aiter_then_raise(10, 20))
-    await asyncio.sleep(0)  # let source run
-    await asyncio.sleep(0)
-    # Source has yielded items and then failed
-    # wait() should raise
-    with pytest.raises(ValueError):
-        await q.wait()
-    # But items yielded before the error are in the buffer
-    items = q.get_nowait()
-    assert 10 in items and 20 in items
-
-
-# ------------------------------------------------------------------
-# Cancellation safety
-# ------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_consumer_cancellation_does_not_cancel_source():
+async def test_get_cancellation_does_not_cancel_source():
     """Cancelling a get() call should not cancel the source task."""
     started = asyncio.Event()
     gate = asyncio.Event()
@@ -165,6 +103,41 @@ async def test_consumer_cancellation_does_not_cancel_source():
 
 
 # ------------------------------------------------------------------
+# get_nowait()
+# ------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_get_nowait_pops_one_item():
+    q = BackgroundQueue[int]()
+    q.subscribe(_aiter(1, 2, 3))
+    await q.wait()
+    assert q.get_nowait() == 1
+    assert q.get_nowait() == 2
+    assert q.get_nowait() == 3
+    assert q.get_nowait() is None
+
+
+@pytest.mark.asyncio
+async def test_get_nowait_empty_returns_none():
+    q = BackgroundQueue[int]()
+    assert q.get_nowait() is None
+
+
+@pytest.mark.asyncio
+async def test_get_nowait_raises_on_queued_error():
+    q = BackgroundQueue[int]()
+    q.subscribe(_aiter_then_raise(10, 20))
+    # Let source run to completion
+    for _ in range(10):
+        await asyncio.sleep(0)
+    assert q.get_nowait() == 10
+    assert q.get_nowait() == 20
+    with pytest.raises(ValueError, match="source failed"):
+        q.get_nowait()
+
+
+# ------------------------------------------------------------------
 # wait()
 # ------------------------------------------------------------------
 
@@ -176,10 +149,42 @@ async def test_wait_completes_when_all_sources_done():
     q.subscribe(_aiter(2))
     await q.wait()
     assert not q._sources
-    assert sorted(q.get_nowait()) == [1, 2]
+    items = []
+    while (item := q.get_nowait()) is not None:
+        items.append(item)
+    assert sorted(items) == [1, 2]
+
+
+@pytest.mark.asyncio
+async def test_wait_raises_on_source_error():
+    q = BackgroundQueue[int]()
+    q.subscribe(_aiter_then_raise())
+    with pytest.raises(ValueError, match="source failed"):
+        await q.wait()
 
 
 @pytest.mark.asyncio
 async def test_wait_with_no_sources():
     q = BackgroundQueue[int]()
     await q.wait()  # should not hang
+
+
+# ------------------------------------------------------------------
+# is_active
+# ------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_is_active():
+    q = BackgroundQueue[int]()
+    assert not q.is_active
+
+    q.subscribe(_aiter(1))
+    assert q.is_active
+
+    await q.wait()
+    # Source done, but items still buffered
+    assert q.is_active
+
+    q.get_nowait()  # pop the single item
+    assert not q.is_active
