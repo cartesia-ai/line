@@ -73,6 +73,7 @@ from line.events import (
     UserTurnEnded,
     UserTurnStarted,
 )
+from line.ttl_map import TTLMap
 
 
 # Call request types
@@ -144,7 +145,9 @@ class VoiceAgentApp:
         self.get_agent = get_agent
         self.pre_call_handler = pre_call_handler
         self.ws_route = "/ws"
-        self._pending_calls: Dict[str, CallRequest] = {}
+        self._pending_calls: TTLMap[str, CallRequest] = TTLMap(
+            default_ttl=3600
+        )  # TTL of 1 hour for pending call requests
 
         self.fastapi_app.add_api_route("/chats", self.create_chat_session, methods=["POST"])
         self.fastapi_app.add_api_route("/status", self.get_status, methods=["GET"])
@@ -179,7 +182,7 @@ class VoiceAgentApp:
                 logger.error(f"Error in pre_call_handler: {str(e)}")
                 raise HTTPException(status_code=500, detail="Server error in call processing") from e
 
-        self._pending_calls[call_request.agent_call_id] = call_request
+        self._pending_calls.set(call_request.agent_call_id, call_request)
         url_params = {"agent_call_id": call_request.agent_call_id}
         query_string = urlencode(url_params)
         websocket_url = f"{self.ws_route}?{query_string}"
