@@ -73,6 +73,7 @@ from line.events import (
     UserTurnEnded,
     UserTurnStarted,
 )
+from line.ttl_map import TTLMap
 
 
 # Call request types
@@ -144,6 +145,9 @@ class VoiceAgentApp:
         self.get_agent = get_agent
         self.pre_call_handler = pre_call_handler
         self.ws_route = "/ws"
+        self._pending_calls: TTLMap[str, CallRequest] = TTLMap(
+            default_ttl=3600
+        )  # TTL of 1 hour for pending call requests
 
         self.fastapi_app.add_api_route("/chats", self.create_chat_session, methods=["POST"])
         self.fastapi_app.add_api_route("/status", self.get_status, methods=["GET"])
@@ -178,15 +182,8 @@ class VoiceAgentApp:
                 logger.error(f"Error in pre_call_handler: {str(e)}")
                 raise HTTPException(status_code=500, detail="Server error in call processing") from e
 
-        url_params = {
-            "call_id": call_request.call_id,
-            "from": call_request.from_,
-            "to": call_request.to,
-            "agent_call_id": call_request.agent_call_id,
-            "agent": json.dumps(call_request.agent.model_dump()),
-            "metadata": json.dumps(call_request.metadata),
-        }
-
+        self._pending_calls.set(call_request.agent_call_id, call_request)
+        url_params = {"agent_call_id": call_request.agent_call_id}
         query_string = urlencode(url_params)
         websocket_url = f"{self.ws_route}?{query_string}"
 
@@ -210,31 +207,17 @@ class VoiceAgentApp:
         logger.info("Client connected")
 
         query_params = dict(websocket.query_params)
+        agent_call_id = query_params.get("agent_call_id", "unknown")
 
-        metadata = {}
-        if "metadata" in query_params:
-            try:
-                metadata = json.loads(query_params["metadata"])
-            except (json.JSONDecodeError, TypeError):
-                logger.warning(f"Invalid metadata JSON: {query_params['metadata']}")
-                metadata = {}
-
-        agent_data = {}
-        if "agent" in query_params:
-            try:
-                agent_data = json.loads(query_params["agent"])
-            except (json.JSONDecodeError, TypeError):
-                logger.warning(f"Invalid agent JSON: {query_params['agent']}")
-                agent_data = {}
-
-        call_request = CallRequest(
-            call_id=query_params.get("call_id", "unknown"),
-            from_=query_params.get("from", "unknown"),
-            to=query_params.get("to", "unknown"),
-            agent_call_id=query_params.get("agent_call_id", "unknown"),
-            agent=AgentConfig(**agent_data),
-            metadata=metadata,
-        )
+        # Look up the CallRequest stored during create_chat_session
+        call_request = self._pending_calls.pop(agent_call_id, None)
+        if call_request is None:
+            logger.error(f"No pending call found for agent_call_id={agent_call_id}")
+            await websocket.send_json(
+                ErrorOutput(content=f"No pending call found for agent_call_id={agent_call_id}").model_dump()
+            )
+            await websocket.close()
+            return
 
         runner: Optional[ConversationRunner] = None
         # Create the AgentEnv with the current event loop
