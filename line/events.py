@@ -137,6 +137,15 @@ class AgentHandedOff(BaseModel):
     history: Optional[List["InputEvent"]] = None
 
 
+class InactivityTimeout(BaseModel):
+    """Fired when user hasn't started speaking within the configured timeout after agent finished."""
+
+    type: Literal["inactivity_timeout"] = "inactivity_timeout"
+    timeout_ms: int  # The configured timeout that expired
+    event_id: str = Field(default_factory=_generate_event_id)
+    history: Optional[List["InputEvent"]] = None
+
+
 class UserTurnStarted(BaseModel):
     type: Literal["user_turn_started"] = "user_turn_started"
     event_id: str = Field(default_factory=_generate_event_id)
@@ -215,6 +224,7 @@ InputEvent = Union[
     AgentDtmfSent,
     AgentTurnEnded,
     AgentHandedOff,
+    InactivityTimeout,
     CallEnded,
 ]
 
@@ -259,6 +269,7 @@ __all__ = [
     "AgentDtmfSent",
     "AgentTurnEnded",
     "UserCustomSent",
+    "InactivityTimeout",
     "InputEvent",
     # History
     "HistoryEvent",
