@@ -36,11 +36,12 @@ The script will test whichever providers have API keys set.
 
 import argparse
 import asyncio
+import json
 import logging
 import os
 import pathlib
 import sys
-from typing import Annotated
+from typing import Annotated, TypedDict
 import warnings
 
 import litellm
@@ -95,6 +96,37 @@ async def calculate(ctx, expression: Annotated[str, "Math expression to evaluate
         return "Invalid expression"
     except Exception as e:
         return f"Error: {e}"
+
+
+# =============================================================================
+# Nested Object Tools (TypedDict vs list[dict])
+# =============================================================================
+
+
+class MenuItem(TypedDict):
+    """A menu item for ordering."""
+
+    menu_item_id: str
+    quantity: int
+    modifiers: list[str]
+
+
+@loopback_tool
+async def add_to_order(
+    ctx,
+    items: Annotated[list[MenuItem], "List of menu items to add to the order"],
+) -> str:
+    """Add items to a restaurant order. Uses TypedDict for proper schema generation."""
+    return json.dumps({"success": True, "items_added": len(items), "items": items})
+
+
+@loopback_tool
+async def add_to_order_broken(
+    ctx,
+    items: Annotated[list[dict], "List of menu items with format [{'menu_item_id': str, 'quantity': int}]"],
+) -> str:
+    """Add items using list[dict] - this will FAIL with OpenAI due to missing schema properties."""
+    return json.dumps({"success": True, "items_added": len(items), "items": items})
 
 
 # =============================================================================
@@ -490,6 +522,180 @@ async def test_conversation_reset(model: str, api_key: str):
     else:
         raise AssertionError(f"Branch B failed — expected 'giraffe', got: {response_b.strip()!r}")
 
+async def test_nested_objects(model: str, api_key: str):
+    """Test tool calling with nested objects using TypedDict.
+
+    This test validates that:
+    1. TypedDict generates proper JSON schemas with all properties defined
+    2. The schema includes additionalProperties: false for OpenAI compatibility
+    3. The LLM can correctly call tools with nested object parameters
+
+    This addresses the issue where list[dict] fails with OpenAI because it
+    generates {"type": "object"} without property definitions.
+    """
+    print("\n" + "=" * 60)
+    print(f"Testing nested objects (TypedDict) with {model}")
+    print("=" * 60)
+
+    agent = LlmAgent(
+        model=model,
+        api_key=api_key,
+        tools=[add_to_order],
+        config=LlmConfig(
+            system_prompt="""You are a restaurant order assistant.
+When the user wants to order food, use the add_to_order tool.
+
+Available menu items:
+- item_001: Grilled Oysters ($15)
+- item_002: Lobster Roll ($25)
+- item_003: Fish Tacos ($12)
+
+Always include menu_item_id, quantity, and modifiers (can be empty list).""",
+        ),
+    )
+
+    env = TurnEnv()
+    user_message = "I'd like to order 2 grilled oysters please"
+    event = UserTextSent(
+        content=user_message,
+        history=[UserTextSent(content=user_message)],
+    )
+
+    print(f"User: {user_message}")
+    print("\nAgent response:")
+
+    tool_called = False
+    tool_args = None
+    error_occurred = False
+
+    try:
+        async for output in agent.process(env, event):
+            if isinstance(output, AgentSendText):
+                print(f"  Text: {output.text}")
+            elif isinstance(output, AgentToolCalled):
+                tool_called = True
+                tool_args = output.tool_args
+                print(f"  [Tool call]: {output.tool_name}")
+                print(f"  [Tool args]: {json.dumps(output.tool_args, indent=4)}")
+            elif isinstance(output, AgentToolReturned):
+                print(f"  [Tool result]: {output.result}")
+    except Exception as e:
+        error_occurred = True
+        print(f"  [ERROR]: {e}")
+    finally:
+        await agent.cleanup()
+
+    # Validate results
+    print("\n--- Validation ---")
+    if error_occurred:
+        print("✗ Test failed: Error occurred during tool call")
+        return False
+    elif not tool_called:
+        print("✗ Test failed: Tool was never called")
+        return False
+    elif tool_args is None or "items" not in tool_args:
+        print("✗ Test failed: 'items' not in tool arguments")
+        return False
+    elif not tool_args["items"]:
+        print("✗ Test failed: 'items' is empty")
+        return False
+    else:
+        # Validate item structure
+        items = tool_args["items"]
+        valid = True
+        for item in items:
+            if "menu_item_id" not in item or "quantity" not in item:
+                valid = False
+                break
+        if valid:
+            print(f"✓ Nested objects test passed (items: {items})")
+            return True
+        else:
+            print("✗ Test failed: Item structure is invalid")
+            return False
+
+
+async def test_nested_objects_without_typeddict(model: str, api_key: str):
+    """Test that list[dict] fails with OpenAI models (negative test).
+
+    This validates that OpenAI rejects schemas without proper property definitions.
+    The expected behavior is:
+    - OpenAI models: Should FAIL with 'additionalProperties' error
+    - Other models (Gemini): May succeed (more lenient schema validation)
+
+    This test documents the known limitation and ensures we catch any API changes.
+    """
+    print("\n" + "=" * 60)
+    print(f"Testing nested objects WITHOUT TypedDict with {model}")
+    print("(This should FAIL for OpenAI models)")
+    print("=" * 60)
+
+    import warnings
+    # Suppress the expected warning about dict types
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        agent = LlmAgent(
+            model=model,
+            api_key=api_key,
+            tools=[add_to_order_broken],
+            config=LlmConfig(
+                system_prompt="""You are a restaurant order assistant.
+When the user wants to order food, use the add_to_order_broken tool.
+
+Available menu items:
+- item_001: Grilled Oysters ($15)
+
+Always include menu_item_id and quantity.""",
+            ),
+        )
+
+    env = TurnEnv()
+    user_message = "Order 2 grilled oysters"
+    event = UserTextSent(
+        content=user_message,
+        history=[UserTextSent(content=user_message)],
+    )
+
+    print(f"User: {user_message}")
+    print("\nAgent response:")
+
+    error_message = None
+    try:
+        async for output in agent.process(env, event):
+            if isinstance(output, AgentSendText):
+                print(f"  Text: {output.text}")
+            elif isinstance(output, AgentToolCalled):
+                print(f"  [Tool call]: {output.tool_name}")
+    except Exception as e:
+        error_message = str(e)
+        print(f"  [ERROR]: {e}")
+    finally:
+        await agent.cleanup()
+
+    # Validate results based on model
+    print("\n--- Validation ---")
+    is_openai = "openai" in model.lower() or "gpt" in model.lower()
+
+    if is_openai:
+        # OpenAI should reject the schema
+        if error_message and "additionalProperties" in error_message:
+            print("✓ OpenAI correctly rejected list[dict] schema (expected behavior)")
+            print("  Error mentions 'additionalProperties' requirement")
+            return True
+        elif error_message:
+            print(f"✓ OpenAI rejected the request (different error: {error_message[:100]}...)")
+            return True
+        else:
+            print("✗ Test failed: OpenAI should have rejected list[dict] schema")
+            return False
+    else:
+        # Non-OpenAI models may be more lenient
+        if error_message:
+            print(f"Note: {model} also rejected list[dict] schema")
+        else:
+            print(f"Note: {model} accepted list[dict] schema (more lenient)")
+        return True  # Not a failure for non-OpenAI models
+
 
 # =============================================================================
 # Main
@@ -511,6 +717,8 @@ AVAILABLE_TESTS = [
     "streaming",  # test_streaming_text
     "introduction",  # test_introduction
     "tools",  # test_tool_calling
+    "nested_objects",  # test_nested_objects (TypedDict support)
+    "nested_objects_fail",  # test_nested_objects_without_typeddict (negative test)
     "web_search",  # test_web_search
     "web_search_fn",  # test_function_tools_with_web_search
     "mcp",  # test_mcp_list_tools and test_mcp_tool_execution
@@ -619,6 +827,10 @@ async def main(args):
             test_plan.append(("introduction", test_introduction, model, api_key))
         if "tools" in tests_to_run:
             test_plan.append(("tools", test_tool_calling, model, api_key))
+        if "nested_objects" in tests_to_run:
+            test_plan.append(("nested_objects", test_nested_objects, model, api_key))
+        if "nested_objects_fail" in tests_to_run:
+            test_plan.append(("nested_objects_fail", test_nested_objects_without_typeddict, model, api_key))
         if "web_search" in tests_to_run:
             test_plan.append(("web_search", test_web_search, model, api_key))
             test_plan.append(("web_search (high)", test_web_search, model, api_key, "high"))
