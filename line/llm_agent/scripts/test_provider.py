@@ -631,6 +631,7 @@ async def test_nested_objects_without_typeddict(model: str, api_key: str):
     print("=" * 60)
 
     import warnings
+
     # Suppress the expected warning about dict types
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")

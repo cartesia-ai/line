@@ -4,20 +4,16 @@ Unit tests for schema_converter module.
 Tests TypedDict support, nested objects, and strict mode handling.
 """
 
+from typing import Annotated, TypedDict
 import warnings
-from typing import Annotated, Optional, TypedDict
-
-import pytest
 
 from line.llm_agent.schema_converter import (
     _is_typeddict,
-    build_parameters_schema,
     function_tool_to_litellm,
     python_type_to_json_schema,
 )
 from line.llm_agent.tools.decorators import loopback_tool
 from line.llm_agent.tools.utils import ToolEnv
-
 
 # =============================================================================
 # TypedDict Definitions for Testing

@@ -744,7 +744,9 @@ def _get_processed_history(
                 committed_text_buffer = ""
             processed_events.append(event)
 
-    committed_text, remaining_committed, remaining_pending = _parse_committed(committed_text_buffer, pending_text)
+    committed_text, remaining_committed, remaining_pending = _parse_committed(
+        committed_text_buffer, pending_text
+    )
 
     if committed_text:
         processed_events.append(AgentTextSent(content=committed_text))

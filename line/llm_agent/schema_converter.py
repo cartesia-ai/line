@@ -45,7 +45,7 @@ TypedDict Support:
 """
 
 from enum import Enum
-from typing import Any, Dict, List, Literal, Optional, Type, Union, get_args, get_origin, get_type_hints
+from typing import Any, Literal, Optional, Type, Union, get_args, get_origin, get_type_hints
 
 from line.llm_agent.tools.utils import FunctionTool, ParameterInfo
 
@@ -133,7 +133,7 @@ def python_type_to_json_schema(type_annotation: Type, *, strict: bool = True) ->
             schema["additionalProperties"] = False
         return schema
 
-    # Handle List[X]
+    # Handle list[X]
     origin = get_origin(type_annotation)
     args = get_args(type_annotation)
 
@@ -143,11 +143,11 @@ def python_type_to_json_schema(type_annotation: Type, *, strict: bool = True) ->
             return {"type": "array", "items": item_schema}
         return {"type": "array"}
 
-    # Handle Dict[K, V] - error in strict mode since it cannot satisfy OpenAI strict rules
+    # Handle dict[K, V] - error in strict mode since it cannot satisfy OpenAI strict rules
     if origin is dict:
         if strict:
             raise ValueError(
-                "Using 'Dict[K, V]' in tool parameters yields an object schema without explicit "
+                "Using 'dict[K, V]' in tool parameters yields an object schema without explicit "
                 "properties, which cannot satisfy OpenAI strict mode. "
                 "Use TypedDict to define the expected structure. "
                 "See: https://platform.openai.com/docs/guides/structured-outputs"
@@ -312,32 +312,32 @@ def tools_to_litellm(tools: list[FunctionTool], *, strict: bool = True) -> list[
     Convert a list of FunctionTools to LiteLLM format.
 
     Args:
-        tools: List of FunctionTool instances.
+        tools: list of FunctionTool instances.
         strict: Whether to enable strict mode for function tools.
 
     Returns:
-        List of tool definitions.
+        list of tool definitions.
     """
     return [function_tool_to_litellm(t, strict=strict) for t in tools]
 
 
 def function_tools_to_openai(
-    tools: List[FunctionTool],
+    tools: list[FunctionTool],
     *,
     strict: bool = True,
     responses_api: bool = False,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Convert a list of FunctionTools to OpenAI/Realtimes API tool format."""
     return [function_tool_to_openai(t, strict=strict, responses_api=responses_api) for t in tools]
 
 
 def build_openai_tool_defs(
-    tools: Optional[List[FunctionTool]] = None,
+    tools: Optional[list[FunctionTool]] = None,
     *,
-    web_search_options: Optional[Dict[str, Any]] = None,
+    web_search_options: Optional[dict[str, Any]] = None,
     strict: bool = True,
     responses_api: bool = False,
-) -> Optional[List[Dict[str, Any]]]:
+) -> Optional[list[dict[str, Any]]]:
     """Build OpenAI/Realtimes tool definitions including native web search.
 
     WebSocket-mode backends do not use LiteLLM's ``web_search_options`` knob, so
