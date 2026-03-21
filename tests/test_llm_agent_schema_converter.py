@@ -110,7 +110,7 @@ class TestTypedDictSchema:
 
     def test_typeddict_without_strict(self):
         """Should not add additionalProperties when strict=False."""
-        schema = python_type_to_json_schema(SimpleItem, _strict=False)
+        schema = python_type_to_json_schema(SimpleItem, strict=False)
 
         assert schema["type"] == "object"
         assert "additionalProperties" not in schema

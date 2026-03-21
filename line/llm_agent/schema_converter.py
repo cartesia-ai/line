@@ -128,6 +128,7 @@ def python_type_to_json_schema(type_annotation: Type, *, strict: bool = True) ->
         }
         if required:
             schema["required"] = required
+        # Add additionalProperties: false for OpenAI strict mode compatibility
         if strict:
             schema["additionalProperties"] = False
         return schema
