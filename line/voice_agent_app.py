@@ -693,11 +693,6 @@ def _get_processed_history(
     """
     full_emitted = "".join(text for text, _ in emitted_chunks)
 
-    # Debug logging for August issue
-    if "August" in full_emitted:
-        logger.info(f"[DEBUG] full_emitted (last 200 chars): '{full_emitted[-200:]}'")
-        logger.info(f"[DEBUG] emitted_chunks (last 20): {emitted_chunks[-20:]}")
-
     # Build chunk boundaries: (start, end, interruptible)
     chunk_boundaries: List[Tuple[int, int, bool]] = []
     pos = 0
@@ -713,10 +708,6 @@ def _get_processed_history(
     for event in history:
         if isinstance(event, AgentTextSent):
             content = event.content
-            # Debug logging for August issue
-            if "August" in content or "August" in committed_text_buffer:
-                logger.info(f"[DEBUG] AgentTextSent content: '{content}'")
-                logger.info(f"[DEBUG] committed_text_buffer before: '{committed_text_buffer}'")
             # Consume against pre-committed text to avoid double-counting
             if pre_committed_dedup:
                 _, remaining_content, remaining_pre = _consume_expected_ack_back_prefix(
@@ -726,26 +717,10 @@ def _get_processed_history(
                 content = remaining_content
             if content:
                 committed_text_buffer += content
-            # Debug logging for August issue
-            if "August" in committed_text_buffer:
-                logger.info(f"[DEBUG] committed_text_buffer after: '{committed_text_buffer}'")
         else:
-            # Debug logging for August issue
-            if "August" in committed_text_buffer or "August" in pending_text[:100]:
-                logger.info(f"[DEBUG] Before _parse_committed:")
-                logger.info(f"[DEBUG]   committed_text_buffer: '{committed_text_buffer}'")
-                logger.info(f"[DEBUG]   pending_text (first 200): '{pending_text[:200]}'")
-
             committed_text, committed_text_buffer, pending_text = _parse_committed(
                 committed_text_buffer, pending_text
             )
-
-            # Debug logging for August issue
-            if committed_text and "August" in committed_text:
-                logger.info(f"[DEBUG] After _parse_committed:")
-                logger.info(f"[DEBUG]   committed_text: '{committed_text}'")
-                logger.info(f"[DEBUG]   remaining committed_text_buffer: '{committed_text_buffer}'")
-                logger.info(f"[DEBUG]   remaining pending_text (first 200): '{pending_text[:200]}'")
 
             # Check if we need to pre-commit uninterruptible text
             pre_commit = _compute_uninterruptible_precommit(
@@ -769,20 +744,7 @@ def _get_processed_history(
                 committed_text_buffer = ""
             processed_events.append(event)
 
-    # Debug logging for August issue
-    if "August" in committed_text_buffer or "August" in pending_text[:100]:
-        logger.info(f"[DEBUG] Final _parse_committed:")
-        logger.info(f"[DEBUG]   committed_text_buffer: '{committed_text_buffer}'")
-        logger.info(f"[DEBUG]   pending_text (first 200): '{pending_text[:200]}'")
-
     committed_text, remaining_committed, remaining_pending = _parse_committed(committed_text_buffer, pending_text)
-
-    # Debug logging for August issue
-    if committed_text and "August" in committed_text:
-        logger.info(f"[DEBUG] Final result:")
-        logger.info(f"[DEBUG]   committed_text: '{committed_text}'")
-        logger.info(f"[DEBUG]   remaining_committed: '{remaining_committed}'")
-        logger.info(f"[DEBUG]   remaining_pending (first 100): '{remaining_pending[:100]}'")
 
     if committed_text:
         processed_events.append(AgentTextSent(content=committed_text))
@@ -883,17 +845,12 @@ def _parse_committed(committed_buffer_text: str, pending_text: str) -> tuple[str
     ws_buffer: list[str] = []  # buffered whitespace/emoji awaiting next match
     started = False  # whether we've matched at least one character
 
-    # Debug flag for August issue
-    debug_august = "August" in committed_buffer_text
-
     while i < len(committed_buffer_text) and j < len(pending_text):
         c = committed_buffer_text[i]
         p = pending_text[j]
 
         if c == p:
             # Characters match: flush buffered whitespace/emoji and consume both
-            if debug_august and ws_buffer:
-                logger.info(f"[DEBUG _parse_committed] Match '{c}' at i={i}, j={j}, flushing ws_buffer: {ws_buffer}")
             started = True
             result.extend(ws_buffer)
             ws_buffer = []
@@ -902,21 +859,15 @@ def _parse_committed(committed_buffer_text: str, pending_text: str) -> tuple[str
             j += 1
         elif _is_stripped_by_harness(p):
             # Whitespace/emoji in pending: buffer it for potential inclusion
-            if debug_august:
-                logger.info(f"[DEBUG _parse_committed] Whitespace '{repr(p)}' at j={j}, started={started}, buffering={started}")
             if started:
                 ws_buffer.append(p)
             j += 1
         elif c in FULL_STOP_CHARS:
             # TTS-inserted full stop not present in pending: skip it
-            if debug_august:
-                logger.info(f"[DEBUG _parse_committed] Skipping full stop '{c}' at i={i}")
             i += 1
         else:
             # Non-matching text in pending (TTS dropped this content):
             # skip and discard any buffered whitespace around it
-            if debug_august:
-                logger.info(f"[DEBUG _parse_committed] Non-match: c='{c}' at i={i}, p='{p}' at j={j}, discarding ws_buffer: {ws_buffer}")
             ws_buffer = []
             j += 1
 
@@ -929,11 +880,6 @@ def _parse_committed(committed_buffer_text: str, pending_text: str) -> tuple[str
     # Any buffered whitespace/emoji that was never flushed (no subsequent match)
     # must be returned to remaining_pending so it's available for future alignment.
     remaining_pending = "".join(ws_buffer) + pending_text[j:]
-
-    if debug_august:
-        logger.info(f"[DEBUG _parse_committed] Final result: '{committed_str}'")
-        logger.info(f"[DEBUG _parse_committed] remaining_committed: '{remaining_committed}'")
-        logger.info(f"[DEBUG _parse_committed] i={i}, j={j}, ws_buffer={ws_buffer}")
 
     return committed_str, remaining_committed, remaining_pending
 
