@@ -362,7 +362,6 @@ class ConversationRunner:
                 # Receive message from WebSocket
                 message = await self.websocket.receive_json()
                 input_msg = TypeAdapter(InputMessage).validate_python(message)
-                logger.info(f"Received input message: {input_msg}")
 
                 # Convert and process the input message
                 event = self._convert_input_message(input_msg)
@@ -516,10 +515,6 @@ class ConversationRunner:
         """
         raw_history = history + [raw_event]
         # Process history to restore whitespace before passing to agent
-        if getattr(raw_event, "content", None) and "August" in raw_event.content:
-            logger.info("AUGUST ")
-            logger.info(f"{self.emitted_agent_text}")
-            logger.info(f"{raw_history}")
         processed_history = _get_processed_history(self.emitted_agent_text, raw_history)
         processed_event = processed_history[-1]
         # Extract base data excluding history (we'll set it explicitly)
@@ -744,10 +739,7 @@ def _get_processed_history(
                 committed_text_buffer = ""
             processed_events.append(event)
 
-    committed_text, remaining_committed, remaining_pending = _parse_committed(
-        committed_text_buffer, pending_text
-    )
-
+    committed_text, _, _ = _parse_committed(committed_text_buffer, pending_text)
     if committed_text:
         processed_events.append(AgentTextSent(content=committed_text))
     return processed_events
