@@ -50,6 +50,36 @@ from typing import Any, Literal, Optional, Type, Union, get_args, get_origin, ge
 from line.llm_agent.tools.utils import FunctionTool, ParameterInfo
 
 
+def _openai_strict_object_violation(schema: dict[str, Any]) -> bool:
+    """Return True if an object schema uses OpenAI-style strict locking but breaks the rule.
+
+    In strict mode, every key in ``properties`` must appear in ``required`` when
+    ``additionalProperties`` is false.
+    """
+    if schema.get("type") != "object" or schema.get("additionalProperties") is not False:
+        return False
+    props = schema.get("properties") or {}
+    if not props:
+        return False
+    required = set(schema.get("required", []))
+    return set(props.keys()) != required
+
+
+def _json_schema_violates_openai_strict(node: Any) -> bool:
+    """Walk a JSON Schema dict and detect object nodes invalid for OpenAI strict mode."""
+    if isinstance(node, dict):
+        if _openai_strict_object_violation(node):
+            return True
+        for v in node.values():
+            if _json_schema_violates_openai_strict(v):
+                return True
+    elif isinstance(node, list):
+        for item in node:
+            if _json_schema_violates_openai_strict(item):
+                return True
+    return False
+
+
 def _is_typeddict(tp: Type) -> bool:
     """Check if a type is a TypedDict.
 
@@ -128,8 +158,10 @@ def python_type_to_json_schema(type_annotation: Type, *, strict: bool = True) ->
         }
         if required:
             schema["required"] = required
-        # Add additionalProperties: false for OpenAI strict mode compatibility
-        if strict:
+        # OpenAI strict mode requires every property in ``required`` when using
+        # additionalProperties: false. Skip locking for TypedDict fields that
+        # are optional (total=False or NotRequired).
+        if strict and not type_annotation.__optional_keys__:
             schema["additionalProperties"] = False
         return schema
 
@@ -226,29 +258,7 @@ def build_parameters_schema(parameters: dict[str, ParameterInfo], *, strict: boo
     return schema
 
 
-def _build_function_tool_payload(tool: FunctionTool, *, strict: bool = True) -> Dict[str, Any]:
-    """Build the shared OpenAI-style function payload for a FunctionTool."""
-    params_schema = build_parameters_schema(tool.parameters)
-
-    # Disable strict mode if any parameters are optional, since OpenAI strict
-    # mode requires every property to be listed in 'required'.
-    has_optional = any(not p.required for p in tool.parameters.values())
-    use_strict = strict and not has_optional
-
-    if use_strict:
-        params_schema["additionalProperties"] = False
-
-    payload: Dict[str, Any] = {
-        "name": tool.name,
-        "description": tool.description,
-        "parameters": params_schema,
-    }
-    if use_strict:
-        payload["strict"] = True
-    return payload
-
-
-def function_tool_to_litellm(tool: FunctionTool, *, strict: bool = True) -> Dict[str, Any]:
+def function_tool_to_litellm(tool: FunctionTool, *, strict: bool = True) -> dict[str, Any]:
     """
     Convert a FunctionTool to LiteLLM (OpenAI Chat Completions) tool format.
 

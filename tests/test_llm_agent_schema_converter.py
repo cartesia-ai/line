@@ -9,6 +9,7 @@ import warnings
 
 from line.llm_agent.schema_converter import (
     _is_typeddict,
+    _json_schema_violates_openai_strict,
     function_tool_to_litellm,
     python_type_to_json_schema,
 )
@@ -119,6 +120,9 @@ class TestTypedDictSchema:
         assert "properties" in schema
         # With total=False, no fields are required
         assert "required" not in schema or schema.get("required") == []
+        # additionalProperties: false is invalid with OpenAI strict unless every key is required
+        assert "additionalProperties" not in schema
+        assert not _json_schema_violates_openai_strict(schema)
 
     def test_nested_typeddict(self):
         """Should handle nested TypedDict correctly."""
@@ -233,3 +237,22 @@ class TestFunctionToolWithTypedDict:
         # Check nested item has additionalProperties: false
         item_schema = data_schema["properties"]["item"]
         assert item_schema["additionalProperties"] is False
+
+    def test_tool_with_required_optional_typeddict_enables_strict(self):
+        """Required param typed as total=False TypedDict must not break OpenAI strict."""
+
+        @loopback_tool
+        async def with_opts(
+            ctx: ToolEnv,
+            payload: Annotated[ItemWithOptional, "Optional keys only"],
+        ):
+            """Use optional-key TypedDict."""
+            pass
+
+        spec = function_tool_to_litellm(with_opts)
+        assert spec["function"].get("strict") is True
+        params = spec["function"]["parameters"]
+        assert params.get("additionalProperties") is False
+        assert not _json_schema_violates_openai_strict(params)
+        payload = params["properties"]["payload"]
+        assert "additionalProperties" not in payload
