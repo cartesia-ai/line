@@ -151,7 +151,10 @@ class VoiceAgentApp:
 
         self.fastapi_app.add_api_route("/chats", self.create_chat_session, methods=["POST"])
         self.fastapi_app.add_api_route("/status", self.get_status, methods=["GET"])
-        self.fastapi_app.add_websocket_route(self.ws_route, self.websocket_endpoint)
+        ws_adder = (
+            getattr(self.fastapi_app, "add_websocket_route", None) or self.fastapi_app.add_api_websocket_route
+        )
+        ws_adder(self.ws_route, self.websocket_endpoint)
 
     async def create_chat_session(self, request: Request) -> dict:
         """Create a new chat session and return the websocket URL."""
