@@ -34,7 +34,7 @@ dependencies = [
     "python-dotenv==1.0.0",
     "loguru==0.7.0",
     "fastapi==0.115.0",
-    "aiohttp==3.8.0",
+    "aiohttp==3.13.3",
     "pydantic==2.0.0,<3",
     "uvicorn==0.35.0,<1",
     "websockets==13.0.0",
