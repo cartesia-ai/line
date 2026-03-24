@@ -82,10 +82,6 @@ class LlmAgent:
             raise ValueError("Missing API key in LLmAgent initialization")
 
         model_config = _get_model_config(model)
-        if model_config is None:
-            raise ValueError(
-                f"Model {model} is not supported. See https://models.litellm.ai/ for supported models."
-            )
 
         # Resolve the base config to insert default values for any _UNSET sentinels.
         effective_config = _normalize_config(config or LlmConfig())

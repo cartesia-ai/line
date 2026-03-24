@@ -91,8 +91,7 @@ class _WebSocketProvider:
         self._lock: Optional[asyncio.Lock] = None
 
     def _get_lock(self) -> asyncio.Lock:
-        if self._lock is None:
-            self._lock = asyncio.Lock()
+        self._lock = self._lock or asyncio.Lock()
         return self._lock
 
     # --- Public interface ---
@@ -334,15 +333,22 @@ def _build_request(
     instructions: Optional[str],
     tool_defs: Optional[List[Dict[str, Any]]],
     cfg: LlmConfig,
-    **extra: Any,
+    input: Optional[List[Dict[str, Any]]] = None,
+    previous_response_id: Optional[str] = None,
+    generate: Optional[bool] = None,
 ) -> Dict[str, Any]:
     """Build a ``response.create`` request dict."""
     request: Dict[str, Any] = {
         "type": "response.create",
         "model": _normalize_openai_model_name(model),
         "store": True,
-        **extra,
     }
+    if input is not None:
+        request["input"] = input
+    if previous_response_id is not None:
+        request["previous_response_id"] = previous_response_id
+    if generate is not None:
+        request["generate"] = generate
     if instructions is not None:
         request["instructions"] = instructions
     if tool_defs is not None:

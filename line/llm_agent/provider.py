@@ -370,15 +370,13 @@ def _is_websocket_model(model: str) -> bool:
 
 
 # Backward-compat alias — emits a deprecation warning on instantiation.
-class LLMProvider(LlmProvider):
+def LLMProvider(*args, **kwargs):
     """Deprecated: use :class:`LlmProvider` instead."""
+    import warnings
 
-    def __init__(self, *args, **kwargs):
-        import warnings
-
-        warnings.warn(
-            "LLMProvider is deprecated, use LlmProvider instead",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        super().__init__(*args, **kwargs)
+    warnings.warn(
+        "LLMProvider is deprecated, use LlmProvider instead",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return LlmProvider(*args, **kwargs)

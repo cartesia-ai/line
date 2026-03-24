@@ -152,7 +152,17 @@ class _RealtimeProvider:
         await lock.acquire()
         try:
             await self._ensure_connected()
-            await self._apply_diff(messages, tools, config, web_search_options=web_search_options)
+
+            plan = _plan_chat(self._history, messages, tools, config, web_search_options=web_search_options)
+            if plan.reconnect:
+                await self._reconnect()
+
+            for event, _ in plan.steps:
+                await self._ws.send(json.dumps(event))
+
+            for _, update in plan.steps:
+                ack = await self._recv_ack()
+                self._history = update(self._history, ack)
             await self._ws.send(json.dumps({"type": "response.create"}))
         except BaseException:
             lock.release()
