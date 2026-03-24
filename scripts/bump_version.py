@@ -9,6 +9,7 @@ Usage:
     python scripts/bump_version.py --patch   # 0.1.9 -> 0.1.10
     python scripts/bump_version.py --minor   # 0.1.9 -> 0.2.0
     python scripts/bump_version.py --major   # 0.1.9 -> 1.0.0
+    python scripts/bump_version.py --release # 0.2.4a2 -> 0.2.4
 """
 
 import argparse
@@ -31,13 +32,21 @@ def get_current_version(pyproject_path: Path) -> Union[str, None]:
     return None
 
 
+def strip_prerelease(patch_str: str) -> int:
+    """Strip pre-release suffixes (e.g. '4a2' -> 4, '1rc1' -> 1)."""
+    match = re.match(r"(\d+)", patch_str)
+    if not match:
+        raise ValueError(f"Cannot parse patch version: {patch_str}")
+    return int(match.group(1))
+
+
 def bump_version(version: str, bump_type: str) -> str:
     """Bump version according to semver."""
     parts = version.split(".")
     if len(parts) != 3:
         raise ValueError(f"Invalid version format: {version}. Expected X.Y.Z")
 
-    major, minor, patch = int(parts[0]), int(parts[1]), int(parts[2])
+    major, minor, patch = int(parts[0]), int(parts[1]), strip_prerelease(parts[2])
 
     if bump_type == "major":
         return f"{major + 1}.0.0"
@@ -45,6 +54,8 @@ def bump_version(version: str, bump_type: str) -> str:
         return f"{major}.{minor + 1}.0"
     elif bump_type == "patch":
         return f"{major}.{minor}.{patch + 1}"
+    elif bump_type == "release":
+        return f"{major}.{minor}.{patch}"
     else:
         raise ValueError(f"Unknown bump type: {bump_type}")
 
@@ -98,6 +109,7 @@ def main():
     bump_group.add_argument("--major", action="store_true", help="Bump major version (X.0.0)")
     bump_group.add_argument("--minor", action="store_true", help="Bump minor version (0.X.0)")
     bump_group.add_argument("--patch", action="store_true", help="Bump patch version (0.0.X)")
+    bump_group.add_argument("--release", action="store_true", help="Strip pre-release tag (0.2.4a2 -> 0.2.4)")
     parser.add_argument(
         "--dry-run", action="store_true", help="Show what would be changed without making changes"
     )
@@ -109,6 +121,8 @@ def main():
         bump_type = "major"
     elif args.minor:
         bump_type = "minor"
+    elif args.release:
+        bump_type = "release"
     else:
         bump_type = "patch"
 
