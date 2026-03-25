@@ -473,3 +473,44 @@ async def test_callable_agent(anyio_backend):
     outputs = await _collect(wrapper)
     texts = _texts(outputs)
     assert texts == ["Hello ", "world"]
+
+
+# =============================================================================
+# Stream Mode (AsyncIterable input)
+# =============================================================================
+
+
+async def test_stream_mode(anyio_backend):
+    """word_buffer accepts an AsyncIterable[OutputEvent] directly."""
+
+    async def event_stream():
+        yield AgentSendText(text="Hum")
+        yield AgentSendText(text="ana")
+        yield AgentSendText(text=" is")
+        yield AgentSendText(text=" great")
+
+    results = []
+    async for output in word_buffer(event_stream()):
+        results.append(output)
+    texts = _texts(results)
+    assert texts == ["Humana ", "is ", "great"]
+
+
+async def test_stream_mode_with_non_text_events(anyio_backend):
+    """Stream mode passes non-text events through immediately."""
+    metric = LogMetric(name="test", value=1)
+
+    async def event_stream():
+        yield AgentSendText(text="Hello")
+        yield metric
+        yield AgentSendText(text=" world")
+
+    results = []
+    async for output in word_buffer(event_stream()):
+        results.append(output)
+
+    assert results[0] == metric
+    assert isinstance(results[1], AgentSendText)
+    assert results[1].text == "Hello "
+    assert isinstance(results[2], AgentSendText)
+    assert results[2].text == "world"

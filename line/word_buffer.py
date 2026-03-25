@@ -7,31 +7,45 @@ This wrapper buffers streamed text and emits complete words.
 
 from __future__ import annotations
 
-from typing import AsyncIterable
+from typing import AsyncIterable, Union, overload
 
 from line.agent import Agent, TurnEnv, call_agent
 from line.events import AgentSendText, InputEvent, OutputEvent
 
 
-def word_buffer(agent: Agent, *, strategy: str = "auto") -> WordBufferingWrapper:
-    """Wrap an agent to buffer text and emit complete words.
+@overload
+def word_buffer(
+    source: AsyncIterable[OutputEvent], *, strategy: str = "auto"
+) -> AsyncIterable[OutputEvent]: ...
 
-    Ensures pronunciation dictionaries can match complete words
-    rather than partial LLM token fragments.
+
+@overload
+def word_buffer(source: Agent, *, strategy: str = "auto") -> WordBufferingWrapper: ...
+
+
+def word_buffer(
+    source: Union[Agent, AsyncIterable[OutputEvent]], *, strategy: str = "auto"
+) -> Union[WordBufferingWrapper, AsyncIterable[OutputEvent]]:
+    """Buffer text and emit complete words for pronunciation dictionary support.
+
+    Accepts either an Agent or an AsyncIterable of OutputEvents.
 
     Args:
-        agent: The inner agent to wrap.
+        source: An Agent to wrap, or an AsyncIterable[OutputEvent] to buffer.
         strategy: Buffering strategy.
             "auto" (default): Buffer on whitespace for space-delimited scripts,
                 emit immediately for CJK/Thai/Khmer/Lao scripts.
             "space": Always buffer on whitespace boundaries only.
 
     Returns:
-        A wrapped agent satisfying the Agent protocol.
+        If given an Agent: a wrapped agent satisfying the Agent protocol.
+        If given an AsyncIterable: a buffered AsyncIterable[OutputEvent].
     """
     if strategy not in ("auto", "space"):
         raise ValueError(f"Unknown strategy: {strategy!r}. Must be 'auto' or 'space'.")
-    return WordBufferingWrapper(agent, strategy=strategy)
+    if hasattr(source, "__aiter__"):
+        return _buffer_events(source, strategy)  # type: ignore[arg-type]
+    return WordBufferingWrapper(source, strategy=strategy)  # type: ignore[arg-type]
 
 
 class WordBufferingWrapper:
@@ -46,43 +60,49 @@ class WordBufferingWrapper:
         self._strategy = strategy
 
     async def process(self, env: TurnEnv, event: InputEvent) -> AsyncIterable[OutputEvent]:
-        text_buffer = ""
-        last_interruptible = True
-
-        async for output in call_agent(self._agent, env, event):
-            if not isinstance(output, AgentSendText):
-                yield output
-                continue
-
-            text_buffer += output.text
-            last_interruptible = last_interruptible and output.interruptible
-
-            # Auto strategy: if new text contains CJK/spaceless script, flush immediately
-            if self._strategy == "auto" and _contains_spaceless_script(output.text):
-                if text_buffer:
-                    yield AgentSendText(text=text_buffer, interruptible=last_interruptible)
-                    text_buffer = ""
-                    last_interruptible = True
-                continue
-
-            # Emit complete words (up to last whitespace)
-            last_ws = _rfind_whitespace(text_buffer)
-            if last_ws >= 0:
-                to_emit = text_buffer[: last_ws + 1]
-                text_buffer = text_buffer[last_ws + 1 :]
-                if to_emit:
-                    yield AgentSendText(text=to_emit, interruptible=last_interruptible)
-                    if not text_buffer:
-                        last_interruptible = True
-
-        # Flush remaining buffer
-        if text_buffer:
-            yield AgentSendText(text=text_buffer, interruptible=last_interruptible)
+        async for output in _buffer_events(call_agent(self._agent, env, event), self._strategy):
+            yield output
 
     async def cleanup(self) -> None:
         """Delegate cleanup to the inner agent if it supports it."""
         if hasattr(self._agent, "cleanup"):
             await self._agent.cleanup()
+
+
+async def _buffer_events(events: AsyncIterable[OutputEvent], strategy: str) -> AsyncIterable[OutputEvent]:
+    """Core buffering logic operating on an async iterable of events."""
+    text_buffer = ""
+    last_interruptible = True
+
+    async for output in events:
+        if not isinstance(output, AgentSendText):
+            yield output
+            continue
+
+        text_buffer += output.text
+        last_interruptible = last_interruptible and output.interruptible
+
+        # Auto strategy: if new text contains CJK/spaceless script, flush immediately
+        if strategy == "auto" and _contains_spaceless_script(output.text):
+            if text_buffer:
+                yield AgentSendText(text=text_buffer, interruptible=last_interruptible)
+                text_buffer = ""
+                last_interruptible = True
+            continue
+
+        # Emit complete words (up to last whitespace)
+        last_ws = _rfind_whitespace(text_buffer)
+        if last_ws >= 0:
+            to_emit = text_buffer[: last_ws + 1]
+            text_buffer = text_buffer[last_ws + 1 :]
+            if to_emit:
+                yield AgentSendText(text=to_emit, interruptible=last_interruptible)
+                if not text_buffer:
+                    last_interruptible = True
+
+    # Flush remaining buffer
+    if text_buffer:
+        yield AgentSendText(text=text_buffer, interruptible=last_interruptible)
 
 
 # ---------------------------------------------------------------------------
