@@ -49,6 +49,7 @@ from line.voice_agent_app import (
     PreCallResult,
     VoiceAgentApp,
 )
+from line.word_buffer import word_buffer
 
 __all__ = [
     # Voice Agent App
@@ -95,4 +96,6 @@ __all__ = [
     "CustomHistoryEntry",
     # History
     "HistoryEvent",
+    # Utilities
+    "word_buffer",
 ]

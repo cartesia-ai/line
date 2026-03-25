@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 import logging
 from typing import Annotated, Any, Dict, Literal, Optional
 
-from line.agent import Agent
+from line.agent import Agent, call_agent
 from line.events import (
     AgentEndCall,
     AgentHandedOff,
@@ -534,12 +534,12 @@ def agent_as_handoff(
                 )
 
             # Trigger the agent's introduction via CallStarted
-            async for output in _call_agent(agent, ctx.turn_env, CallStarted()):
+            async for output in call_agent(agent, ctx.turn_env, CallStarted()):
                 yield output
             return
 
         # Delegate subsequent events to the agent
-        async for output in _call_agent(agent, ctx.turn_env, event):
+        async for output in call_agent(agent, ctx.turn_env, event):
             yield output
 
     # Use construct_function_tool to create the FunctionTool
@@ -549,16 +549,6 @@ def agent_as_handoff(
         description=description,
         tool_type=ToolType.HANDOFF,
     )
-
-
-def _call_agent(agent: Agent, turn_env, event):
-    """Call an agent, handling both AgentClass and AgentCallable."""
-    if hasattr(agent, "process"):
-        # AgentClass with process method
-        return agent.process(turn_env, event)
-    else:
-        # AgentCallable
-        return agent(turn_env, event)
 
 
 __all__ = [
