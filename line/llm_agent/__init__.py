@@ -17,7 +17,7 @@ from line.llm_agent.history import History
 from line.llm_agent.llm_agent import LlmAgent
 
 # Provider facade
-from line.llm_agent.provider import LlmProvider
+from line.llm_agent.provider import LlmProvider, LLMProvider
 
 # Tool type decorators
 from line.llm_agent.tools.decorators import handoff_tool, loopback_tool, passthrough_tool
@@ -50,6 +50,7 @@ __all__ = [
     "LlmAgent",
     # Provider
     "LlmProvider",
+    "LLMProvider",
     # Configuration
     "LlmConfig",
     "FALLBACK_SYSTEM_PROMPT",

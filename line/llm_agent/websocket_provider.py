@@ -21,7 +21,7 @@ Protocol reference: https://developers.openai.com/api/docs/guides/websocket-mode
 
 import asyncio
 import json
-from typing import Any, AsyncIterable, Callable, Dict, List, Optional
+from typing import Any, AsyncIterable, Callable, Dict, List, Optional, Tuple
 
 from loguru import logger
 
@@ -194,6 +194,7 @@ class _WebSocketProvider:
     async def _ensure_connected(self) -> None:
         if _ws_is_closed(self._ws):
             self._ws = await _ws_connect(WS_URL, self._api_key)
+            self._history = []
             logger.debug("WebSocket mode connected to Responses API")
 
     async def _setup_chat(self, messages, tools, config, *, web_search_options=None):
@@ -249,7 +250,7 @@ def _plan_chat(
     tools: Optional[List[FunctionTool]],
     config: LlmConfig,
     web_search_options: Optional[Dict[str, Any]] = None,
-) -> tuple:
+) -> Tuple[Dict[str, Any], HistoryUpdate]:
     """Compute the request to send and the history update callback.
 
     Returns ``(request_dict, update_fn)`` where

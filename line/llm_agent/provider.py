@@ -100,7 +100,8 @@ class ProviderProtocol(Protocol):
         self,
         config: LlmConfig,
         tools: Optional[List[Any]] = None,
-        **kwargs: Any,
+        *,
+        web_search_options: Optional[Any] = None,
     ) -> None: ...
 
     async def aclose(self) -> None: ...
