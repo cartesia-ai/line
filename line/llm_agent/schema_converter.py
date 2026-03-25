@@ -50,16 +50,26 @@ from typing import Any, Literal, Optional, Type, Union, get_args, get_origin, ge
 from line.llm_agent.tools.utils import FunctionTool, ParameterInfo
 
 
-def _openai_strict_object_violation(schema: dict[str, Any]) -> bool:
-    """Return True if an object schema uses OpenAI-style strict locking but breaks the rule.
+def _object_schema_incompatible_with_openai_strict(schema: dict[str, Any]) -> bool:
+    """Return True if an object-shaped JSON Schema node breaks OpenAI function strict mode.
 
-    In strict mode, every key in ``properties`` must appear in ``required`` when
-    ``additionalProperties`` is false.
+    OpenAI requires every object at every nesting level to set ``additionalProperties`` to
+    ``false``. When that lock is present, every key in ``properties`` must also appear in
+    ``required``. Objects that omit the lock (e.g. ``total=False`` TypedDict) are invalid
+    under a parent tool with ``strict: true`` and must trigger falling back to non-strict.
     """
-    if schema.get("type") != "object" or schema.get("additionalProperties") is not False:
+    is_object = schema.get("type") == "object" or "properties" in schema
+    if not is_object:
         return False
-    props = schema.get("properties") or {}
-    if not props:
+
+    props = schema.get("properties")
+    if props is not None and not isinstance(props, dict):
+        return False
+
+    if schema.get("additionalProperties") is not False:
+        return True
+
+    if not isinstance(props, dict) or not props:
         return False
     required = set(schema.get("required", []))
     return set(props.keys()) != required
@@ -68,7 +78,7 @@ def _openai_strict_object_violation(schema: dict[str, Any]) -> bool:
 def _json_schema_violates_openai_strict(node: Any) -> bool:
     """Walk a JSON Schema dict and detect object nodes invalid for OpenAI strict mode."""
     if isinstance(node, dict):
-        if _openai_strict_object_violation(node):
+        if _object_schema_incompatible_with_openai_strict(node):
             return True
         for v in node.values():
             if _json_schema_violates_openai_strict(v):
