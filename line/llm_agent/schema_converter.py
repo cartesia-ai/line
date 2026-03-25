@@ -251,5 +251,5 @@ def build_openai_tool_defs(
     """
     tool_defs = function_tools_to_openai(tools, strict=strict, responses_api=responses_api) if tools else []
     if web_search_options is not None:
-        tool_defs.append({"type": "web_search", "name": "web_search", **web_search_options})
+        tool_defs.append({"type": "web_search", **web_search_options})
     return tool_defs or None

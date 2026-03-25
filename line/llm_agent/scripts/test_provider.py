@@ -7,8 +7,8 @@ Usage:
 
 Options:
     --tests TESTS       Comma-separated list of tests to run. Available tests:
-                        streaming, introduction, tools, end_call, end_call_eval,
-                        form_eval, web_search, all (default: all)
+                        streaming, introduction, tools, web_search,
+                        web_search_fn, mcp, reset, all (default: all)
     --runs N            Number of iterations for eval tests (default: 3)
     --model MODEL       Only test specific model (e.g., "gpt-4o-mini")
 
@@ -416,14 +416,90 @@ async def test_mcp_tool_execution(model: str, api_key: str):
     print("✓ MCP tool execution test completed")
 
 
+async def test_conversation_reset(model: str, api_key: str):
+    """Test resetting a conversation to an earlier point.
+
+    Exercises the WebSocket provider's divergence detection by:
+    1. Running a 2-turn conversation (user sets a secret word, assistant acks).
+    2. Asking the model to recall the secret word (turn 3).
+    3. Resetting: re-sending turns 1-2 with a *different* secret word,
+       then asking the model to recall it again (turn 3').
+    4. Verifying the model answers with the *new* secret word, confirming
+       the provider rolled back correctly.
+    """
+    print("\n" + "=" * 60)
+    print(f"Testing conversation reset with {model}")
+    print("=" * 60)
+
+    provider = LlmProvider(model=model, api_key=api_key)
+
+    async def collect_text(stream) -> str:
+        parts = []
+        async for chunk in stream:
+            if chunk.text:
+                parts.append(chunk.text)
+        return "".join(parts)
+
+    # Turn 1: shared greeting — captures the real assistant response.
+    history = [Message(role="user", content="Hi, I'm testing multi-turn. Just say OK.")]
+    print("--- Turn 1: greeting ---")
+    turn1_reply = await collect_text(provider.chat(history))
+    print(f"Model says: {turn1_reply.strip()}")
+    history.append(Message(role="assistant", content=turn1_reply))
+
+    # Turn 2 (branch A): set secret word = banana.
+    history.append(Message(role="user", content="The secret word is 'banana'. Just say OK."))
+    print("--- Turn 2a: secret word = banana ---")
+    turn2a_reply = await collect_text(provider.chat(history))
+    print(f"Model says: {turn2a_reply.strip()}")
+    history.append(Message(role="assistant", content=turn2a_reply))
+
+    # Turn 3 (branch A): ask for the secret word.
+    history.append(
+        Message(role="user", content="What is the secret word? Reply with ONLY the word, nothing else.")
+    )
+    print("--- Turn 3a: recall ---")
+    response_a = await collect_text(provider.chat(history))
+    print(f"Model says: {response_a.strip()}")
+
+    # Branch B: rewind to after turn 1, set a different secret word.
+    # Keeps the first two messages (user + real assistant reply) intact,
+    # so divergence happens at message index 2.
+    history_b = history[:2]  # user greeting + real assistant reply
+    history_b.append(Message(role="user", content="The secret word is 'giraffe'. Just say OK."))
+    print("--- Turn 2b (reset at message 2): secret word = giraffe ---")
+    turn2b_reply = await collect_text(provider.chat(history_b))
+    print(f"Model says: {turn2b_reply.strip()}")
+    history_b.append(Message(role="assistant", content=turn2b_reply))
+
+    # Turn 3 (branch B): ask for the secret word again.
+    history_b.append(
+        Message(role="user", content="What is the secret word? Reply with ONLY the word, nothing else.")
+    )
+    print("--- Turn 3b: recall after reset ---")
+    response_b = await collect_text(provider.chat(history_b))
+    print(f"Model says: {response_b.strip()}")
+
+    a_ok = "banana" in response_a.lower()
+    b_ok = "giraffe" in response_b.lower()
+
+    if a_ok and b_ok:
+        print("✓ Conversation reset test passed")
+    elif not a_ok:
+        raise AssertionError(f"Branch A failed — expected 'banana', got: {response_a.strip()!r}")
+    else:
+        raise AssertionError(f"Branch B failed — expected 'giraffe', got: {response_b.strip()!r}")
+
+
 # =============================================================================
 # Main
 # =============================================================================
 
 MODELS = [
     ("OPENAI_API_KEY", "openai/gpt-5.2"),
-    ("OPENAI_API_KEY", "openai/gpt-5.2-mini"),
-    ("OPENAI_API_KEY", "openai/gpt-5.2-nano"),
+    ("OPENAI_API_KEY", "openai/gpt-5.4"),
+    ("OPENAI_API_KEY", "openai/gpt-5.4-mini"),
+    ("OPENAI_API_KEY", "openai/gpt-5.4-nano"),
     ("OPENAI_API_KEY", "openai/gpt-realtime"),
     ("ANTHROPIC_API_KEY", "anthropic/claude-haiku-4-5"),
     ("GEMINI_API_KEY", "gemini/gemini-2.5-flash"),
@@ -438,6 +514,7 @@ AVAILABLE_TESTS = [
     "web_search",  # test_web_search
     "web_search_fn",  # test_function_tools_with_web_search
     "mcp",  # test_mcp_list_tools and test_mcp_tool_execution
+    "reset",  # test_conversation_reset
 ]
 
 
@@ -464,6 +541,11 @@ def parse_args():
         type=str,
         default=None,
         help="Only test specific model (e.g., 'openai/gpt-5-2')",
+    )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Enable debug logging",
     )
     return parser.parse_args()
 
@@ -545,6 +627,8 @@ async def main(args):
         if "mcp" in tests_to_run:
             test_plan.append(("mcp_list_tools", test_mcp_list_tools, model, api_key))
             test_plan.append(("mcp_tool_execution", test_mcp_tool_execution, model, api_key))
+        if "reset" in tests_to_run:
+            test_plan.append(("reset", test_conversation_reset, model, api_key))
 
         for test_entry in test_plan:
             test_name, test_fn, *test_args = test_entry
@@ -581,8 +665,9 @@ if __name__ == "__main__":
     # Suppress litellm colored output
     litellm.suppress_debug_info = True
 
-    # Suppress loguru output
-    logger.disable("line")
+    # Suppress loguru output unless --debug
+    if not args.debug:
+        logger.disable("line")
 
     try:
         exit_code = asyncio.run(main(args))

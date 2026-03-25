@@ -1,18 +1,19 @@
 """Tests for the Realtime WebSocket provider."""
 
-from line.llm_agent.config import LlmConfig
+from line.llm_agent.config import LlmConfig, _normalize_config
 from line.llm_agent.provider import Message, ToolCall
 from line.llm_agent.realtime_provider import RECONNECT_THRESHOLD, _plan_chat, _track_output_items
 from line.llm_agent.stream import _context_identity, _expand_messages
 
 
-def _ctx_id(instructions=None, tool_defs=None, config=None):
-    """Helper to build a context identity matching what _plan_chat computes.
+def _cfg(**overrides):
+    """Return a normalized LlmConfig with optional overrides."""
+    return _normalize_config(LlmConfig(**overrides))
 
-    Uses raw config values (including _UNSET sentinels) to match the identity
-    that _plan_chat generates internally.
-    """
-    cfg = config or LlmConfig()
+
+def _ctx_id(instructions=None, tool_defs=None, config=None):
+    """Helper to build a context identity matching what _plan_chat computes."""
+    cfg = config or _cfg()
     return _context_identity(instructions, tool_defs, temperature=cfg.temperature, max_tokens=cfg.max_tokens)
 
 
@@ -29,7 +30,7 @@ def test_plan_chat_session_update_on_sampling_change():
         history=state,
         messages=messages,
         tools=None,
-        config=LlmConfig(temperature=0.9, max_tokens=200),
+        config=_cfg(temperature=0.9, max_tokens=200),
     )
 
     assert not diff.reconnect
@@ -37,7 +38,7 @@ def test_plan_chat_session_update_on_sampling_change():
     assert event["type"] == "session.update"
     session = event["session"]
     assert session["instructions"] == "stay concise"
-    assert session["tools"] is None
+    assert session["tools"] == []
     assert session["temperature"] == 0.9
     assert session["max_response_output_tokens"] == 200
 
@@ -60,17 +61,17 @@ def test_plan_chat_clears_session_fields():
         history=state,
         messages=messages,
         tools=None,
-        config=LlmConfig(temperature=None, max_tokens=None),
+        config=_cfg(temperature=None, max_tokens=None),
     )
 
     assert not diff.reconnect
     event, _ = diff.steps[0]
     assert event["type"] == "session.update"
     session = event["session"]
-    assert session["instructions"] is None
-    assert session["tools"] is None
-    assert session["temperature"] is None
-    assert session["max_response_output_tokens"] is None
+    assert session["instructions"] == ""
+    assert session["tools"] == []
+    assert "temperature" not in session
+    assert "max_response_output_tokens" not in session
 
 
 def test_plan_chat_uses_config_system_prompt():
@@ -78,7 +79,7 @@ def test_plan_chat_uses_config_system_prompt():
         history=[],
         messages=[Message(role="user", content="hi")],
         tools=None,
-        config=LlmConfig(system_prompt="stay concise"),
+        config=_cfg(system_prompt="stay concise"),
     )
 
     event, _ = diff.steps[0]
@@ -91,15 +92,13 @@ def test_plan_chat_includes_native_web_search_tool():
         history=[],
         messages=[Message(role="user", content="hi")],
         tools=None,
-        config=LlmConfig(),
+        config=_cfg(),
         web_search_options={"search_context_size": "high"},
     )
 
     event, _ = diff.steps[0]
     assert event["type"] == "session.update"
-    assert event["session"]["tools"] == [
-        {"type": "web_search", "name": "web_search", "search_context_size": "high"}
-    ]
+    assert event["session"]["tools"] == [{"type": "web_search", "search_context_size": "high"}]
 
 
 def test_plan_chat_append_only():
@@ -120,7 +119,7 @@ def test_plan_chat_append_only():
             Message(role="user", content="what's up?"),
         ],
         tools=None,
-        config=LlmConfig(),
+        config=_cfg(),
     )
 
     assert not diff.reconnect
@@ -148,7 +147,7 @@ def test_plan_chat_deletes_divergent_suffix():
             Message(role="assistant", content="new response"),
         ],
         tools=None,
-        config=LlmConfig(),
+        config=_cfg(),
     )
 
     assert not diff.reconnect
@@ -169,7 +168,7 @@ def test_plan_chat_reconnect_on_large_diff():
         history=history,
         messages=[Message(role="system", content="sys"), Message(role="user", content="fresh start")],
         tools=None,
-        config=LlmConfig(),
+        config=_cfg(),
     )
 
     assert diff.reconnect
@@ -190,7 +189,7 @@ def test_plan_chat_no_ops_when_unchanged():
         history=history,
         messages=[Message(role="system", content="sys"), Message(role="user", content="hello")],
         tools=None,
-        config=LlmConfig(),
+        config=_cfg(),
     )
 
     assert not diff.reconnect
@@ -203,7 +202,7 @@ def test_plan_chat_history_update_applies_server_id():
         history=[],
         messages=[Message(role="user", content="hi")],
         tools=None,
-        config=LlmConfig(),
+        config=_cfg(),
     )
 
     # Find the create step (after session update)

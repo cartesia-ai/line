@@ -26,7 +26,7 @@ def test_plan_chat_update_preserves_text_then_tool_call_outputs():
 
     _, update = _plan_chat(
         history=history,
-        model="gpt-5.2-mini",
+        model="openai/gpt-5.2",
         default_reasoning_effort="none",
         messages=[Message(role="user", content="Weather?")],
         tools=None,
@@ -74,7 +74,7 @@ def test_plan_chat_continuation_from_checkpoint():
 
     request, _ = _plan_chat(
         history=history,
-        model="gpt-5.2-mini",
+        model="openai/gpt-5.2",
         default_reasoning_effort="none",
         messages=[
             Message(role="user", content="hello"),
@@ -104,7 +104,7 @@ def test_plan_chat_divergence_rolls_back_to_checkpoint():
 
     request, _ = _plan_chat(
         history=history,
-        model="gpt-5.2-mini",
+        model="openai/gpt-5.2",
         default_reasoning_effort="none",
         messages=[
             Message(role="user", content="hello"),
@@ -127,7 +127,7 @@ def test_plan_chat_update_builds_correct_history():
 
     _, update = _plan_chat(
         history=[],
-        model="gpt-5.2-mini",
+        model="openai/gpt-5.2",
         default_reasoning_effort="none",
         messages=[Message(role="user", content="hi")],
         tools=None,
@@ -157,13 +157,13 @@ def test_plan_chat_update_builds_correct_history():
 
 def test_build_request_strips_openai_prefix():
     request = _build_request(
-        model="openai/gpt-5.2-mini",
+        model="openai/gpt-5.2",
         default_reasoning_effort="none",
         instructions=None,
         tool_defs=None,
         cfg=LlmConfig(),
     )
-    assert request["model"] == "gpt-5.2-mini"
+    assert request["model"] == "gpt-5.2"
 
 
 # ---------------------------------------------------------------------------
@@ -193,7 +193,7 @@ def test_extract_model_output_identities_reads_output_text():
 
 
 def test_chat_retries_previous_response_not_found(monkeypatch):
-    provider = _WebSocketProvider(model="gpt-5.2-mini")
+    provider = _WebSocketProvider(model="openai/gpt-5.2")
     attempts = 0
 
     class _FakeStream:
@@ -214,11 +214,8 @@ def test_chat_retries_previous_response_not_found(monkeypatch):
     async def _fake_setup(*_args, **_kwargs):
         nonlocal attempts
         attempts += 1
-
-        async def _noop_cleanup():
-            pass
-
-        return _FakeStream(fail=attempts == 1), _noop_cleanup
+        await provider._get_lock().acquire()
+        return _FakeStream(fail=attempts == 1)
 
     provider._setup_chat = lambda *a, **kw: _fake_setup()
     chunks: List[StreamChunk] = []
@@ -285,7 +282,7 @@ def test_context_identity_accepts_native_web_search_tool():
     assert _context_identity(None, tool_defs, temperature=None, max_tokens=None) == (
         "__context__",
         "",
-        ('{"name": "web_search", "search_context_size": "high", "type": "web_search"}',),
+        ('{"search_context_size": "high", "type": "web_search"}',),
         None,
         None,
     )

@@ -5,14 +5,14 @@ Contains:
 
 - ``_ws_connect`` / ``_ws_is_closed`` — WebSocket connection helpers
 - ``_WsEventStream`` — unified event→chunk translator for Realtime and Responses APIs
-- ``_WsChatStream`` — async context manager + async iterable for safe stream lifecycle
+- ``_AsyncIterableContext`` — async context manager + async iterable wrapper
 - ``_setup_ws_chat`` / ``_ws_warmup`` — shared provider patterns (free functions)
 - Divergence/identity utilities used by both providers
 """
 
 import asyncio
 import json
-from typing import Any, AsyncIterator, Awaitable, Callable, Dict, List, Optional, Tuple
+from typing import Any, AsyncIterator, Callable, Dict, List, Optional, Tuple
 
 from loguru import logger
 import websockets
@@ -29,8 +29,9 @@ HistoryUpdate = Callable[[List[ConversationEntry], Dict[str, Any]], List[Convers
 
 
 def _normalize_openai_model_name(model: str) -> str:
-    """Strip LiteLLM-style ``openai/`` prefixes for direct OpenAI API calls."""
-    if model.lower().startswith("openai/"):
+    """Strip LiteLLM-style ``openai/`` or ``chatgpt/`` prefixes for direct OpenAI API calls."""
+    lower = model.lower()
+    if lower.startswith("openai/") or lower.startswith("chatgpt/"):
         return model.split("/", 1)[1]
     return model
 
@@ -174,6 +175,7 @@ _IGNORED_EVENTS = frozenset(
         "response.content_part.done",
         "response.output_text.done",
         "response.output_text.annotation.added",
+        "response.text.done",
         "rate_limits.updated",
     }
 )
@@ -237,7 +239,7 @@ class _WsEventStream:
         while True:
             event = json.loads(await self._ws.recv())
             if event.get("type", "") in _TERMINAL_EVENTS:
-                self._on_response_done(event.get("response", {}))
+                self._on_response_done(event.get("response") or {})
                 return
 
     async def __aiter__(self) -> AsyncIterator[StreamChunk]:
@@ -251,7 +253,7 @@ class _WsEventStream:
                 event_type = event.get("type", "")
 
                 # --- Text deltas ---
-                if event_type == "response.output_text.delta":
+                if event_type in ("response.output_text.delta", "response.text.delta"):
                     delta = event.get("delta", "")
                     if delta:
                         yield StreamChunk(text=delta)
@@ -307,14 +309,14 @@ class _WsEventStream:
                 # --- Terminal events (response complete) ---
                 elif event_type in _TERMINAL_EVENTS:
                     self.done = True
-                    response = event.get("response", {})
+                    response = event.get("response") or {}
                     self._on_response_done(response)
 
                     # Check for failure — covers both APIs:
                     # Realtime: response.done with status="failed"
                     # Responses: response.failed event
-                    error = response.get("error", {})
-                    status = response.get("status", "")
+                    error = response.get("error") or {}
+                    status = response.get("status") or ""
                     if event_type == "response.failed" or status == "failed":
                         raise RuntimeError(
                             f"OpenAI API error ({error.get('code', '')}): "
@@ -333,7 +335,7 @@ class _WsEventStream:
                 # --- Error (protocol-level) ---
                 elif event_type == "error":
                     self.done = True
-                    error_msg = event.get("error", {}).get("message", "unknown error")
+                    error_msg = (event.get("error") or {}).get("message", "unknown error")
                     raise RuntimeError(f"OpenAI WebSocket error: {error_msg}")
 
                 # --- Safely ignorable events ---
@@ -342,6 +344,13 @@ class _WsEventStream:
 
         except websockets.exceptions.ConnectionClosed as e:
             self.done = True
+            if e.rcvd and e.rcvd.code == 1000:
+                # Server closed cleanly — treat as normal stream end.
+                yield StreamChunk(
+                    tool_calls=list(tool_calls.values()) if tool_calls else [],
+                    is_final=True,
+                )
+                return
             raise RuntimeError(f"WebSocket connection closed during streaming: {e}") from e
 
 
@@ -372,7 +381,7 @@ async def _cancel_and_drain(stream: _WsEventStream, ws: WebSocketClientProtocol)
         logger.debug("Stream drain failed (%s), closing WS for clean reconnect", type(e).__name__)
         try:
             await ws.close()
-        except Exception:
+        except BaseException:
             pass
         # Re-raise CancelledError / KeyboardInterrupt so the caller's
         # cancellation semantics are preserved.
@@ -381,51 +390,51 @@ async def _cancel_and_drain(stream: _WsEventStream, ws: WebSocketClientProtocol)
 
 
 # ---------------------------------------------------------------------------
-# _WsChatStream — async context manager + async iterable
+# _AsyncIterableContext — async context manager + async iterable
 # ---------------------------------------------------------------------------
 
 
-class _WsChatStream:
-    """Async context manager and async iterable for a streaming response.
+class _AsyncIterableContext:
+    """Wrap an async-iterable factory so it also supports ``async with``.
 
-    Supports two usage patterns::
+    On ``__aexit__``, the underlying async iterator is closed (via
+    ``aclose``), which unwinds any ``async with`` / cleanup blocks
+    inside the generator.
 
-        # Pattern 1: async with (recommended — deterministic cleanup)
-        async with provider.chat(...) as stream:
-            async for chunk in stream:
+    Usage::
+
+        def make_iter():
+            async def _gen():
+                ...
+                yield item
+            return _gen()
+
+        ctx = _AsyncIterableContext(make_iter)
+
+        # Pattern 1 — context-managed
+        async with ctx as stream:
+            async for item in stream:
                 ...
 
-        # Pattern 2: bare async for (cleanup via generator finalization)
-        async for chunk in provider.chat(...):
+        # Pattern 2 — bare iteration
+        async for item in ctx:
             ...
     """
 
-    def __init__(self, setup: Awaitable[Tuple[_WsEventStream, Callable[[], Awaitable[None]]]]):
-        self._setup = setup
-        self._stream: Optional[_WsEventStream] = None
-        self._cleanup_fn: Optional[Callable[[], Awaitable[None]]] = None
+    def __init__(self, factory: Callable[[], Any]):
+        self._factory = factory
+        self._it: Any = None
 
-    # --- Async context manager ---
-
-    async def __aenter__(self) -> "_WsChatStream":
-        self._stream, self._cleanup_fn = await self._setup
+    async def __aenter__(self) -> "_AsyncIterableContext":
         return self
 
     async def __aexit__(self, *exc_info: Any) -> None:
-        if self._cleanup_fn is not None:
-            await self._cleanup_fn()
-            self._cleanup_fn = None
+        if self._it is not None:
+            aclose = getattr(self._it, "aclose", None)
+            if aclose is not None:
+                await aclose()
+            self._it = None
 
-    # --- Async iterable ---
-
-    def __aiter__(self) -> AsyncIterator[StreamChunk]:
-        if self._stream is not None:
-            # Inside ``async with`` — iterate the already-initialized stream.
-            return self._stream.__aiter__()
-        # Standalone ``async for`` — manage lifecycle internally.
-        return self._standalone_iter()
-
-    async def _standalone_iter(self) -> AsyncIterator[StreamChunk]:
-        async with self:
-            async for chunk in self._stream:
-                yield chunk
+    def __aiter__(self) -> AsyncIterator:
+        self._it = self._factory().__aiter__()
+        return self._it

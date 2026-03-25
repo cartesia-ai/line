@@ -17,7 +17,7 @@ from line.llm_agent.history import History
 from line.llm_agent.llm_agent import LlmAgent
 
 # Provider facade
-from line.llm_agent.provider import LLMProvider, LlmProvider
+from line.llm_agent.provider import ChatStream, LLMProvider, LlmProvider
 
 # Tool type decorators
 from line.llm_agent.tools.decorators import handoff_tool, loopback_tool, passthrough_tool
@@ -49,6 +49,7 @@ __all__ = [
     # LLM Agent
     "LlmAgent",
     # Provider
+    "ChatStream",
     "LlmProvider",
     "LLMProvider",
     # Configuration

@@ -7,7 +7,7 @@ turn, we keep the socket open and use ``previous_response_id`` for efficient
 multi-turn continuations.
 
 Key differences from the Realtime API (``realtime_provider.py``):
-  * Works with standard text models (gpt-5.2, gpt-5.2-mini, …)
+  * Works with standard text models (openai/gpt-5.2, openai/gpt-5.2-pro, …)
     rather than dedicated realtime models.
   * No conversation-item CRUD — the server manages state via
     ``previous_response_id``.
@@ -21,17 +21,18 @@ Protocol reference: https://developers.openai.com/api/docs/guides/websocket-mode
 
 import asyncio
 import json
-from typing import Any, AsyncIterable, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from loguru import logger
 from websockets.legacy.client import WebSocketClientProtocol
 
 from line.llm_agent.config import LlmConfig
-from line.llm_agent.provider import Message, StreamChunk, _extract_instructions_and_messages
+from line.llm_agent.provider import Message, _extract_instructions_and_messages
 from line.llm_agent.schema_converter import build_openai_tool_defs
 from line.llm_agent.stream import (
     ConversationEntry,
     HistoryUpdate,
+    _AsyncIterableContext,
     _cancel_and_drain,
     _compute_divergence,
     _context_identity,
@@ -39,7 +40,6 @@ from line.llm_agent.stream import (
     _normalize_openai_model_name,
     _ws_connect,
     _ws_is_closed,
-    _WsChatStream,
     _WsEventStream,
 )
 from line.llm_agent.tools.utils import FunctionTool
@@ -83,7 +83,7 @@ class _WebSocketProvider:
         self,
         model: str,
         api_key: Optional[str] = None,
-        default_reasoning_effort: str = "none",
+        default_reasoning_effort: Optional[str] = "none",
     ):
         self._model = model
         self._default_reasoning_effort = default_reasoning_effort
@@ -105,24 +105,30 @@ class _WebSocketProvider:
         *,
         config: LlmConfig,
         **kwargs,
-    ) -> AsyncIterable[StreamChunk]:
+    ) -> _AsyncIterableContext:
         """Start a streaming chat completion over WebSocket mode.
 
         Retries once when the server has forgotten a ``previous_response_id``
         before any content was emitted.
         """
+        ws_kwargs = {"web_search_options": kwargs.get("web_search_options")}
 
-        async def _retrying_iter():
+        async def _iter():
             attempt = 0
             while True:
                 emitted_any = False
                 try:
-                    ws_kwargs = {"web_search_options": kwargs.get("web_search_options")}
-                    stream = _WsChatStream(self._setup_chat(messages, tools, config, **ws_kwargs))
-                    async with stream:
+                    stream = await self._setup_chat(messages, tools, config, **ws_kwargs)
+                    try:
                         async for chunk in stream:
                             emitted_any = True
                             yield chunk
+                    finally:
+                        try:
+                            if not stream.done:
+                                await _cancel_and_drain(stream, self._ws)
+                        finally:
+                            self._get_lock().release()
                     return
                 except RuntimeError as exc:
                     if "previous_response_not_found" not in str(exc) or emitted_any or attempt >= 1:
@@ -132,7 +138,7 @@ class _WebSocketProvider:
                         "Responses API lost previous_response_id; retrying current turn from scratch"
                     )
 
-        return _retrying_iter()
+        return _AsyncIterableContext(_iter)
 
     async def warmup(
         self,
@@ -221,7 +227,7 @@ class _WebSocketProvider:
             raise
 
         def on_response_done(response):
-            error_code = response.get("error", {}).get("code")
+            error_code = (response.get("error") or {}).get("code")
             if error_code == "previous_response_not_found":
                 self._history = []
                 return
@@ -229,16 +235,7 @@ class _WebSocketProvider:
                 return
             self._history = update_history(self._history, response)
 
-        stream = _WsEventStream(self._ws, on_response_done)
-
-        async def cleanup():
-            try:
-                if not stream.done:
-                    await _cancel_and_drain(stream, self._ws)
-            finally:
-                lock.release()
-
-        return stream, cleanup
+        return _WsEventStream(self._ws, on_response_done)
 
 
 # ---------------------------------------------------------------------------

@@ -170,13 +170,30 @@ class _HttpProvider:
 class _ChatStream:
     """Async-iterable stream for HTTP chat responses.
 
-    All setup, iteration, and cleanup happen inside ``__aiter__`` — no
-    ``async with`` is needed.  Breaking out of ``async for`` triggers
-    ``GeneratorExit`` which closes the underlying response via ``finally``.
+    Supports two usage patterns::
+
+        # Pattern 1: async with
+        async with provider.chat(...) as stream:
+            async for chunk in stream:
+                ...
+
+        # Pattern 2: bare async for
+        async for chunk in provider.chat(...):
+            ...
+
+    Both patterns are equivalent — the HTTP request is issued lazily on
+    first iteration.  ``async with`` is supported for API consistency with
+    the WebSocket backends.
     """
 
     def __init__(self, llm_kwargs: Dict[str, Any]):
         self._kwargs = llm_kwargs
+
+    async def __aenter__(self) -> "_ChatStream":
+        return self
+
+    async def __aexit__(self, *exc_info: Any) -> None:
+        pass
 
     async def __aiter__(self) -> AsyncIterator[StreamChunk]:
         response = cast(_ClosableAsyncIterable, await acompletion(**self._kwargs))

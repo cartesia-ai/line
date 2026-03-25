@@ -11,7 +11,7 @@ Protocol reference: https://platform.openai.com/docs/api-reference/realtime
 
 import asyncio
 import json
-from typing import Any, AsyncIterable, Dict, List, NamedTuple, Optional, Tuple
+from typing import Any, Dict, List, NamedTuple, Optional, Tuple
 import uuid
 
 from loguru import logger
@@ -19,11 +19,12 @@ import websockets
 from websockets.legacy.client import WebSocketClientProtocol
 
 from line.llm_agent.config import LlmConfig
-from line.llm_agent.provider import Message, StreamChunk, _extract_instructions_and_messages
+from line.llm_agent.provider import Message, _extract_instructions_and_messages
 from line.llm_agent.schema_converter import build_openai_tool_defs
 from line.llm_agent.stream import (
     ConversationEntry,
     HistoryUpdate,
+    _AsyncIterableContext,
     _cancel_and_drain,
     _compute_divergence,
     _context_identity,
@@ -31,7 +32,6 @@ from line.llm_agent.stream import (
     _normalize_openai_model_name,
     _ws_connect,
     _ws_is_closed,
-    _WsChatStream,
     _WsEventStream,
 )
 from line.llm_agent.tools.utils import FunctionTool
@@ -84,10 +84,22 @@ class _RealtimeProvider:
         *,
         config: LlmConfig,
         **kwargs,
-    ) -> AsyncIterable[StreamChunk]:
-        return _WsChatStream(
-            self._setup_chat(messages, tools, config, web_search_options=kwargs.get("web_search_options"))
-        )
+    ) -> _AsyncIterableContext:
+        async def _iter():
+            stream = await self._setup_chat(
+                messages, tools, config, web_search_options=kwargs.get("web_search_options")
+            )
+            try:
+                async for chunk in stream:
+                    yield chunk
+            finally:
+                try:
+                    if not stream.done:
+                        await _cancel_and_drain(stream, self._ws)
+                finally:
+                    self._get_lock().release()
+
+        return _AsyncIterableContext(_iter)
 
     async def warmup(
         self,
@@ -182,16 +194,7 @@ class _RealtimeProvider:
                 return
             self._history = _track_output_items(self._history, response.get("output", []))
 
-        stream = _WsEventStream(self._ws, on_response_done)
-
-        async def cleanup():
-            try:
-                if not stream.done:
-                    await _cancel_and_drain(stream, self._ws)
-            finally:
-                lock.release()
-
-        return stream, cleanup
+        return _WsEventStream(self._ws, on_response_done)
 
     async def _recv_ack(self) -> Dict[str, Any]:
         """Receive the next ack or error event, skipping non-ack events."""
@@ -206,11 +209,14 @@ class _RealtimeProvider:
                 raise RuntimeError(f"WebSocket closed while waiting for ack: {e}") from e
             msg = json.loads(raw)
             if msg.get("type") == "error":
-                error_detail = msg.get("error", {}).get("message", "unknown error")
+                error_detail = (msg.get("error") or {}).get("message", "unknown error")
                 raise RuntimeError(f"Realtime API error: {error_detail}")
-            if msg.get("type", "").endswith((".updated", ".created", ".deleted")):
+            msg_type = msg.get("type", "")
+            if msg_type.endswith((".updated", ".created", ".deleted")) and msg_type.startswith(
+                ("session.", "conversation.item.")
+            ):
                 return msg
-            logger.debug("Skipping event %s while waiting for ack", msg.get("type"))
+            logger.debug("Skipping event {} while waiting for ack", msg.get("type"))
 
 
 # ---------------------------------------------------------------------------
@@ -343,17 +349,22 @@ def _make_session_update(
     temperature: Optional[float],
     max_tokens: Optional[int],
 ) -> Tuple[Dict[str, Any], HistoryUpdate]:
-    """Build a session.update event and its history update function."""
-    event = {
-        "type": "session.update",
-        "session": {
-            "modalities": ["text"],
-            "instructions": instructions,
-            "tools": tool_defs,
-            "temperature": temperature,
-            "max_response_output_tokens": max_tokens,
-        },
+    """Build a session.update event and its history update function.
+
+    The Realtime API rejects ``null`` for every field, so we omit
+    ``None``-valued fields and use ``""`` / ``[]`` as "clear" sentinels
+    for instructions and tools.
+    """
+    session: Dict[str, Any] = {
+        "modalities": ["text"],
+        "instructions": instructions or "",
+        "tools": tool_defs or [],
     }
+    if temperature is not None:
+        session["temperature"] = temperature
+    if max_tokens is not None:
+        session["max_response_output_tokens"] = max_tokens
+    event = {"type": "session.update", "session": session}
     context_id = _context_identity(instructions, tool_defs, temperature=temperature, max_tokens=max_tokens)
 
     def update(history: List[ConversationEntry], _ack: Dict[str, Any]) -> List[ConversationEntry]:
@@ -389,7 +400,7 @@ def _make_create(
     }
 
     def update(history: List[ConversationEntry], ack: Dict[str, Any]) -> List[ConversationEntry]:
-        actual_id = ack.get("item", {}).get("id", item_id)
+        actual_id = (ack.get("item") or {}).get("id", item_id)
         return history + [(identity, actual_id)]
 
     return event, update

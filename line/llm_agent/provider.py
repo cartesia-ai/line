@@ -11,7 +11,7 @@ Model naming:
 """
 
 from dataclasses import dataclass, field
-from typing import Any, AsyncIterable, Dict, List, Optional, Protocol, Tuple, runtime_checkable
+from typing import Any, AsyncIterator, Dict, List, Optional, Protocol, Tuple, runtime_checkable
 
 from line.llm_agent.config import LlmConfig, _merge_configs, _normalize_config
 from line.llm_agent.tools.utils import FunctionTool, _merge_tools, _normalize_tools
@@ -58,10 +58,9 @@ def _extract_instructions_and_messages(
     in-band system messages. Match the HTTP backend by prepending
     ``config.system_prompt`` ahead of any explicit system messages.
     """
-    cfg = _normalize_config(config)
     system_parts: List[str] = []
-    if cfg.system_prompt:
-        system_parts.append(cfg.system_prompt)
+    if config.system_prompt:
+        system_parts.append(config.system_prompt)
 
     non_system: List[Message] = []
     for msg in messages:
@@ -79,6 +78,14 @@ def _extract_instructions_and_messages(
 # ---------------------------------------------------------------------------
 
 
+class ChatStream(Protocol):
+    """Return type of ``chat()`` — supports both ``async with`` and ``async for``."""
+
+    def __aiter__(self) -> AsyncIterator[StreamChunk]: ...
+    async def __aenter__(self) -> "ChatStream": ...
+    async def __aexit__(self, *exc_info: Any) -> None: ...
+
+
 @runtime_checkable
 class ProviderProtocol(Protocol):
     """Protocol defining the interface all provider backends must implement.
@@ -94,7 +101,7 @@ class ProviderProtocol(Protocol):
         *,
         config: LlmConfig,
         **kwargs: Any,
-    ) -> AsyncIterable[StreamChunk]: ...
+    ) -> ChatStream: ...
 
     async def warmup(
         self,
@@ -127,7 +134,7 @@ class LlmProvider:
         model: Model name (e.g. ``"gpt-4o"``, ``"gpt-4o-realtime-preview"``).
         api_key: Provider API key. Required.
         config: LLM configuration (normalized internally).
-        tools: Tool specs (``List[FunctionTool]``).  Normalized internally,
+        tools: Tool specs (``List[ToolSpec]``).  Normalized internally,
             stored as defaults and merged with any per-call tool overrides by
             tool name.
         backend: Force a specific backend (``"http"``, ``"realtime"``, or
@@ -192,7 +199,7 @@ class LlmProvider:
         tools: Optional[List[Any]] = None,
         config: Optional[LlmConfig] = None,
         **kwargs: Any,
-    ) -> AsyncIterable[StreamChunk]:
+    ) -> ChatStream:
         effective_config = _merge_configs(self._config, config) if config else self._config
         effective_tools, web_search_options = _normalize_tools(
             _merge_tools(self._tools, tools), model=self._model
@@ -350,24 +357,30 @@ def _get_model_config(model: str, *, backend: Optional[str] = None) -> _ModelCon
     )
 
 
-def _is_direct_openai_model(model: str) -> bool:
-    """Return True for bare OpenAI model names or explicit ``openai/`` ones."""
+def _is_openai_model(model: str) -> bool:
+    """Return True for explicit ``openai/``-prefixed model names."""
     lower = model.lower()
-    return "/" not in lower or lower.startswith("openai/")
+    return lower.startswith("openai/") or lower.startswith("chatgpt/")
 
 
 def _is_realtime_model(model: str) -> bool:
     """Check if a model name indicates a direct OpenAI Realtime model."""
-    return _is_direct_openai_model(model) and "realtime" in model.lower().split("/", 1)[-1]
+    return _is_openai_model(model) and "realtime" in model.lower().split("/", 1)[-1]
+
+
+_WEBSOCKET_MODELS = ("gpt-5.2", "gpt-5.2-pro", "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano")
 
 
 def _is_websocket_model(model: str) -> bool:
     """Check if a model should use the WebSocket (Responses API) backend.
 
-    Use WebSocket mode for direct OpenAI gpt-5 variants.
+    Only matches models listed in ``_WEBSOCKET_MODELS``.  Requires the
+    ``openai/`` prefix.
     """
-    lower = model.lower().split("/", 1)[-1]
-    return _is_direct_openai_model(model) and (lower.startswith("gpt-5.2") or lower.startswith("gpt5.2"))
+    if not _is_openai_model(model):
+        return False
+    model = model.lower().split("/", 1)[-1]
+    return model in _WEBSOCKET_MODELS
 
 
 # Backward-compat alias — emits a deprecation warning on instantiation.

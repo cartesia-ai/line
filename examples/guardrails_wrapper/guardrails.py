@@ -213,9 +213,10 @@ Respond with ONLY a JSON object (no markdown, no explanation):
 
         try:
             response_text = ""
-            async for chunk in self._guardrail_llm.chat(messages, tools=None):
-                if chunk.text:
-                    response_text += chunk.text
+            async with self._guardrail_llm.chat(messages, tools=None) as stream:
+                async for chunk in stream:
+                    if chunk.text:
+                        response_text += chunk.text
 
             # Parse JSON response
             # Handle potential markdown code blocks

@@ -1,14 +1,14 @@
 """Tests for the LlmProvider facade and HTTP backend."""
 
 import asyncio
-from typing import Annotated, Any, AsyncIterable, List, Optional, get_type_hints
+from typing import Annotated, Any, List, Optional, get_type_hints
 
 from line.llm_agent.config import LlmConfig, _normalize_config
 from line.llm_agent.http_provider import _feed_tool_args, _HttpProvider
 from line.llm_agent.provider import (
+    ChatStream,
     LlmProvider,
     Message,
-    StreamChunk,
     _extract_instructions_and_messages,
     _get_model_config,
     _is_realtime_model,
@@ -166,7 +166,7 @@ def test_llm_provider_warmup_preserves_native_web_search_defaults(monkeypatch):
     monkeypatch.setattr(litellm, "supports_web_search", lambda model: True)
 
     provider = LlmProvider(
-        model="gpt-5.2-mini",
+        model="openai/gpt-5.2",
         api_key="test-key",
         tools=[web_search(search_context_size="high")],
     )
@@ -182,7 +182,7 @@ def test_llm_provider_warmup_preserves_native_web_search_defaults(monkeypatch):
 
 def test_llm_provider_routes_websocket_models_with_unsupported_config_to_http_backend():
     provider = LlmProvider(
-        model="gpt-5.2-mini",
+        model="openai/gpt-5.2",
         api_key="test-key",
     )
     websocket_backend = _DummyBackend()
@@ -202,7 +202,7 @@ def test_llm_provider_routes_websocket_models_with_unsupported_config_to_http_ba
 
 def test_llm_provider_keeps_websocket_backend_for_supported_config():
     provider = LlmProvider(
-        model="gpt-5.2-mini",
+        model="openai/gpt-5.2",
         api_key="test-key",
     )
     websocket_backend = _DummyBackend()
@@ -222,7 +222,7 @@ def test_llm_provider_keeps_websocket_backend_for_supported_config():
 
 def test_llm_provider_warmup_routes_unsupported_websocket_config_to_http_backend():
     provider = LlmProvider(
-        model="gpt-5.2-mini",
+        model="openai/gpt-5.2",
         api_key="test-key",
     )
     websocket_backend = _DummyBackend()
@@ -251,7 +251,7 @@ def test_build_openai_tool_defs_adds_native_web_search():
     assert build_openai_tool_defs(
         web_search_options={"search_context_size": "high"},
         responses_api=True,
-    ) == [{"type": "web_search", "name": "web_search", "search_context_size": "high"}]
+    ) == [{"type": "web_search", "search_context_size": "high"}]
 
 
 def test_llm_provider_requires_api_key():
@@ -280,11 +280,11 @@ def test_is_supported_model_accepts_direct_openai_websocket_model(monkeypatch):
     import litellm
 
     monkeypatch.setattr(litellm, "get_supported_openai_params", lambda model: None)
-    assert _get_model_config("gpt-5.2-mini") is not None
+    assert _get_model_config("openai/gpt-5.2") is not None
 
 
 def test_backend_override_http_for_websocket_model():
-    provider = LlmProvider(model="gpt-5.2-mini", api_key="test-key", backend="http")
+    provider = LlmProvider(model="openai/gpt-5.2", api_key="test-key", backend="http")
     from line.llm_agent.http_provider import _HttpProvider
 
     assert isinstance(provider._backend, _HttpProvider)
@@ -318,20 +318,20 @@ def test_backend_override_invalid_value():
 
 
 def test_is_websocket_model_matches_gpt52_variants():
-    assert _is_websocket_model("gpt-5.2")
-    assert _is_websocket_model("gpt-5.2-mini")
-    assert _is_websocket_model("openai/gpt-5.2-mini")
-    assert _is_websocket_model("gpt5.2")
-    assert not _is_websocket_model("gpt-5-nano")
-    assert not _is_websocket_model("gpt-5-mini")
-    assert not _is_websocket_model("azure/gpt-5.2-mini")
-    assert not _is_websocket_model("openrouter/gpt-5.2-mini")
-    assert not _is_websocket_model("gpt-4o")
+    assert _is_websocket_model("openai/gpt-5.2")
+    assert _is_websocket_model("openai/gpt-5.2-pro")
+    assert _is_websocket_model("openai/gpt-5.4")
+    assert _is_websocket_model("openai/gpt-5.4-mini")
+    assert not _is_websocket_model("gpt-5.2")  # requires openai/ prefix
+    assert not _is_websocket_model("gpt-5.4-mini")  # requires openai/ prefix
+    assert not _is_websocket_model("azure/gpt-5.2")
+    assert not _is_websocket_model("openrouter/gpt-5.2")
+    assert not _is_websocket_model("openai/gpt-4o")
 
 
 def test_is_realtime_model_matches_only_direct_openai_models():
-    assert _is_realtime_model("gpt-4o-realtime-preview")
     assert _is_realtime_model("openai/gpt-4o-realtime-preview")
+    assert not _is_realtime_model("gpt-4o-realtime-preview")  # requires openai/ prefix
     assert not _is_realtime_model("azure/gpt-4o-realtime-preview")
     assert not _is_realtime_model("openrouter/gpt-4o-realtime-preview")
 
@@ -342,7 +342,7 @@ def test_llm_provider_public_methods_have_type_hints():
     assert chat_hints["tools"] == Optional[List[Any]]
     assert chat_hints["config"] == Optional[LlmConfig]
     assert chat_hints["kwargs"] is Any
-    assert chat_hints["return"] == AsyncIterable[StreamChunk]
+    assert chat_hints["return"] == ChatStream
 
     warmup_hints = get_type_hints(LlmProvider.warmup)
     assert warmup_hints["config"] == Optional[LlmConfig]
