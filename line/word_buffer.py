@@ -57,8 +57,8 @@ class WordBufferingWrapper:
             text_buffer += output.text
             last_interruptible = last_interruptible and output.interruptible
 
-            # Auto strategy: if buffer contains CJK/spaceless script, flush immediately
-            if self._strategy == "auto" and _contains_spaceless_script(text_buffer):
+            # Auto strategy: if new text contains CJK/spaceless script, flush immediately
+            if self._strategy == "auto" and _contains_spaceless_script(output.text):
                 if text_buffer:
                     yield AgentSendText(text=text_buffer, interruptible=last_interruptible)
                     text_buffer = ""
