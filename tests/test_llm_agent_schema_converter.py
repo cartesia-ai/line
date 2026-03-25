@@ -7,6 +7,8 @@ Tests TypedDict support, nested objects, and strict mode handling.
 from typing import Annotated, TypedDict
 import warnings
 
+import pytest
+
 from line.llm_agent.schema_converter import (
     _is_typeddict,
     _json_schema_violates_openai_strict,
@@ -238,8 +240,8 @@ class TestFunctionToolWithTypedDict:
         item_schema = data_schema["properties"]["item"]
         assert item_schema["additionalProperties"] is False
 
-    def test_tool_with_required_optional_typeddict_disables_strict(self):
-        """Required param typed as total=False TypedDict cannot use OpenAI strict (nested lock)."""
+    def test_tool_with_required_optional_typeddict_strict_raises(self):
+        """Required param typed as total=False TypedDict cannot satisfy OpenAI strict."""
 
         @loopback_tool
         async def with_opts(
@@ -249,9 +251,39 @@ class TestFunctionToolWithTypedDict:
             """Use optional-key TypedDict."""
             pass
 
-        spec = function_tool_to_litellm(with_opts)
+        with pytest.raises(ValueError, match="cannot satisfy OpenAI strict mode"):
+            function_tool_to_litellm(with_opts)
+
+    def test_tool_with_required_optional_typeddict_non_strict_ok(self):
+        """Same tool succeeds when strict=False."""
+
+        @loopback_tool
+        async def with_opts(
+            ctx: ToolEnv,
+            payload: Annotated[ItemWithOptional, "Optional keys only"],
+        ):
+            """Use optional-key TypedDict."""
+            pass
+
+        spec = function_tool_to_litellm(with_opts, strict=False)
         assert spec["function"].get("strict") is not True
         params = spec["function"]["parameters"]
         assert "additionalProperties" not in params
         payload = params["properties"]["payload"]
         assert "additionalProperties" not in payload
+
+    def test_tool_with_list_dict_strict_raises(self):
+        """list[dict] cannot satisfy strict mode."""
+
+        @loopback_tool
+        async def add_items(
+            ctx: ToolEnv,
+            items: Annotated[list[dict], "Items"],
+        ):
+            """Add items."""
+            pass
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            with pytest.raises(ValueError, match="cannot satisfy OpenAI strict mode"):
+                function_tool_to_litellm(add_items)

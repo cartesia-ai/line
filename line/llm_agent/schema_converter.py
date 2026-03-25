@@ -127,6 +127,7 @@ def python_type_to_json_schema(type_annotation: Type, *, strict: bool = True) ->
 
     # Handle plain dict - error in strict mode since it cannot satisfy OpenAI strict rules
     if type_annotation is dict:
+<<<<<<< HEAD
         if strict:
             raise ValueError(
                 "Using 'dict' in tool parameters yields an object schema without explicit "
@@ -134,6 +135,16 @@ def python_type_to_json_schema(type_annotation: Type, *, strict: bool = True) ->
                 "Use TypedDict to define the expected structure. "
                 "See: https://platform.openai.com/docs/guides/structured-outputs"
             )
+=======
+        warnings.warn(
+            "Using 'dict' in tool parameters yields an object schema without explicit "
+            "properties, which cannot satisfy OpenAI strict mode when enabled (default). "
+            "Use TypedDict or set LlmConfig(strict_tool_schemas=False). "
+            "See: https://platform.openai.com/docs/guides/structured-outputs",
+            UserWarning,
+            stacklevel=4,
+        )
+>>>>>>> b7a0e6d (Addressing comments)
         return {"type": "object"}
 
     # Handle TypedDict - generates full schema with properties
@@ -187,6 +198,7 @@ def python_type_to_json_schema(type_annotation: Type, *, strict: bool = True) ->
 
     # Handle dict[K, V] - error in strict mode since it cannot satisfy OpenAI strict rules
     if origin is dict:
+<<<<<<< HEAD
         if strict:
             raise ValueError(
                 "Using 'dict[K, V]' in tool parameters yields an object schema without explicit "
@@ -194,6 +206,16 @@ def python_type_to_json_schema(type_annotation: Type, *, strict: bool = True) ->
                 "Use TypedDict to define the expected structure. "
                 "See: https://platform.openai.com/docs/guides/structured-outputs"
             )
+=======
+        warnings.warn(
+            "Using 'Dict[K, V]' in tool parameters yields an object schema without explicit "
+            "properties, which cannot satisfy OpenAI strict mode when enabled (default). "
+            "Use TypedDict or set LlmConfig(strict_tool_schemas=False). "
+            "See: https://platform.openai.com/docs/guides/structured-outputs",
+            UserWarning,
+            stacklevel=4,
+        )
+>>>>>>> b7a0e6d (Addressing comments)
         return {"type": "object"}
 
     # Handle Literal types (e.g., Literal["a", "b", "c"])
