@@ -72,7 +72,8 @@ class WordBufferingWrapper:
                 text_buffer = text_buffer[last_ws + 1 :]
                 if to_emit:
                     yield AgentSendText(text=to_emit, interruptible=last_interruptible)
-                    last_interruptible = True
+                    if not text_buffer:
+                        last_interruptible = True
 
         # Flush remaining buffer
         if text_buffer:

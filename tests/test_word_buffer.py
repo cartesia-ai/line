@@ -279,9 +279,33 @@ async def test_interruptible_and_logic(anyio_backend):
     # "Humana " includes a chunk with interruptible=False → entire emission is False
     assert text_events[0].text == "Humana "
     assert text_events[0].interruptible is False
-    # "is" only has interruptible=True (reset after emission)
+    # "is" remains False — buffer wasn't fully drained after split, so the
+    # non-interruptible flag from the earlier chunk is conservatively preserved
     assert text_events[1].text == "is"
-    assert text_events[1].interruptible is True
+    assert text_events[1].interruptible is False
+
+
+async def test_interruptible_survives_partial_split(anyio_backend):
+    """Non-interruptible flag is preserved for text remaining in buffer after a whitespace split."""
+    agent = MockAgent(
+        [
+            AgentSendText(text="world is great", interruptible=False),
+            AgentSendText(text=" end", interruptible=True),
+        ]
+    )
+    wrapper = word_buffer(agent)
+    outputs = await _collect(wrapper)
+    text_events = [o for o in outputs if isinstance(o, AgentSendText)]
+
+    # First emission from the split at "is " boundary
+    assert text_events[0].text == "world is "
+    assert text_events[0].interruptible is False
+    # "great" remained in buffer from the False chunk; second split keeps False
+    assert text_events[1].text == "great "
+    assert text_events[1].interruptible is False
+    # Final flush — "end" still tainted by the non-interruptible buffer
+    assert text_events[2].text == "end"
+    assert text_events[2].interruptible is False
 
 
 # =============================================================================
