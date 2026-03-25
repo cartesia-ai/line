@@ -17,6 +17,7 @@ from typing import (
     Dict,
     List,
     Optional,
+    Set,
     Tuple,
     TypeVar,
     Union,
@@ -111,7 +112,7 @@ class LlmAgent:
         self._handoff_target: Optional[AgentCallable] = None  # Normalized process function
         # Queue for events from backgrounded tools that need to trigger loopback
         # Lazy-init: asyncio.Queue() requires a running event loop on Python 3.9.
-        self._background_event_queue: Optional[BackgroundQueue[tuple[AgentToolCalled, AgentToolReturned]]] = (
+        self._background_event_queue: Optional[BackgroundQueue[Tuple[AgentToolCalled, AgentToolReturned]]] = (
             None
         )
         # Cache for thought signatures (Gemini 3+ models)
@@ -123,7 +124,7 @@ class LlmAgent:
 
     def _get_background_event_queue(
         self,
-    ) -> "BackgroundQueue[tuple[AgentToolCalled, AgentToolReturned]]":
+    ) -> "BackgroundQueue[Tuple[AgentToolCalled, AgentToolReturned]]":
         if self._background_event_queue is None:
             self._background_event_queue = BackgroundQueue()
         return self._background_event_queue
@@ -555,7 +556,7 @@ class LlmAgent:
                 full_history.extend(context)
 
         # First pass: collect all tool_call_ids that have matching AgentToolReturned
-        returned_tool_call_ids: set[str] = set()
+        returned_tool_call_ids: Set[str] = set()
         for event in full_history:
             if isinstance(event, AgentToolReturned):
                 returned_tool_call_ids.add(event.tool_call_id)
@@ -770,7 +771,7 @@ def _construct_tool_events(
     tool_name: str,
     tool_args: Dict[str, Any],
     result: Any,
-) -> tuple[AgentToolCalled, AgentToolReturned]:
+) -> Tuple[AgentToolCalled, AgentToolReturned]:
     """Construct a pair of AgentToolCalled and AgentToolReturned events."""
     called = AgentToolCalled(
         tool_call_id=tool_call_id,

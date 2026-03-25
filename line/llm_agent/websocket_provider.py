@@ -21,15 +21,17 @@ Protocol reference: https://developers.openai.com/api/docs/guides/websocket-mode
 
 import asyncio
 import json
-from typing import Any, AsyncIterable, Callable, Dict, List, Optional, Tuple
+from typing import Any, AsyncIterable, Dict, List, Optional, Tuple
 
 from loguru import logger
+from websockets.legacy.client import WebSocketClientProtocol
 
 from line.llm_agent.config import LlmConfig
 from line.llm_agent.provider import Message, StreamChunk, _extract_instructions_and_messages
 from line.llm_agent.schema_converter import build_openai_tool_defs
 from line.llm_agent.stream import (
     ConversationEntry,
+    HistoryUpdate,
     _cancel_and_drain,
     _compute_divergence,
     _context_identity,
@@ -86,7 +88,7 @@ class _WebSocketProvider:
         self._model = model
         self._default_reasoning_effort = default_reasoning_effort
         self._api_key = api_key or ""
-        self._ws: Optional[Any] = None
+        self._ws: Optional[WebSocketClientProtocol] = None
         self._history: List[ConversationEntry] = []
         self._lock: Optional[asyncio.Lock] = None
 
@@ -219,6 +221,12 @@ class _WebSocketProvider:
             raise
 
         def on_response_done(response):
+            error_code = response.get("error", {}).get("code")
+            if error_code == "previous_response_not_found":
+                self._history = []
+                return
+            if response.get("status") != "completed":
+                return
             self._history = update_history(self._history, response)
 
         stream = _WsEventStream(self._ws, on_response_done)
@@ -236,9 +244,6 @@ class _WebSocketProvider:
 # ---------------------------------------------------------------------------
 # Pure functions
 # ---------------------------------------------------------------------------
-
-# Type: (old_history, response) -> new_history
-HistoryUpdate = Callable[[List[ConversationEntry], Dict[str, Any]], List[ConversationEntry]]
 
 
 def _plan_chat(
@@ -309,12 +314,6 @@ def _plan_chat(
     )
 
     def update(old_history: List[ConversationEntry], response: Dict[str, Any]) -> List[ConversationEntry]:
-        error_code = response.get("error", {}).get("code")
-        if error_code == "previous_response_not_found":
-            return []
-        if response.get("status") != "completed":
-            return old_history
-
         response_id = response.get("id")
         model_ids = _extract_model_output_identities(response)
         new_history = list(old_history[:continuation_idx])

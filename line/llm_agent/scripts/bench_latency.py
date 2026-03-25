@@ -26,7 +26,7 @@ import os
 import statistics
 import sys
 import time
-from typing import Optional
+from typing import Dict, List, Optional, Set
 import uuid
 import warnings
 
@@ -156,20 +156,20 @@ class ConversationResult:
 class ModelStats:
     model: str
     reasoning_effort: Optional[str]
-    ttft1s: list
-    ttft2s: list
+    ttft1s: List[float]
+    ttft2s: List[float]
     errors: int
 
 
 async def stream_turn(
     provider: LlmProvider,
-    messages: list[Message],
+    messages: List[Message],
     config: LlmConfig,
 ) -> TurnResult:
     """Stream a single turn via LlmProvider. Returns timing info."""
     t0 = time.perf_counter()
     ttft = None
-    text_parts: list[str] = []
+    text_parts: List[str] = []
 
     async for chunk in provider.chat(messages, config=config):
         if chunk.text:
@@ -187,7 +187,7 @@ async def stream_turn(
 
 async def measure_conversation(
     provider: LlmProvider,
-    config_kwargs: dict,
+    config_kwargs: Dict[str, str],
 ) -> ConversationResult:
     """Run a 2-turn conversation through LlmProvider."""
     # Nonce in the system prompt ensures we never hit a provider-side cache.
@@ -204,7 +204,7 @@ async def measure_conversation(
     return ConversationResult(turn1=turn1, turn2=turn2)
 
 
-def _print_stats(label: str, values: list[float]) -> None:
+def _print_stats(label: str, values: List[float]) -> None:
     avg = statistics.mean(values)
     sd = statistics.stdev(values) if len(values) > 1 else 0
     print(
@@ -228,16 +228,16 @@ async def bench_model(
 
     # Only pass reasoning_effort when explicitly set; otherwise leave it as
     # _UNSET so LlmProvider applies its own per-model default.
-    config_kwargs: dict = {}
+    config_kwargs: Dict[str, str] = {}
     if reasoning_effort is not None:
         config_kwargs["reasoning_effort"] = reasoning_effort
     api_key = os.getenv(_env_var_for_model(model))
     provider = LlmProvider(model=model, api_key=api_key)
 
-    ttft1s: list[float] = []
-    total1s: list[float] = []
-    ttft2s: list[float] = []
-    total2s: list[float] = []
+    ttft1s: List[float] = []
+    total1s: List[float] = []
+    ttft2s: List[float] = []
+    total2s: List[float] = []
     errors = 0
 
     for i in range(n):
@@ -303,7 +303,7 @@ def parse_args():
 async def main(args):
     # Filter to models the user asked for / has keys for.
     entries = []
-    seen_skipped: set[str] = set()
+    seen_skipped: Set[str] = set()
     for entry in MODELS:
         model = entry["model"]
         if args.model and model != args.model:
@@ -334,7 +334,7 @@ async def main(args):
     for m in unique_models:
         print(f"  ✓ {m}")
 
-    all_stats: list[ModelStats] = []
+    all_stats: List[ModelStats] = []
     for entry in entries:
         stats = await bench_model(
             model=entry["model"],

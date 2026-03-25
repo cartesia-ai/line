@@ -11,10 +11,10 @@ Model naming:
 """
 
 from dataclasses import dataclass, field
-from typing import Any, AsyncIterable, List, Optional, Protocol, Tuple, runtime_checkable
+from typing import Any, AsyncIterable, Dict, List, Optional, Protocol, Tuple, runtime_checkable
 
 from line.llm_agent.config import LlmConfig, _merge_configs, _normalize_config
-from line.llm_agent.tools.utils import _merge_tools, _normalize_tools
+from line.llm_agent.tools.utils import FunctionTool, _merge_tools, _normalize_tools
 
 
 @dataclass
@@ -90,18 +90,18 @@ class ProviderProtocol(Protocol):
     def chat(
         self,
         messages: List[Message],
-        tools: Optional[List[Any]] = None,
+        tools: Optional[List[FunctionTool]] = None,
         *,
         config: LlmConfig,
         **kwargs: Any,
-    ) -> Any: ...
+    ) -> AsyncIterable[StreamChunk]: ...
 
     async def warmup(
         self,
         config: LlmConfig,
-        tools: Optional[List[Any]] = None,
+        tools: Optional[List[FunctionTool]] = None,
         *,
-        web_search_options: Optional[Any] = None,
+        web_search_options: Optional[Dict[str, Any]] = None,
     ) -> None: ...
 
     async def aclose(self) -> None: ...

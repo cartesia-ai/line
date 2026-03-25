@@ -121,8 +121,8 @@ def test_plan_chat_divergence_rolls_back_to_checkpoint():
     assert len(request["input"]) == 3
 
 
-def test_plan_chat_previous_response_not_found_resets_history():
-    """Update function returns empty history on previous_response_not_found."""
+def test_plan_chat_update_builds_correct_history():
+    """Update function builds history from a completed response."""
     config = _normalize_config(LlmConfig())
 
     _, update = _plan_chat(
@@ -134,27 +134,20 @@ def test_plan_chat_previous_response_not_found_resets_history():
         config=config,
     )
 
-    error_response = {
-        "error": {"code": "previous_response_not_found"},
+    completed_response = {
+        "status": "completed",
+        "id": "resp_123",
+        "output": [
+            {
+                "type": "message",
+                "content": [{"type": "output_text", "text": "hello"}],
+            }
+        ],
     }
-    assert update([("some", "history")], error_response) == []
-
-
-def test_plan_chat_non_completed_response_preserves_history():
-    """Update function is a no-op for non-completed responses."""
-    config = _normalize_config(LlmConfig())
-    original = [("some", "history")]
-
-    _, update = _plan_chat(
-        history=[],
-        model="gpt-5.2-mini",
-        default_reasoning_effort="none",
-        messages=[Message(role="user", content="hi")],
-        tools=None,
-        config=config,
-    )
-
-    assert update(original, {"status": "failed"}) is original
+    result = update([], completed_response)
+    # Should contain context entry + user message entry + model output entry
+    assert len(result) >= 2
+    assert result[-1][1] == "resp_123"
 
 
 # ---------------------------------------------------------------------------

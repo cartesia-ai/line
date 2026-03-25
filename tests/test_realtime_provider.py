@@ -26,8 +26,8 @@ def test_plan_chat_session_update_on_sampling_change():
     messages = [Message(role="system", content="stay concise"), Message(role="user", content="hi")]
 
     diff = _plan_chat(
-        state,
-        messages,
+        history=state,
+        messages=messages,
         tools=None,
         config=LlmConfig(temperature=0.9, max_tokens=200),
     )
@@ -57,8 +57,8 @@ def test_plan_chat_clears_session_fields():
     messages = [Message(role="user", content="hi")]
 
     diff = _plan_chat(
-        state,
-        messages,
+        history=state,
+        messages=messages,
         tools=None,
         config=LlmConfig(temperature=None, max_tokens=None),
     )
@@ -75,8 +75,8 @@ def test_plan_chat_clears_session_fields():
 
 def test_plan_chat_uses_config_system_prompt():
     diff = _plan_chat(
-        [],
-        [Message(role="user", content="hi")],
+        history=[],
+        messages=[Message(role="user", content="hi")],
         tools=None,
         config=LlmConfig(system_prompt="stay concise"),
     )
@@ -88,8 +88,8 @@ def test_plan_chat_uses_config_system_prompt():
 
 def test_plan_chat_includes_native_web_search_tool():
     diff = _plan_chat(
-        [],
-        [Message(role="user", content="hi")],
+        history=[],
+        messages=[Message(role="user", content="hi")],
         tools=None,
         config=LlmConfig(),
         web_search_options={"search_context_size": "high"},
@@ -112,8 +112,8 @@ def test_plan_chat_append_only():
     ]
 
     diff = _plan_chat(
-        history,
-        [
+        history=history,
+        messages=[
             Message(role="system", content="hi"),
             Message(role="user", content="hello"),
             Message(role="assistant", content="hi there"),
@@ -141,8 +141,8 @@ def test_plan_chat_deletes_divergent_suffix():
     ]
 
     diff = _plan_chat(
-        history,
-        [
+        history=history,
+        messages=[
             Message(role="system", content="sys"),
             Message(role="user", content="hello"),
             Message(role="assistant", content="new response"),
@@ -166,8 +166,8 @@ def test_plan_chat_reconnect_on_large_diff():
         history.append((("user", f"msg_{i}", "", ""), f"item_{i}"))
 
     diff = _plan_chat(
-        history,
-        [Message(role="system", content="sys"), Message(role="user", content="fresh start")],
+        history=history,
+        messages=[Message(role="system", content="sys"), Message(role="user", content="fresh start")],
         tools=None,
         config=LlmConfig(),
     )
@@ -187,8 +187,8 @@ def test_plan_chat_no_ops_when_unchanged():
     ]
 
     diff = _plan_chat(
-        history,
-        [Message(role="system", content="sys"), Message(role="user", content="hello")],
+        history=history,
+        messages=[Message(role="system", content="sys"), Message(role="user", content="hello")],
         tools=None,
         config=LlmConfig(),
     )
@@ -200,8 +200,8 @@ def test_plan_chat_no_ops_when_unchanged():
 def test_plan_chat_history_update_applies_server_id():
     """The create step's update function picks up the server-assigned item ID."""
     diff = _plan_chat(
-        [],
-        [Message(role="user", content="hi")],
+        history=[],
+        messages=[Message(role="user", content="hi")],
         tools=None,
         config=LlmConfig(),
     )

@@ -16,12 +16,16 @@ from typing import Any, AsyncIterator, Awaitable, Callable, Dict, List, Optional
 
 from loguru import logger
 import websockets
+from websockets.legacy.client import WebSocketClientProtocol
 from websockets.protocol import State as WsState
 
 from line.llm_agent.provider import Message, StreamChunk, ToolCall
 
 ExpandedItem = Tuple[Dict[str, Any], tuple]
 ConversationEntry = Tuple[tuple, Optional[str]]  # (identity, opaque_id | None)
+
+# Type: (old_history, response_or_ack) -> new_history
+HistoryUpdate = Callable[[List[ConversationEntry], Dict[str, Any]], List[ConversationEntry]]
 
 
 def _normalize_openai_model_name(model: str) -> str:
@@ -180,7 +184,7 @@ _IGNORED_EVENTS = frozenset(
 # ---------------------------------------------------------------------------
 
 
-def _ws_is_closed(ws: Optional[Any]) -> bool:
+def _ws_is_closed(ws: Optional[WebSocketClientProtocol]) -> bool:
     """Check if a WebSocket is closed or uninitialized."""
     if ws is None:
         return True
@@ -191,7 +195,7 @@ async def _ws_connect(
     url: str,
     api_key: str,
     extra_headers: Optional[Dict[str, str]] = None,
-) -> Any:
+) -> WebSocketClientProtocol:
     """Open a new WebSocket connection and return it."""
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -199,7 +203,7 @@ async def _ws_connect(
     }
     return await websockets.connect(
         url,
-        additional_headers=headers,
+        extra_headers=headers,
         max_size=2**24,  # 16 MB
         ping_interval=20,
         ping_timeout=20,
@@ -223,7 +227,7 @@ class _WsEventStream:
     terminal event arrives so the provider can update its state.
     """
 
-    def __init__(self, ws: Any, on_response_done: Callable[[Dict[str, Any]], None]):
+    def __init__(self, ws: WebSocketClientProtocol, on_response_done: Callable[[Dict[str, Any]], None]):
         self._ws = ws
         self._on_response_done = on_response_done
         self.done = False
@@ -346,7 +350,7 @@ class _WsEventStream:
 # ---------------------------------------------------------------------------
 
 
-async def _cancel_and_drain(stream: _WsEventStream, ws: Any) -> None:
+async def _cancel_and_drain(stream: _WsEventStream, ws: WebSocketClientProtocol) -> None:
     """Cancel the in-progress response and drain remaining WS events.
 
     Catches ``BaseException`` (not just ``Exception``) so that

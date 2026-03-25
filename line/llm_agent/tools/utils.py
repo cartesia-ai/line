@@ -25,10 +25,13 @@ Parameter syntax:
         ...
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass
 from enum import Enum
 from inspect import Parameter, signature
 from typing import (
+    TYPE_CHECKING,
     Annotated,
     Any,
     AsyncIterable,
@@ -48,6 +51,9 @@ from typing import (
 
 from line.agent import TurnEnv
 from line.events import InputEvent, OutputEvent
+
+if TYPE_CHECKING:
+    from line.llm_agent.tools.system import EndCallTool, WebSearchTool
 
 # -------------------------
 # Tool Type Enum
@@ -132,6 +138,12 @@ class FunctionTool:
     is_background: bool = False
 
 
+# Type alias for tools that can be passed to LlmAgent/LlmProvider.
+# Plain callables are automatically wrapped as loopback tools.
+# Uses string literal because WebSearchTool/EndCallTool are TYPE_CHECKING-only imports.
+ToolSpec = Union[FunctionTool, "WebSearchTool", "EndCallTool", Callable]
+
+
 @dataclass
 class ParameterInfo:
     """Information about a function parameter."""
@@ -154,7 +166,9 @@ def _get_tool_name(tool: Any) -> str:
     return type(tool).__name__
 
 
-def _merge_tools(base_tools: Optional[List[Any]], override_tools: Optional[List[Any]]) -> List[Any]:
+def _merge_tools(
+    base_tools: Optional[List[ToolSpec]], override_tools: Optional[List[ToolSpec]]
+) -> List[ToolSpec]:
     """Merge two tool lists, with override_tools replacing base_tools by name."""
     override_names = {_get_tool_name(t) for t in (override_tools or [])}
     filtered_base = [t for t in (base_tools or []) if _get_tool_name(t) not in override_names]
@@ -292,7 +306,7 @@ def construct_function_tool(func, name, description, tool_type, is_background=Fa
 
 
 def _normalize_tools(
-    tool_specs: List[Any],
+    tool_specs: List[ToolSpec],
     model: str,
 ) -> Tuple[List[FunctionTool], Optional[Dict[str, Any]]]:
     """Resolve tool specs into FunctionTools and optional web_search_options.

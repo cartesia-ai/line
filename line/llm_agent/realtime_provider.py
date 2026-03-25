@@ -11,17 +11,19 @@ Protocol reference: https://platform.openai.com/docs/api-reference/realtime
 
 import asyncio
 import json
-from typing import Any, Callable, Dict, List, NamedTuple, Optional, Tuple
+from typing import Any, AsyncIterable, Dict, List, NamedTuple, Optional, Tuple
 import uuid
 
 from loguru import logger
 import websockets
+from websockets.legacy.client import WebSocketClientProtocol
 
 from line.llm_agent.config import LlmConfig
-from line.llm_agent.provider import Message, _extract_instructions_and_messages
+from line.llm_agent.provider import Message, StreamChunk, _extract_instructions_and_messages
 from line.llm_agent.schema_converter import build_openai_tool_defs
 from line.llm_agent.stream import (
     ConversationEntry,
+    HistoryUpdate,
     _cancel_and_drain,
     _compute_divergence,
     _context_identity,
@@ -64,7 +66,7 @@ class _RealtimeProvider:
         self._model = model
         self._api_key = api_key or ""
         self._ws_url = f"{WS_URL}?model={_normalize_openai_model_name(model)}"
-        self._ws: Optional[Any] = None
+        self._ws: Optional[WebSocketClientProtocol] = None
         self._history: List[ConversationEntry] = []
         # Lazy-init: asyncio.Lock() requires a running event loop on Python 3.9.
         self._lock: Optional[asyncio.Lock] = None
@@ -82,7 +84,7 @@ class _RealtimeProvider:
         *,
         config: LlmConfig,
         **kwargs,
-    ) -> _WsChatStream:
+    ) -> AsyncIterable[StreamChunk]:
         return _WsChatStream(
             self._setup_chat(messages, tools, config, web_search_options=kwargs.get("web_search_options"))
         )
@@ -96,6 +98,7 @@ class _RealtimeProvider:
     ) -> None:
         async with self._get_lock():
             await self._ensure_connected()
+            instructions = config.system_prompt or None
             tool_defs = build_openai_tool_defs(
                 tools,
                 web_search_options=web_search_options,
@@ -103,7 +106,7 @@ class _RealtimeProvider:
                 responses_api=True,
             )
             desired_context = _context_identity(
-                config.system_prompt,
+                instructions,
                 tool_defs,
                 temperature=config.temperature,
                 max_tokens=config.max_tokens,
@@ -113,7 +116,7 @@ class _RealtimeProvider:
                 return
 
             event, update = _make_session_update(
-                instructions=config.system_prompt,
+                instructions=instructions,
                 tool_defs=tool_defs,
                 temperature=config.temperature,
                 max_tokens=config.max_tokens,
@@ -153,7 +156,13 @@ class _RealtimeProvider:
         try:
             await self._ensure_connected()
 
-            plan = _plan_chat(self._history, messages, tools, config, web_search_options=web_search_options)
+            plan = _plan_chat(
+                history=self._history,
+                messages=messages,
+                tools=tools,
+                config=config,
+                web_search_options=web_search_options,
+            )
             if plan.reconnect:
                 await self._reconnect()
 
@@ -246,10 +255,6 @@ def _split_context_history(
     return None, history
 
 
-# Type for a history update function: (old_history, ack_payload) -> new_history
-HistoryUpdate = Callable[[List[ConversationEntry], Dict[str, Any]], List[ConversationEntry]]
-
-
 class _DiffResult(NamedTuple):
     """Pure output of the diff algorithm.
 
@@ -267,15 +272,15 @@ class _DiffResult(NamedTuple):
 
 
 def _plan_chat(
-    current_history: List[ConversationEntry],
-    desired_messages: List[Message],
+    *,
+    history: List[ConversationEntry],
+    messages: List[Message],
     tools: Optional[List[FunctionTool]],
     config: LlmConfig,
-    *,
     web_search_options: Optional[Dict[str, Any]] = None,
 ) -> _DiffResult:
     """Compute minimal WS messages to sync conversation with desired state."""
-    desired_instructions, non_system = _extract_instructions_and_messages(desired_messages, config)
+    desired_instructions, non_system = _extract_instructions_and_messages(messages, config)
 
     tool_defs = build_openai_tool_defs(
         tools,
@@ -289,7 +294,7 @@ def _plan_chat(
         temperature=config.temperature,
         max_tokens=config.max_tokens,
     )
-    current_context, current_items = _split_context_history(current_history)
+    current_context, current_items = _split_context_history(history)
 
     desired_pairs = _expand_messages(non_system, assistant_text_type="text")
     current_identities = [identity for identity, _ in current_items]

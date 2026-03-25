@@ -422,6 +422,9 @@ async def test_mcp_tool_execution(model: str, api_key: str):
 
 MODELS = [
     ("OPENAI_API_KEY", "openai/gpt-5.2"),
+    ("OPENAI_API_KEY", "openai/gpt-5.2-mini"),
+    ("OPENAI_API_KEY", "openai/gpt-5.2-nano"),
+    ("OPENAI_API_KEY", "openai/gpt-realtime"),
     ("ANTHROPIC_API_KEY", "anthropic/claude-haiku-4-5"),
     ("GEMINI_API_KEY", "gemini/gemini-2.5-flash"),
     ("GEMINI_API_KEY", "gemini/gemini-3-flash-preview"),
@@ -500,6 +503,8 @@ async def main(args):
             print(f"  export {env_var}=your-key-here")
         return 1
 
+    failures: list[tuple[str, str, str]] = []  # (model, test_name, error)
+
     # First, validate all API keys
     print("\n" + "=" * 60)
     print("PHASE 1: Validating API Keys")
@@ -510,43 +515,57 @@ async def main(args):
         api_key = os.environ[env_var]
         if await test_api_key(model, api_key):
             valid_models.append((env_var, model))
+        else:
+            failures.append((model, "api_key", "API key validation failed"))
 
     if not valid_models:
         print("\n⚠ No valid API keys. Check your keys and permissions.")
-        return 1
 
     # Run full tests only for models with valid keys
-    print("\n" + "=" * 60)
-    print("PHASE 2: Running Full Tests")
-    print("=" * 60)
+    if valid_models:
+        print("\n" + "=" * 60)
+        print("PHASE 2: Running Full Tests")
+        print("=" * 60)
 
     for env_var, model in valid_models:
         api_key = os.environ[env_var]
-        try:
-            if "streaming" in tests_to_run:
-                await test_streaming_text(model, api_key)
-            if "introduction" in tests_to_run:
-                await test_introduction(model, api_key)
-            if "tools" in tests_to_run:
-                await test_tool_calling(model, api_key)
-            if "web_search" in tests_to_run:
-                await test_web_search(model, api_key)
-                await test_web_search(model, api_key, search_context_size="high")
-            if "web_search_fn" in tests_to_run:
-                await test_function_tools_with_web_search(model, api_key)
-            if "mcp" in tests_to_run:
-                await test_mcp_list_tools(model, api_key)
-                await test_mcp_tool_execution(model, api_key)
-        except Exception as e:
-            print(f"\n✗ Error testing {model}: {e}")
-            import traceback
 
-            traceback.print_exc()
+        test_plan: list[tuple[str, ...]] = []
+        if "streaming" in tests_to_run:
+            test_plan.append(("streaming", test_streaming_text, model, api_key))
+        if "introduction" in tests_to_run:
+            test_plan.append(("introduction", test_introduction, model, api_key))
+        if "tools" in tests_to_run:
+            test_plan.append(("tools", test_tool_calling, model, api_key))
+        if "web_search" in tests_to_run:
+            test_plan.append(("web_search", test_web_search, model, api_key))
+            test_plan.append(("web_search (high)", test_web_search, model, api_key, "high"))
+        if "web_search_fn" in tests_to_run:
+            test_plan.append(("web_search_fn", test_function_tools_with_web_search, model, api_key))
+        if "mcp" in tests_to_run:
+            test_plan.append(("mcp_list_tools", test_mcp_list_tools, model, api_key))
+            test_plan.append(("mcp_tool_execution", test_mcp_tool_execution, model, api_key))
+
+        for test_entry in test_plan:
+            test_name, test_fn, *test_args = test_entry
+            try:
+                await test_fn(*test_args)
+            except Exception as e:
+                print(f"\n✗ Error in {test_name} for {model}: {e}")
+                import traceback
+
+                traceback.print_exc()
+                failures.append((model, test_name, str(e)))
 
     print("\n" + "=" * 60)
-    print("All tests completed!")
+    if failures:
+        print(f"DONE — {len(failures)} failure(s):")
+        for model, test_name, error in failures:
+            print(f"  ✗ {model} / {test_name}: {error}")
+    else:
+        print("All tests passed!")
     print("=" * 60)
-    return 0
+    return 1 if failures else 0
 
 
 if __name__ == "__main__":
