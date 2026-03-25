@@ -29,3 +29,11 @@ AgentSpec = Union[Agent, tuple[Agent, EventFilter, EventFilter]]
 # We can add more context here later as needed.
 class TurnEnv:
     pass
+
+
+def call_agent(agent: Agent, turn_env: TurnEnv, event: InputEvent) -> AsyncIterable[OutputEvent]:
+    """Call an agent, handling both AgentClass and AgentCallable."""
+    if hasattr(agent, "process"):
+        return agent.process(turn_env, event)  # type: ignore[union-attr]
+    else:
+        return agent(turn_env, event)  # type: ignore[return-value]

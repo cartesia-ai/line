@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import AsyncIterable
 
-from line.agent import Agent, TurnEnv
+from line.agent import Agent, TurnEnv, call_agent
 from line.events import AgentSendText, InputEvent, OutputEvent
 
 
@@ -49,19 +49,20 @@ class WordBufferingWrapper:
         text_buffer = ""
         last_interruptible = True
 
-        async for output in _call_agent(self._agent, env, event):
+        async for output in call_agent(self._agent, env, event):
             if not isinstance(output, AgentSendText):
                 yield output
                 continue
 
             text_buffer += output.text
-            last_interruptible = output.interruptible
+            last_interruptible = last_interruptible and output.interruptible
 
             # Auto strategy: if buffer contains CJK/spaceless script, flush immediately
             if self._strategy == "auto" and _contains_spaceless_script(text_buffer):
                 if text_buffer:
                     yield AgentSendText(text=text_buffer, interruptible=last_interruptible)
                     text_buffer = ""
+                    last_interruptible = True
                 continue
 
             # Emit complete words (up to last whitespace)
@@ -71,6 +72,7 @@ class WordBufferingWrapper:
                 text_buffer = text_buffer[last_ws + 1 :]
                 if to_emit:
                     yield AgentSendText(text=to_emit, interruptible=last_interruptible)
+                    last_interruptible = True
 
         # Flush remaining buffer
         if text_buffer:
@@ -130,17 +132,3 @@ def _is_spaceless_char(ch: str) -> bool:
         # Khmer
         or 0x1780 <= cp <= 0x17FF
     )
-
-
-async def _call_agent(
-    agent: Agent, env: TurnEnv, event: InputEvent
-) -> AsyncIterable[OutputEvent]:
-    """Call an agent, handling both AgentClass and AgentCallable."""
-    if hasattr(agent, "process") and callable(agent.process):
-        async for output in agent.process(env, event):  # type: ignore[union-attr]
-            yield output
-    elif callable(agent):
-        async for output in agent(env, event):  # type: ignore[operator]
-            yield output
-    else:
-        raise TypeError("Agent must be callable or have a callable 'process' method.")

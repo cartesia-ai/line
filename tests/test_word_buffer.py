@@ -4,7 +4,7 @@ Tests for the word_buffer wrapper.
 uv run pytest tests/test_word_buffer.py -v
 """
 
-from typing import List
+from typing import List, Optional
 
 import pytest
 
@@ -43,7 +43,7 @@ class MockAgent:
         self._cleanup_called = True
 
 
-async def _collect(wrapper: WordBufferingWrapper, event: InputEvent | None = None) -> List[OutputEvent]:
+async def _collect(wrapper: WordBufferingWrapper, event: Optional[InputEvent] = None) -> List[OutputEvent]:
     """Helper to collect all outputs from a wrapper."""
     if event is None:
         event = UserTurnEnded()
@@ -65,11 +65,13 @@ def _texts(outputs: List[OutputEvent]) -> List[str]:
 
 async def test_basic_word_buffering(anyio_backend):
     """Words split across tokens are reassembled: 'Hum' + 'ana' + ' is' → 'Humana ' then 'is'."""
-    agent = MockAgent([
-        AgentSendText(text="Hum"),
-        AgentSendText(text="ana"),
-        AgentSendText(text=" is"),
-    ])
+    agent = MockAgent(
+        [
+            AgentSendText(text="Hum"),
+            AgentSendText(text="ana"),
+            AgentSendText(text=" is"),
+        ]
+    )
     wrapper = word_buffer(agent)
     outputs = await _collect(wrapper)
     texts = _texts(outputs)
@@ -78,10 +80,12 @@ async def test_basic_word_buffering(anyio_backend):
 
 async def test_first_token_no_leading_space(anyio_backend):
     """First token without leading space is buffered until next space."""
-    agent = MockAgent([
-        AgentSendText(text="Hello"),
-        AgentSendText(text=" world"),
-    ])
+    agent = MockAgent(
+        [
+            AgentSendText(text="Hello"),
+            AgentSendText(text=" world"),
+        ]
+    )
     wrapper = word_buffer(agent)
     outputs = await _collect(wrapper)
     texts = _texts(outputs)
@@ -90,11 +94,13 @@ async def test_first_token_no_leading_space(anyio_backend):
 
 async def test_punctuation_attached(anyio_backend):
     """Punctuation tokens stay attached to their word."""
-    agent = MockAgent([
-        AgentSendText(text="Hello"),
-        AgentSendText(text=","),
-        AgentSendText(text=" world"),
-    ])
+    agent = MockAgent(
+        [
+            AgentSendText(text="Hello"),
+            AgentSendText(text=","),
+            AgentSendText(text=" world"),
+        ]
+    )
     wrapper = word_buffer(agent)
     outputs = await _collect(wrapper)
     texts = _texts(outputs)
@@ -103,10 +109,12 @@ async def test_punctuation_attached(anyio_backend):
 
 async def test_multiple_words_in_one_chunk(anyio_backend):
     """A chunk containing multiple spaces emits all complete words."""
-    agent = MockAgent([
-        AgentSendText(text="the quick "),
-        AgentSendText(text="brown"),
-    ])
+    agent = MockAgent(
+        [
+            AgentSendText(text="the quick "),
+            AgentSendText(text="brown"),
+        ]
+    )
     wrapper = word_buffer(agent)
     outputs = await _collect(wrapper)
     texts = _texts(outputs)
@@ -115,10 +123,12 @@ async def test_multiple_words_in_one_chunk(anyio_backend):
 
 async def test_newline_as_word_boundary(anyio_backend):
     """Newlines are treated as word boundaries."""
-    agent = MockAgent([
-        AgentSendText(text="Hello\n"),
-        AgentSendText(text="world"),
-    ])
+    agent = MockAgent(
+        [
+            AgentSendText(text="Hello\n"),
+            AgentSendText(text="world"),
+        ]
+    )
     wrapper = word_buffer(agent)
     outputs = await _collect(wrapper)
     texts = _texts(outputs)
@@ -127,10 +137,12 @@ async def test_newline_as_word_boundary(anyio_backend):
 
 async def test_tab_as_word_boundary(anyio_backend):
     """Tabs are treated as word boundaries."""
-    agent = MockAgent([
-        AgentSendText(text="col1\t"),
-        AgentSendText(text="col2"),
-    ])
+    agent = MockAgent(
+        [
+            AgentSendText(text="col1\t"),
+            AgentSendText(text="col2"),
+        ]
+    )
     wrapper = word_buffer(agent)
     outputs = await _collect(wrapper)
     texts = _texts(outputs)
@@ -144,9 +156,11 @@ async def test_tab_as_word_boundary(anyio_backend):
 
 async def test_empty_text(anyio_backend):
     """Empty AgentSendText produces no output."""
-    agent = MockAgent([
-        AgentSendText(text=""),
-    ])
+    agent = MockAgent(
+        [
+            AgentSendText(text=""),
+        ]
+    )
     wrapper = word_buffer(agent)
     outputs = await _collect(wrapper)
     texts = _texts(outputs)
@@ -155,11 +169,13 @@ async def test_empty_text(anyio_backend):
 
 async def test_whitespace_only(anyio_backend):
     """Whitespace-only chunks flush correctly."""
-    agent = MockAgent([
-        AgentSendText(text="Hello"),
-        AgentSendText(text=" "),
-        AgentSendText(text="world"),
-    ])
+    agent = MockAgent(
+        [
+            AgentSendText(text="Hello"),
+            AgentSendText(text=" "),
+            AgentSendText(text="world"),
+        ]
+    )
     wrapper = word_buffer(agent)
     outputs = await _collect(wrapper)
     texts = _texts(outputs)
@@ -168,10 +184,12 @@ async def test_whitespace_only(anyio_backend):
 
 async def test_single_word_no_spaces(anyio_backend):
     """A single word with no spaces is emitted on final flush."""
-    agent = MockAgent([
-        AgentSendText(text="Hum"),
-        AgentSendText(text="ana"),
-    ])
+    agent = MockAgent(
+        [
+            AgentSendText(text="Hum"),
+            AgentSendText(text="ana"),
+        ]
+    )
     wrapper = word_buffer(agent)
     outputs = await _collect(wrapper)
     texts = _texts(outputs)
@@ -180,10 +198,12 @@ async def test_single_word_no_spaces(anyio_backend):
 
 async def test_final_flush(anyio_backend):
     """Remaining buffer is flushed when stream ends."""
-    agent = MockAgent([
-        AgentSendText(text="Hello "),
-        AgentSendText(text="world"),
-    ])
+    agent = MockAgent(
+        [
+            AgentSendText(text="Hello "),
+            AgentSendText(text="world"),
+        ]
+    )
     wrapper = word_buffer(agent)
     outputs = await _collect(wrapper)
     texts = _texts(outputs)
@@ -199,12 +219,14 @@ async def test_non_text_events_pass_through(anyio_backend):
     """Non-AgentSendText events are yielded immediately, not buffered."""
     metric = LogMetric(name="test", value=42)
     tool_called = AgentToolCalled(tool_call_id="tc1", tool_name="test_tool")
-    agent = MockAgent([
-        AgentSendText(text="Hello"),
-        metric,
-        AgentSendText(text=" world"),
-        tool_called,
-    ])
+    agent = MockAgent(
+        [
+            AgentSendText(text="Hello"),
+            metric,
+            AgentSendText(text=" world"),
+            tool_called,
+        ]
+    )
     wrapper = word_buffer(agent)
     outputs = await _collect(wrapper)
 
@@ -224,18 +246,41 @@ async def test_non_text_events_pass_through(anyio_backend):
 
 async def test_interruptible_flag_preserved(anyio_backend):
     """The last interruptible value is used for emitted chunks."""
-    agent = MockAgent([
-        AgentSendText(text="Hello ", interruptible=False),
-        AgentSendText(text="world", interruptible=True),
-    ])
+    agent = MockAgent(
+        [
+            AgentSendText(text="Hello ", interruptible=False),
+            AgentSendText(text="world", interruptible=True),
+        ]
+    )
     wrapper = word_buffer(agent)
     outputs = await _collect(wrapper)
     text_events = [o for o in outputs if isinstance(o, AgentSendText)]
 
     assert text_events[0].text == "Hello "
     assert text_events[0].interruptible is False
-    # "world" flushed at end with last_interruptible=True
+    # "world" flushed at end — interruptible resets after emission
     assert text_events[1].text == "world"
+    assert text_events[1].interruptible is True
+
+
+async def test_interruptible_and_logic(anyio_backend):
+    """If any chunk in a buffered emission is non-interruptible, the emission is non-interruptible."""
+    agent = MockAgent(
+        [
+            AgentSendText(text="Hum", interruptible=True),
+            AgentSendText(text="ana", interruptible=False),
+            AgentSendText(text=" is", interruptible=True),
+        ]
+    )
+    wrapper = word_buffer(agent)
+    outputs = await _collect(wrapper)
+    text_events = [o for o in outputs if isinstance(o, AgentSendText)]
+
+    # "Humana " includes a chunk with interruptible=False → entire emission is False
+    assert text_events[0].text == "Humana "
+    assert text_events[0].interruptible is False
+    # "is" only has interruptible=True (reset after emission)
+    assert text_events[1].text == "is"
     assert text_events[1].interruptible is True
 
 
@@ -246,11 +291,13 @@ async def test_interruptible_flag_preserved(anyio_backend):
 
 async def test_cjk_chinese_emitted_immediately(anyio_backend):
     """Chinese characters are emitted immediately without buffering."""
-    agent = MockAgent([
-        AgentSendText(text="你"),
-        AgentSendText(text="好"),
-        AgentSendText(text="世界"),
-    ])
+    agent = MockAgent(
+        [
+            AgentSendText(text="你"),
+            AgentSendText(text="好"),
+            AgentSendText(text="世界"),
+        ]
+    )
     wrapper = word_buffer(agent, strategy="auto")
     outputs = await _collect(wrapper)
     texts = _texts(outputs)
@@ -260,10 +307,12 @@ async def test_cjk_chinese_emitted_immediately(anyio_backend):
 
 async def test_cjk_japanese_emitted_immediately(anyio_backend):
     """Japanese hiragana/katakana triggers immediate emission."""
-    agent = MockAgent([
-        AgentSendText(text="こんに"),
-        AgentSendText(text="ちは"),
-    ])
+    agent = MockAgent(
+        [
+            AgentSendText(text="こんに"),
+            AgentSendText(text="ちは"),
+        ]
+    )
     wrapper = word_buffer(agent, strategy="auto")
     outputs = await _collect(wrapper)
     texts = _texts(outputs)
@@ -272,10 +321,12 @@ async def test_cjk_japanese_emitted_immediately(anyio_backend):
 
 async def test_cjk_korean_emitted_immediately(anyio_backend):
     """Korean hangul triggers immediate emission."""
-    agent = MockAgent([
-        AgentSendText(text="안녕"),
-        AgentSendText(text="하세요"),
-    ])
+    agent = MockAgent(
+        [
+            AgentSendText(text="안녕"),
+            AgentSendText(text="하세요"),
+        ]
+    )
     wrapper = word_buffer(agent, strategy="auto")
     outputs = await _collect(wrapper)
     texts = _texts(outputs)
@@ -284,10 +335,12 @@ async def test_cjk_korean_emitted_immediately(anyio_backend):
 
 async def test_thai_emitted_immediately(anyio_backend):
     """Thai characters trigger immediate emission."""
-    agent = MockAgent([
-        AgentSendText(text="สวัส"),
-        AgentSendText(text="ดี"),
-    ])
+    agent = MockAgent(
+        [
+            AgentSendText(text="สวัส"),
+            AgentSendText(text="ดี"),
+        ]
+    )
     wrapper = word_buffer(agent, strategy="auto")
     outputs = await _collect(wrapper)
     texts = _texts(outputs)
@@ -296,10 +349,12 @@ async def test_thai_emitted_immediately(anyio_backend):
 
 async def test_mixed_cjk_latin_flushes_buffer(anyio_backend):
     """When CJK arrives while Latin text is buffered, everything flushes."""
-    agent = MockAgent([
-        AgentSendText(text="Hello"),
-        AgentSendText(text="世界"),
-    ])
+    agent = MockAgent(
+        [
+            AgentSendText(text="Hello"),
+            AgentSendText(text="世界"),
+        ]
+    )
     wrapper = word_buffer(agent, strategy="auto")
     outputs = await _collect(wrapper)
     texts = _texts(outputs)
@@ -314,10 +369,12 @@ async def test_mixed_cjk_latin_flushes_buffer(anyio_backend):
 
 async def test_space_strategy_buffers_cjk(anyio_backend):
     """With strategy='space', CJK text is buffered like anything else."""
-    agent = MockAgent([
-        AgentSendText(text="你好"),
-        AgentSendText(text="世界"),
-    ])
+    agent = MockAgent(
+        [
+            AgentSendText(text="你好"),
+            AgentSendText(text="世界"),
+        ]
+    )
     wrapper = word_buffer(agent, strategy="space")
     outputs = await _collect(wrapper)
     texts = _texts(outputs)
@@ -327,10 +384,12 @@ async def test_space_strategy_buffers_cjk(anyio_backend):
 
 async def test_space_strategy_still_splits_on_whitespace(anyio_backend):
     """strategy='space' still splits on whitespace for any text."""
-    agent = MockAgent([
-        AgentSendText(text="Hello "),
-        AgentSendText(text="world"),
-    ])
+    agent = MockAgent(
+        [
+            AgentSendText(text="Hello "),
+            AgentSendText(text="world"),
+        ]
+    )
     wrapper = word_buffer(agent, strategy="space")
     outputs = await _collect(wrapper)
     texts = _texts(outputs)
