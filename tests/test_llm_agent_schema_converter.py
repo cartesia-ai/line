@@ -5,7 +5,6 @@ Tests TypedDict support, nested objects, and strict mode handling.
 """
 
 from typing import Annotated, TypedDict
-import warnings
 
 import pytest
 
@@ -158,29 +157,31 @@ class TestTypedDictSchema:
 # =============================================================================
 
 
-class TestDictWarnings:
-    """Tests for warnings when using dict types."""
+class TestDictErrors:
+    """Tests for errors when using dict types in strict mode."""
 
-    def test_plain_dict_warning(self):
-        """Should warn when using plain dict type."""
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            schema = python_type_to_json_schema(dict)
+    def test_plain_dict_raises_in_strict_mode(self):
+        """Should raise ValueError when using plain dict type in strict mode."""
+        with pytest.raises(ValueError) as exc_info:
+            python_type_to_json_schema(dict, strict=True)
+        assert "TypedDict" in str(exc_info.value)
 
-            assert len(w) == 1
-            assert "TypedDict" in str(w[0].message)
-            assert schema == {"type": "object"}
+    def test_plain_dict_ok_in_non_strict_mode(self):
+        """Should not raise when using plain dict type in non-strict mode."""
+        schema = python_type_to_json_schema(dict, strict=False)
+        assert schema == {"type": "object"}
 
-    def test_list_dict_warning(self):
-        """Should warn when using list[dict] type."""
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            schema = python_type_to_json_schema(list[dict])
+    def test_list_dict_raises_in_strict_mode(self):
+        """Should raise ValueError when using list[dict] type in strict mode."""
+        with pytest.raises(ValueError) as exc_info:
+            python_type_to_json_schema(list[dict], strict=True)
+        assert "TypedDict" in str(exc_info.value)
 
-            assert len(w) == 1
-            assert "TypedDict" in str(w[0].message)
-            assert schema["type"] == "array"
-            assert schema["items"] == {"type": "object"}
+    def test_list_dict_ok_in_non_strict_mode(self):
+        """Should not raise when using list[dict] type in non-strict mode."""
+        schema = python_type_to_json_schema(list[dict], strict=False)
+        assert schema["type"] == "array"
+        assert schema["items"] == {"type": "object"}
 
 
 # =============================================================================
@@ -283,7 +284,5 @@ class TestFunctionToolWithTypedDict:
             """Add items."""
             pass
 
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            with pytest.raises(ValueError, match="cannot satisfy OpenAI strict mode"):
-                function_tool_to_litellm(add_items)
+        with pytest.raises(ValueError, match="cannot satisfy OpenAI strict mode"):
+            function_tool_to_litellm(add_items)

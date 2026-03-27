@@ -19,9 +19,6 @@ class LlmConfig:
     :func:`_merge_configs` to layer an override config onto a base config and
     resolve every sentinel to its real default value.
 
-    ``strict_tool_schemas`` (default True) requires every tool's JSON Schema to satisfy
-    OpenAI strict mode; set it False only if you accept weaker schemas (e.g. ``list[dict]``).
-
     See https://docs.litellm.ai/docs/completion/input for full documentation.
     """
 
@@ -45,9 +42,6 @@ class LlmConfig:
     num_retries: int = _UNSET
     fallbacks: Optional[List[str]] = _UNSET
     timeout: Optional[float] = _UNSET
-
-    # Tool JSON Schema → LiteLLM / OpenAI function tools (see schema_converter.function_tool_to_litellm)
-    strict_tool_schemas: bool = _UNSET
 
     # Provider-specific pass-through
     extra: Dict[str, Any] = _UNSET
@@ -136,7 +130,6 @@ _FIELD_DEFAULTS: Dict[str, Any] = {
     "num_retries": 2,
     "fallbacks": None,
     "timeout": None,
-    "strict_tool_schemas": True,
     "extra": dict,  # callable → invoked each time
 }
 

@@ -98,6 +98,50 @@ def _is_typeddict(tp: Type) -> bool:
     return isinstance(tp, type) and hasattr(tp, "__required_keys__") and hasattr(tp, "__optional_keys__")
 
 
+def _type_violates_openai_strict(tp: Type) -> bool:
+    """Check if a type annotation would violate OpenAI strict mode.
+
+    Returns True if the type contains:
+    - Plain dict or Dict[K, V] (no explicit properties)
+    - TypedDict with optional keys (cannot have additionalProperties: false)
+    """
+    # Plain dict
+    if tp is dict:
+        return True
+
+    # TypedDict with optional keys
+    if _is_typeddict(tp):
+        if tp.__optional_keys__:
+            return True
+        # Check nested fields recursively
+        try:
+            hints = get_type_hints(tp)
+        except Exception:
+            hints = getattr(tp, "__annotations__", {})
+        for field_type in hints.values():
+            if _type_violates_openai_strict(field_type):
+                return True
+        return False
+
+    origin = get_origin(tp)
+    args = get_args(tp)
+
+    # Dict[K, V]
+    if origin is dict:
+        return True
+
+    # list[X] - check item type
+    if origin is list and args:
+        return _type_violates_openai_strict(args[0])
+
+    # Union types - check all variants
+    if origin is Union:
+        non_none_args = [a for a in args if a is not type(None)]
+        return any(_type_violates_openai_strict(a) for a in non_none_args)
+
+    return False
+
+
 def python_type_to_json_schema(type_annotation: Type, *, strict: bool = True) -> dict[str, Any]:
     """
     Convert a Python type annotation to a JSON Schema type.
@@ -127,7 +171,6 @@ def python_type_to_json_schema(type_annotation: Type, *, strict: bool = True) ->
 
     # Handle plain dict - error in strict mode since it cannot satisfy OpenAI strict rules
     if type_annotation is dict:
-<<<<<<< HEAD
         if strict:
             raise ValueError(
                 "Using 'dict' in tool parameters yields an object schema without explicit "
@@ -135,16 +178,6 @@ def python_type_to_json_schema(type_annotation: Type, *, strict: bool = True) ->
                 "Use TypedDict to define the expected structure. "
                 "See: https://platform.openai.com/docs/guides/structured-outputs"
             )
-=======
-        warnings.warn(
-            "Using 'dict' in tool parameters yields an object schema without explicit "
-            "properties, which cannot satisfy OpenAI strict mode when enabled (default). "
-            "Use TypedDict or set LlmConfig(strict_tool_schemas=False). "
-            "See: https://platform.openai.com/docs/guides/structured-outputs",
-            UserWarning,
-            stacklevel=4,
-        )
->>>>>>> b7a0e6d (Addressing comments)
         return {"type": "object"}
 
     # Handle TypedDict - generates full schema with properties
@@ -198,7 +231,6 @@ def python_type_to_json_schema(type_annotation: Type, *, strict: bool = True) ->
 
     # Handle dict[K, V] - error in strict mode since it cannot satisfy OpenAI strict rules
     if origin is dict:
-<<<<<<< HEAD
         if strict:
             raise ValueError(
                 "Using 'dict[K, V]' in tool parameters yields an object schema without explicit "
@@ -206,16 +238,6 @@ def python_type_to_json_schema(type_annotation: Type, *, strict: bool = True) ->
                 "Use TypedDict to define the expected structure. "
                 "See: https://platform.openai.com/docs/guides/structured-outputs"
             )
-=======
-        warnings.warn(
-            "Using 'Dict[K, V]' in tool parameters yields an object schema without explicit "
-            "properties, which cannot satisfy OpenAI strict mode when enabled (default). "
-            "Use TypedDict or set LlmConfig(strict_tool_schemas=False). "
-            "See: https://platform.openai.com/docs/guides/structured-outputs",
-            UserWarning,
-            stacklevel=4,
-        )
->>>>>>> b7a0e6d (Addressing comments)
         return {"type": "object"}
 
     # Handle Literal types (e.g., Literal["a", "b", "c"])
