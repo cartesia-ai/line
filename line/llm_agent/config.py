@@ -46,6 +46,9 @@ class LlmConfig:
     # Provider-specific pass-through
     extra: Dict[str, Any] = _UNSET
 
+    # Tool schema settings
+    strict_tool_schemas: bool = _UNSET
+
     @classmethod
     def from_call_request(
         cls,
@@ -131,6 +134,7 @@ _FIELD_DEFAULTS: Dict[str, Any] = {
     "fallbacks": None,
     "timeout": None,
     "extra": dict,  # callable → invoked each time
+    "strict_tool_schemas": True,
 }
 
 

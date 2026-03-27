@@ -197,7 +197,7 @@ class LlmProvider:
             llm_kwargs.update(cfg.extra)
 
         if tools:
-            llm_kwargs["tools"] = tools_to_litellm(tools)
+            llm_kwargs["tools"] = tools_to_litellm(tools, strict=cfg.strict_tool_schemas)
 
         llm_kwargs.update(kwargs)
 
