@@ -23,7 +23,7 @@ from line.events import (
     UserTurnEnded,
 )
 from line.llm_agent import LlmAgent, LlmConfig
-from line.llm_agent.provider import LLMProvider, Message
+from line.llm_agent.provider import LlmProvider, Message
 
 
 @dataclass
@@ -102,7 +102,7 @@ class GuardrailsWrapper:
         self._call_ended = False
 
         # Initialize guardrail LLM for content classification
-        self._guardrail_llm = LLMProvider(
+        self._guardrail_llm = LlmProvider(
             model=self.config.guardrail_model,
             api_key=self.config.guardrail_api_key,
             config=LlmConfig(temperature=0),  # Deterministic for classification
@@ -213,8 +213,7 @@ Respond with ONLY a JSON object (no markdown, no explanation):
 
         try:
             response_text = ""
-            stream = self._guardrail_llm.chat(messages, tools=None)
-            async with stream:
+            async with self._guardrail_llm.chat(messages, tools=None) as stream:
                 async for chunk in stream:
                     if chunk.text:
                         response_text += chunk.text

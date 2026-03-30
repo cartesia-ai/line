@@ -4,6 +4,7 @@ LlmAgent - An Agent implementation wrapping 100+ LLM providers via LiteLLM.
 See README.md for examples and documentation.
 """
 
+import asyncio
 import inspect
 import json
 import time
@@ -16,11 +17,12 @@ from typing import (
     Dict,
     List,
     Optional,
+    Set,
+    Tuple,
     TypeVar,
     Union,
 )
 
-from litellm import get_supported_openai_params
 from loguru import logger
 
 from line.agent import AgentCallable, TurnEnv
@@ -42,10 +44,15 @@ from line.events import (
 from line.llm_agent.background_queue import BackgroundQueue
 from line.llm_agent.config import LlmConfig, _merge_configs, _normalize_config
 from line.llm_agent.history import _HISTORY_EVENT_TYPES, History
-from line.llm_agent.provider import LLMProvider, Message, ToolCall
-from line.llm_agent.tools.decorators import loopback_tool
+from line.llm_agent.provider import LlmProvider, Message, ToolCall, _get_model_config
 from line.llm_agent.tools.system import EndCallTool, WebSearchTool
-from line.llm_agent.tools.utils import FunctionTool, ToolEnv, ToolType, construct_function_tool
+from line.llm_agent.tools.utils import (
+    FunctionTool,
+    ToolEnv,
+    ToolType,
+    _merge_tools,
+    _normalize_tools,
+)
 
 T = TypeVar("T")
 
@@ -74,15 +81,12 @@ class LlmAgent:
     ):
         if not api_key:
             raise ValueError("Missing API key in LLmAgent initialization")
-        supported_params = get_supported_openai_params(model=model)
-        if supported_params is None:
-            raise ValueError(
-                f"Model {model} is not supported. See https://models.litellm.ai/ for supported models."
-            )
+
+        model_config = _get_model_config(model)
 
         # Resolve the base config to insert default values for any _UNSET sentinels.
         effective_config = _normalize_config(config or LlmConfig())
-        if effective_config.reasoning_effort is not None and "reasoning_effort" not in supported_params:
+        if effective_config.reasoning_effort is not None and not model_config.supports_reasoning_effort:
             raise ValueError(
                 f"Model {model} does not support reasoning_effort. "
                 "Remove reasoning_effort from your LlmConfig or use a model that supports it."
@@ -94,29 +98,41 @@ class LlmAgent:
         self._max_tool_iterations = max_tool_iterations
 
         self._tools: List[ToolSpec] = list(tools or [])
+        effective_tools, web_search_options = _normalize_tools(self._tools, model=model)
 
-        self._llm = LLMProvider(
-            model=self._model,
-            api_key=self._api_key,
-            config=self._config,
+        self._llm = LlmProvider(
+            model=model,
+            api_key=api_key,
+            config=effective_config,
+            tools=self._tools,
         )
 
         self._introduction_sent = False
         self.history = History()
         self._handoff_target: Optional[AgentCallable] = None  # Normalized process function
         # Queue for events from backgrounded tools that need to trigger loopback
-        self._background_queue: BackgroundQueue[tuple[AgentToolCalled, AgentToolReturned]] = BackgroundQueue()
+        # Lazy-init: asyncio.Queue() requires a running event loop on Python 3.9.
+        self._background_event_queue: Optional[BackgroundQueue[Tuple[AgentToolCalled, AgentToolReturned]]] = (
+            None
+        )
         # Cache for thought signatures (Gemini 3+ models)
         # Maps tool_call_id -> thought_signature
         self._tool_signatures: Dict[str, str] = {}
 
-        resolved_tools, web_search_options = self._resolve_tools(self._tools)
-        tool_names = [t.name for t in resolved_tools] + (["web_search"] if web_search_options else [])
+        tool_names = [t.name for t in effective_tools] + (["web_search"] if web_search_options else [])
         logger.info(f"LlmAgent initialized with model={self._model}, tools={tool_names}")
+
+    def _get_background_event_queue(
+        self,
+    ) -> "BackgroundQueue[Tuple[AgentToolCalled, AgentToolReturned]]":
+        if self._background_event_queue is None:
+            self._background_event_queue = BackgroundQueue()
+        return self._background_event_queue
 
     def set_tools(self, tools: List[ToolSpec]) -> None:
         """Replace the agent's tools with a new list."""
         self._tools = tools
+        self._llm._set_tools(tools)
 
     def set_config(self, config: LlmConfig) -> None:
         """Replace the agent's config."""
@@ -164,7 +180,7 @@ class LlmAgent:
 
         # Compute effective config and tools for this #process invocation
         effective_config = _merge_configs(self._config, config) if config else self._config
-        effective_tools = self._merge_tools(self._tools, tools) if tools else self._tools
+        effective_tools = _merge_tools(self._tools, tools)
 
         # If handoff is active, call the handed-off process function
         if self._handoff_target is not None:
@@ -177,12 +193,21 @@ class LlmAgent:
 
         # Handle CallStarted
         if isinstance(event, CallStarted):
+            warmup_task = asyncio.create_task(
+                self._llm.warmup(config=effective_config, tools=effective_tools)
+            )
             if effective_config.introduction and not self._introduction_sent:
                 output = AgentSendText(text=effective_config.introduction)
                 self.history._append_local(output)
                 self._introduction_sent = True
                 yield output
             yield LogMetric(name="agent_turn_ms", value=(time.perf_counter() - turn_start_time) * 1000)
+            try:
+                await warmup_task
+            except asyncio.CancelledError:
+                raise  # Warmup task continues as a separate asyncio.Task
+            except Exception as e:
+                logger.warning(f"Provider warmup failed: {e}")
             return
 
         # Handle CallEnded
@@ -197,83 +222,6 @@ class LlmAgent:
             yield output
 
         yield LogMetric(name="agent_turn_ms", value=(time.perf_counter() - turn_start_time) * 1000)
-
-    def _get_tool_name(self, tool: ToolSpec) -> str:
-        """Extract the name from a ToolSpec.
-
-        Args:
-            tool: A ToolSpec (FunctionTool, WebSearchTool, EndCallTool, McpTool, or Callable)
-
-        Returns:
-            The name of the tool
-        """
-        if isinstance(tool, WebSearchTool):
-            return "web_search"
-        elif isinstance(tool, EndCallTool):
-            return tool.name
-        elif isinstance(tool, FunctionTool):
-            return tool.name
-        else:  # Plain callable
-            return tool.__name__
-
-    def _merge_tools(
-        self, base_tools: List[ToolSpec], override_tools: Optional[List[ToolSpec]]
-    ) -> List[ToolSpec]:
-        """Merge two tool lists, with override_tools replacing base_tools by name.
-
-        Args:
-            base_tools: The base list of tools (typically self._tools)
-            override_tools: Tools to merge in, replacing any with matching names
-
-        Returns:
-            A merged list where tools from override_tools replace those in base_tools
-            that have the same name, and all other base_tools are preserved.
-        """
-        if not override_tools:
-            return base_tools
-
-        # Build a set of names from override_tools
-        override_names = {self._get_tool_name(tool) for tool in override_tools}
-
-        # Filter base_tools to exclude any with names in override_names
-        filtered_base = [tool for tool in base_tools if self._get_tool_name(tool) not in override_names]
-
-        # Return filtered base + override tools
-        return filtered_base + override_tools
-
-    def _resolve_tools(
-        self, tool_specs: List[ToolSpec]
-    ) -> tuple[List[FunctionTool], Optional[Dict[str, Any]]]:
-        """Resolve ToolSpecs into FunctionTools and web_search_options.
-
-        Separates WebSearchTool from other tools, converts plain callables to
-        FunctionTools via loopback_tool, and decides whether to use native web
-        search or a fallback tool based on model support.
-
-        Returns:
-            (function_tools, web_search_options)
-        """
-        function_tools: List[FunctionTool] = []
-        web_search_tool: Optional[WebSearchTool] = None
-
-        for tool in tool_specs:
-            if isinstance(tool, WebSearchTool):
-                web_search_tool = tool
-            elif isinstance(tool, EndCallTool):
-                function_tools.append(tool.as_function_tool())
-            elif isinstance(tool, FunctionTool):
-                function_tools.append(tool)
-            else:
-                function_tools.append(loopback_tool(tool))
-
-        web_search_options: Optional[Dict[str, Any]] = None
-        if web_search_tool is not None:
-            if _check_web_search_support(self._model) and not function_tools:
-                web_search_options = web_search_tool.get_web_search_options()
-            else:
-                function_tools.append(_web_search_tool_to_function_tool(web_search_tool))
-
-        return function_tools, web_search_options
 
     async def _generate_response(
         self,
@@ -295,7 +243,7 @@ class LlmAgent:
             context: Extra context to append to history for the current #process invocation only.
             history: Override history for the current #process invocation only.
         """
-        tools, web_search_options = self._resolve_tools(tool_specs)
+        tools, web_search_options = _normalize_tools(tool_specs, model=self._model)
         tool_map: Dict[str, FunctionTool] = {t.name: t for t in tools}
 
         is_first_iteration = True
@@ -312,13 +260,13 @@ class LlmAgent:
             # These events were produced since the last iteration (or from previous process() invocations)
             if is_first_iteration or should_loopback:
                 # Drain any immediately available events (non-blocking)
-                while (pair := self._background_queue.get_nowait()) is not None:
+                while (pair := self._get_background_event_queue().get_nowait()) is not None:
                     called_evt, returned_evt = pair
                     yield called_evt
                     yield returned_evt
             else:
                 # Otherwise wait for either: all sources complete OR new event arrives
-                result = await self._background_queue.get()
+                result = await self._get_background_event_queue().get()
                 if result is None:
                     # All background sources completed with no more events
                     # this generation process is completed - exit loop
@@ -364,36 +312,35 @@ class LlmAgent:
                 config=config,
                 **chat_kwargs,
             )
-            async with stream:
-                async for chunk in stream:
-                    # Track time to first chunk (text or tool call)
-                    if not first_chunk_logged and (chunk.text or chunk.tool_calls):
-                        first_chunk_ms = (time.perf_counter() - response_start_time) * 1000
-                        logger.info(f"Time to first chunk: {first_chunk_ms:.2f}ms")
-                        yield LogMetric(name="llm_first_chunk_ms", value=first_chunk_ms)
-                        first_chunk_logged = True
+            async for chunk in stream:
+                # Track time to first chunk (text or tool call)
+                if not first_chunk_logged and (chunk.text or chunk.tool_calls):
+                    first_chunk_ms = (time.perf_counter() - response_start_time) * 1000
+                    logger.info(f"Time to first chunk: {first_chunk_ms:.2f}ms")
+                    yield LogMetric(name="llm_first_chunk_ms", value=first_chunk_ms)
+                    first_chunk_logged = True
 
-                    if chunk.text:
-                        output = AgentSendText(text=chunk.text)
-                        self.history._append_local(output)
+                if chunk.text:
+                    output = AgentSendText(text=chunk.text)
+                    self.history._append_local(output)
 
-                        # Track time to first text
-                        if not first_text_logged:
-                            first_text_ms = (time.perf_counter() - response_start_time) * 1000
-                            logger.info(f"Time to first text: {first_text_ms:.2f}ms")
-                            yield LogMetric(name="llm_first_text_ms", value=first_text_ms)
-                            first_text_logged = True
+                    # Track time to first text
+                    if not first_text_logged:
+                        first_text_ms = (time.perf_counter() - response_start_time) * 1000
+                        logger.info(f"Time to first text: {first_text_ms:.2f}ms")
+                        yield LogMetric(name="llm_first_text_ms", value=first_text_ms)
+                        first_text_logged = True
 
-                        yield output
+                    yield output
 
-                    if chunk.tool_calls:
-                        # Tool call streaming differs by provider:
-                        # - OpenAI: sends args incrementally ("{\"ci", "ty\":", "\"Tokyo\"}")
-                        # - Anthropic: incremental chunks like OpenAI
-                        # - Gemini: sends complete args each chunk ("{\"city\":\"Tokyo\"}")
-                        # Provider handles accumulation; we just replace with latest version.
-                        for tc in chunk.tool_calls:
-                            tool_calls_dict[tc.id] = tc
+                if chunk.tool_calls:
+                    # Tool call streaming differs by provider:
+                    # - OpenAI: sends args incrementally ("{\"ci", "ty\":", "\"Tokyo\"}")
+                    # - Anthropic: incremental chunks like OpenAI
+                    # - Gemini: sends complete args each chunk ("{\"city\":\"Tokyo\"}")
+                    # Provider handles accumulation; we just replace with latest version.
+                    for tc in chunk.tool_calls:
+                        tool_calls_dict[tc.id] = tc
             # ==== END GENERATION CALL ==== #
 
             # ==== TOOL CALLS ==== #
@@ -572,7 +519,7 @@ class LlmAgent:
 
             # ==== END TOOL CALLS ==== #
 
-            if not (should_loopback or self._background_queue.is_active):
+            if not (should_loopback or self._get_background_event_queue().is_active):
                 break
 
     async def _build_messages(
@@ -609,7 +556,7 @@ class LlmAgent:
                 full_history.extend(context)
 
         # First pass: collect all tool_call_ids that have matching AgentToolReturned
-        returned_tool_call_ids: set[str] = set()
+        returned_tool_call_ids: Set[str] = set()
         for event in full_history:
             if isinstance(event, AgentToolReturned):
                 returned_tool_call_ids.add(event.tool_call_id)
@@ -696,7 +643,7 @@ class LlmAgent:
         when yielded after a new process() call has started.
         """
 
-        async def generate_events() -> AsyncIterable[tuple[AgentToolCalled, AgentToolReturned]]:
+        async def generate_events() -> AsyncIterable[Tuple[AgentToolCalled, AgentToolReturned]]:
             n = 0
             try:
                 async for value in normalized_func(ctx, **tool_args):
@@ -713,12 +660,12 @@ class LlmAgent:
                 self.history._append_local(returned)
                 yield (called, returned)
 
-        self._background_queue.subscribe(generate_events())
+        self._get_background_event_queue().subscribe(generate_events())
 
     async def cleanup(self) -> None:
         """Clean up resources."""
         self._handoff_target = None
-        await self._background_queue.wait()
+        await self._get_background_event_queue().wait()
         await self._llm.aclose()
 
     # ------------------------------------------------------------------
@@ -787,36 +734,6 @@ class LlmAgent:
                     )
 
 
-def _check_web_search_support(model: str) -> bool:
-    """Check if a model supports native web search via litellm.
-
-    Returns True if the model supports web_search_options, False otherwise.
-    """
-    try:
-        import litellm
-
-        return litellm.supports_web_search(model=model)
-    except (ImportError, AttributeError, Exception):
-        # If litellm doesn't have supports_web_search or any error occurs,
-        # fall back to the tool-based approach
-        return False
-
-
-def _web_search_tool_to_function_tool(web_search_tool: WebSearchTool) -> FunctionTool:
-    """Convert a WebSearchTool to a FunctionTool for use as a fallback.
-
-    When the LLM doesn't support native web search, we use the WebSearchTool's
-    search method as a regular loopback tool.
-    """
-    return construct_function_tool(
-        func=web_search_tool.search,
-        name="web_search",
-        description="Search the web for real-time information."
-        + " Use this when you need current information that may not be in your training data.",
-        tool_type=ToolType.LOOPBACK,
-    )
-
-
 async def _normalize_result(
     result: Union[AsyncIterable[T], Awaitable[T], T],
 ) -> AsyncIterable[T]:
@@ -854,7 +771,7 @@ def _construct_tool_events(
     tool_name: str,
     tool_args: Dict[str, Any],
     result: Any,
-) -> tuple[AgentToolCalled, AgentToolReturned]:
+) -> Tuple[AgentToolCalled, AgentToolReturned]:
     """Construct a pair of AgentToolCalled and AgentToolReturned events."""
     called = AgentToolCalled(
         tool_call_id=tool_call_id,

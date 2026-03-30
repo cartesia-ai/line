@@ -26,8 +26,9 @@ from line.events import (
 )
 from line.llm_agent.config import LlmConfig
 from line.llm_agent.llm_agent import LlmAgent
-from line.llm_agent.provider import Message, StreamChunk, ToolCall
+from line.llm_agent.provider import Message, StreamChunk, ToolCall, _ModelConfig
 from line.llm_agent.tools.decorators import handoff_tool, loopback_tool, passthrough_tool
+from line.llm_agent.tools.system import web_search
 from line.llm_agent.tools.utils import FunctionTool
 
 # Use anyio for async test support with asyncio backend only (trio not installed)
@@ -69,12 +70,6 @@ class MockStream:
             else:
                 yield chunk
 
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, *args):
-        pass
-
 
 class MockLLM:
     """Mock LLM that returns predefined responses."""
@@ -84,6 +79,7 @@ class MockLLM:
         self._call_count = 0
         self._recorded_messages: List[List[Message]] = []
         self._recorded_tools: List[Optional[List[FunctionTool]]] = []
+        self._warmup_calls = []
 
     def chat(
         self, messages: List[Message], tools: Optional[List[FunctionTool]] = None, **kwargs
@@ -97,6 +93,12 @@ class MockLLM:
             return MockStream(response)
         else:
             return MockStream([StreamChunk(is_final=True)])
+
+    async def warmup(self, config=None, tools=None):
+        self._warmup_calls.append({"config": config, "tools": tools})
+
+    def _set_tools(self, tools):
+        self._tools = tools
 
     async def aclose(self):
         pass
@@ -181,6 +183,120 @@ async def build_messages_with(agent, input_history, local_history, current_event
 def turn_env():
     """Create a basic TurnEnv."""
     return TurnEnv()
+
+
+# =============================================================================
+# Tests: Constructor Validation
+# =============================================================================
+
+
+def _unsupported_model_config(model):
+    return None
+
+
+async def test_init_rejects_unsupported_model(monkeypatch, anyio_backend):
+    """Test that invalid models are rejected at construction time."""
+    monkeypatch.setattr("line.llm_agent.llm_agent._get_model_config", _unsupported_model_config)
+
+    with pytest.raises(ValueError, match="is not supported"):
+        LlmAgent(model="definitely-not-a-real-model", api_key="test-key")
+
+
+async def test_init_accepts_direct_openai_websocket_model(monkeypatch, anyio_backend):
+    """Direct OpenAI WebSocket models stay accepted even if LiteLLM doesn't know them yet."""
+
+    def _ws_or_unsupported(model):
+        if model == "gpt-5-mini":
+            return _ModelConfig(
+                backend="websocket",
+                supports_reasoning_effort=True,
+                default_reasoning_effort="low",
+            )
+        return _unsupported_model_config(model)
+
+    monkeypatch.setattr("line.llm_agent.llm_agent._get_model_config", _ws_or_unsupported)
+
+    agent = LlmAgent(model="gpt-5-mini", api_key="test-key")
+    assert agent._model == "gpt-5-mini"
+
+
+async def test_init_rejects_unsupported_reasoning_effort(monkeypatch, anyio_backend):
+    """Test that reasoning_effort is rejected for models that do not support it."""
+    monkeypatch.setattr(
+        "line.llm_agent.llm_agent._get_model_config",
+        lambda model: _ModelConfig(
+            backend="http",
+            supports_reasoning_effort=False,
+            default_reasoning_effort=None,
+        ),
+    )
+
+    with pytest.raises(ValueError, match="does not support reasoning_effort"):
+        LlmAgent(
+            model="gpt-4o",
+            api_key="test-key",
+            config=LlmConfig(reasoning_effort="high"),
+        )
+
+
+async def test_call_started_warmup_uses_effective_tools(turn_env):
+    responses = []
+    agent, mock_llm = create_agent_with_mock(responses)
+
+    @loopback_tool
+    async def extra_tool(ctx, query: Annotated[str, "Search query"]) -> str:
+        return query
+
+    outputs = await collect_outputs(
+        agent,
+        turn_env,
+        CallStarted(history=[]),
+        include_metrics=True,
+        tools=[extra_tool],
+    )
+
+    assert outputs[-1].name == "agent_turn_ms"
+    assert len(mock_llm._warmup_calls) == 1
+    assert [tool.name for tool in mock_llm._warmup_calls[0]["tools"]] == ["extra_tool"]
+
+
+async def test_call_started_warmup_preserves_default_native_web_search(monkeypatch, turn_env):
+    import litellm
+
+    monkeypatch.setattr(litellm, "supports_web_search", lambda model: True)
+
+    agent = LlmAgent(
+        model="gpt-5-mini",
+        api_key="test-key",
+        tools=[web_search(search_context_size="high")],
+    )
+
+    class _DummyBackend:
+        def __init__(self):
+            self.warmup_calls = []
+
+        def chat(self, *args, **kwargs):
+            raise AssertionError("chat should not be called during CallStarted warmup")
+
+        async def warmup(self, config, tools=None, **kwargs):
+            self.warmup_calls.append({"config": config, "tools": tools, "kwargs": kwargs})
+
+        async def aclose(self):
+            pass
+
+    backend = _DummyBackend()
+    agent._llm._backend = backend
+
+    await collect_outputs(
+        agent,
+        turn_env,
+        CallStarted(history=[]),
+        include_metrics=True,
+    )
+
+    assert len(backend.warmup_calls) == 1
+    assert backend.warmup_calls[0]["tools"] == []
+    assert backend.warmup_calls[0]["kwargs"]["web_search_options"] == {"search_context_size": "high"}
 
 
 # =============================================================================
@@ -971,17 +1087,15 @@ async def test_loopback_tool_returns_bare_value(turn_env):
 
 async def test_plain_function_wrapped_as_loopback_tool():
     """Test that plain functions are wrapped as loopback tools when resolved."""
-    from line.llm_agent.tools.utils import ToolType
+    from line.llm_agent.tools.utils import ToolType, _normalize_tools
 
     # Plain function without any decorator
     async def my_tool(ctx, query: Annotated[str, "Search query"]) -> str:
         """Search for something."""
         return f"Results for: {query}"
 
-    agent = LlmAgent(model="gpt-4o", api_key="test-key")
-
     # Resolve tools - this is where wrapping happens
-    resolved_tools, _ = agent._resolve_tools([my_tool])
+    resolved_tools, _ = _normalize_tools([my_tool], model="gpt-4o")
 
     # Verify the tool was wrapped
     assert len(resolved_tools) == 1
@@ -1063,7 +1177,7 @@ async def test_plain_function_works_as_loopback_tool(turn_env):
 
 async def test_mixed_decorated_and_plain_functions(turn_env):
     """Test that decorated and plain functions can be mixed and both resolve to loopback tools."""
-    from line.llm_agent.tools.utils import ToolType
+    from line.llm_agent.tools.utils import ToolType, _normalize_tools
 
     @loopback_tool
     async def decorated_tool(ctx) -> str:
@@ -1074,10 +1188,8 @@ async def test_mixed_decorated_and_plain_functions(turn_env):
         """A plain tool."""
         return "plain"
 
-    agent = LlmAgent(model="gpt-4o", api_key="test-key")
-
     # Resolve tools - plain functions get wrapped here
-    resolved_tools, _ = agent._resolve_tools([decorated_tool, plain_tool])
+    resolved_tools, _ = _normalize_tools([decorated_tool, plain_tool], model="gpt-4o")
 
     assert len(resolved_tools) == 2
 
@@ -1458,6 +1570,27 @@ async def test_process_replaces_tools_with_same_name(turn_env):
     # Should use the override version, not the original
     assert tool_result.result == "Override: 85°F in NYC"
     assert "Original" not in tool_result.result
+
+
+async def test_set_tools_forwards_to_provider(turn_env):
+    """Test that set_tools() updates both the agent and the underlying provider."""
+
+    @loopback_tool
+    async def original_tool(ctx) -> str:
+        """Original tool."""
+        return "original"
+
+    @loopback_tool
+    async def replacement_tool(ctx) -> str:
+        """Replacement tool."""
+        return "replacement"
+
+    agent, mock_llm = create_agent_with_mock([], tools=[original_tool])
+
+    agent.set_tools([replacement_tool])
+
+    assert agent._tools == [replacement_tool]
+    assert mock_llm._tools == [replacement_tool]
 
 
 async def test_process_replaces_config(turn_env):
@@ -2133,7 +2266,7 @@ async def test_background_tool_event_not_lost_on_cancellation(turn_env):
     tool_can_complete.set()
 
     # Wait for the background tool to yield its success result
-    await asyncio.wait_for(agent._background_queue.wait(), timeout=5.0)
+    await asyncio.wait_for(agent._get_background_event_queue().wait(), timeout=5.0)
 
     # Second process() call - should pick up the success event
     second_event = UserTextSent(

@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-Test script for LLMProvider integration with real API keys.
+Test script for LlmProvider integration with real API keys.
 
 Usage:
     uv run python line/llm_agent/scripts/test_provider.py [OPTIONS]
 
 Options:
     --tests TESTS       Comma-separated list of tests to run. Available tests:
-                        streaming, introduction, tools, end_call, end_call_eval,
-                        form_eval, web_search, all (default: all)
+                        streaming, introduction, tools, web_search,
+                        web_search_fn, mcp, reset, all (default: all)
     --runs N            Number of iterations for eval tests (default: 3)
     --model MODEL       Only test specific model (e.g., "gpt-4o-mini")
 
@@ -62,7 +62,7 @@ from line.llm_agent import (
     mcp_tool,
     web_search,
 )
-from line.llm_agent.provider import LLMProvider, Message
+from line.llm_agent.provider import LlmProvider, Message
 
 # =============================================================================
 # Test Tools
@@ -108,16 +108,15 @@ async def test_api_key(model: str, api_key: str) -> bool:
     print(f"Testing API key for {model}")
     print("=" * 60)
 
-    provider = LLMProvider(model=model, api_key=api_key)
+    provider = LlmProvider(model=model, api_key=api_key)
 
     messages = [Message(role="user", content="Say 'ok'")]
 
     try:
-        async with provider.chat(messages) as stream:
-            async for chunk in stream:
-                if chunk.text:
-                    print(f"✓ API key valid - got response: {chunk.text.strip()}")
-                    return True
+        async for chunk in provider.chat(messages):
+            if chunk.text:
+                print(f"✓ API key valid - got response: {chunk.text.strip()}")
+                return True
         print("✓ API key valid")
         return True
     except Exception as e:
@@ -131,15 +130,14 @@ async def test_streaming_text(model: str, api_key: str):
     print(f"Testing streaming text with {model}")
     print("=" * 60)
 
-    provider = LLMProvider(model=model, api_key=api_key)
+    provider = LlmProvider(model=model, api_key=api_key)
 
     messages = [Message(role="user", content="Say 'Hello, World!' and nothing else.")]
 
     print("Response: ", end="", flush=True)
-    async with provider.chat(messages) as stream:
-        async for chunk in stream:
-            if chunk.text:
-                print(chunk.text, end="", flush=True)
+    async for chunk in provider.chat(messages):
+        if chunk.text:
+            print(chunk.text, end="", flush=True)
     print("\n✓ Streaming text test passed")
 
 
@@ -418,12 +416,91 @@ async def test_mcp_tool_execution(model: str, api_key: str):
     print("✓ MCP tool execution test completed")
 
 
+async def test_conversation_reset(model: str, api_key: str):
+    """Test resetting a conversation to an earlier point.
+
+    Exercises the WebSocket provider's divergence detection by:
+    1. Running a 2-turn conversation (user sets a secret word, assistant acks).
+    2. Asking the model to recall the secret word (turn 3).
+    3. Resetting: re-sending turns 1-2 with a *different* secret word,
+       then asking the model to recall it again (turn 3').
+    4. Verifying the model answers with the *new* secret word, confirming
+       the provider rolled back correctly.
+    """
+    print("\n" + "=" * 60)
+    print(f"Testing conversation reset with {model}")
+    print("=" * 60)
+
+    provider = LlmProvider(model=model, api_key=api_key)
+
+    async def collect_text(stream) -> str:
+        parts = []
+        async for chunk in stream:
+            if chunk.text:
+                parts.append(chunk.text)
+        return "".join(parts)
+
+    # Turn 1: shared greeting — captures the real assistant response.
+    history = [Message(role="user", content="Hi, I'm testing multi-turn. Just say OK.")]
+    print("--- Turn 1: greeting ---")
+    turn1_reply = await collect_text(provider.chat(history))
+    print(f"Model says: {turn1_reply.strip()}")
+    history.append(Message(role="assistant", content=turn1_reply))
+
+    # Turn 2 (branch A): set secret word = banana.
+    history.append(Message(role="user", content="The secret word is 'banana'. Just say OK."))
+    print("--- Turn 2a: secret word = banana ---")
+    turn2a_reply = await collect_text(provider.chat(history))
+    print(f"Model says: {turn2a_reply.strip()}")
+    history.append(Message(role="assistant", content=turn2a_reply))
+
+    # Turn 3 (branch A): ask for the secret word.
+    history.append(
+        Message(role="user", content="What is the secret word? Reply with ONLY the word, nothing else.")
+    )
+    print("--- Turn 3a: recall ---")
+    response_a = await collect_text(provider.chat(history))
+    print(f"Model says: {response_a.strip()}")
+
+    # Branch B: rewind to after turn 1, set a different secret word.
+    # Keeps the first two messages (user + real assistant reply) intact,
+    # so divergence happens at message index 2.
+    history_b = history[:2]  # user greeting + real assistant reply
+    history_b.append(Message(role="user", content="The secret word is 'giraffe'. Just say OK."))
+    print("--- Turn 2b (reset at message 2): secret word = giraffe ---")
+    turn2b_reply = await collect_text(provider.chat(history_b))
+    print(f"Model says: {turn2b_reply.strip()}")
+    history_b.append(Message(role="assistant", content=turn2b_reply))
+
+    # Turn 3 (branch B): ask for the secret word again.
+    history_b.append(
+        Message(role="user", content="What is the secret word? Reply with ONLY the word, nothing else.")
+    )
+    print("--- Turn 3b: recall after reset ---")
+    response_b = await collect_text(provider.chat(history_b))
+    print(f"Model says: {response_b.strip()}")
+
+    a_ok = "banana" in response_a.lower()
+    b_ok = "giraffe" in response_b.lower()
+
+    if a_ok and b_ok:
+        print("✓ Conversation reset test passed")
+    elif not a_ok:
+        raise AssertionError(f"Branch A failed — expected 'banana', got: {response_a.strip()!r}")
+    else:
+        raise AssertionError(f"Branch B failed — expected 'giraffe', got: {response_b.strip()!r}")
+
+
 # =============================================================================
 # Main
 # =============================================================================
 
 MODELS = [
     ("OPENAI_API_KEY", "openai/gpt-5.2"),
+    ("OPENAI_API_KEY", "openai/gpt-5.4"),
+    ("OPENAI_API_KEY", "openai/gpt-5.4-mini"),
+    ("OPENAI_API_KEY", "openai/gpt-5.4-nano"),
+    ("OPENAI_API_KEY", "openai/gpt-realtime"),
     ("ANTHROPIC_API_KEY", "anthropic/claude-haiku-4-5"),
     ("GEMINI_API_KEY", "gemini/gemini-2.5-flash"),
     ("GEMINI_API_KEY", "gemini/gemini-3-flash-preview"),
@@ -437,13 +514,14 @@ AVAILABLE_TESTS = [
     "web_search",  # test_web_search
     "web_search_fn",  # test_function_tools_with_web_search
     "mcp",  # test_mcp_list_tools and test_mcp_tool_execution
+    "reset",  # test_conversation_reset
 ]
 
 
 def parse_args():
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
-        description="Test LLMProvider integration with real API keys.",
+        description="Test LlmProvider integration with real API keys.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
@@ -463,6 +541,11 @@ def parse_args():
         type=str,
         default=None,
         help="Only test specific model (e.g., 'openai/gpt-5-2')",
+    )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Enable debug logging",
     )
     return parser.parse_args()
 
@@ -502,6 +585,8 @@ async def main(args):
             print(f"  export {env_var}=your-key-here")
         return 1
 
+    failures: list[tuple[str, str, str]] = []  # (model, test_name, error)
+
     # First, validate all API keys
     print("\n" + "=" * 60)
     print("PHASE 1: Validating API Keys")
@@ -512,43 +597,59 @@ async def main(args):
         api_key = os.environ[env_var]
         if await test_api_key(model, api_key):
             valid_models.append((env_var, model))
+        else:
+            failures.append((model, "api_key", "API key validation failed"))
 
     if not valid_models:
         print("\n⚠ No valid API keys. Check your keys and permissions.")
-        return 1
 
     # Run full tests only for models with valid keys
-    print("\n" + "=" * 60)
-    print("PHASE 2: Running Full Tests")
-    print("=" * 60)
+    if valid_models:
+        print("\n" + "=" * 60)
+        print("PHASE 2: Running Full Tests")
+        print("=" * 60)
 
     for env_var, model in valid_models:
         api_key = os.environ[env_var]
-        try:
-            if "streaming" in tests_to_run:
-                await test_streaming_text(model, api_key)
-            if "introduction" in tests_to_run:
-                await test_introduction(model, api_key)
-            if "tools" in tests_to_run:
-                await test_tool_calling(model, api_key)
-            if "web_search" in tests_to_run:
-                await test_web_search(model, api_key)
-                await test_web_search(model, api_key, search_context_size="high")
-            if "web_search_fn" in tests_to_run:
-                await test_function_tools_with_web_search(model, api_key)
-            if "mcp" in tests_to_run:
-                await test_mcp_list_tools(model, api_key)
-                await test_mcp_tool_execution(model, api_key)
-        except Exception as e:
-            print(f"\n✗ Error testing {model}: {e}")
-            import traceback
 
-            traceback.print_exc()
+        test_plan: list[tuple[str, ...]] = []
+        if "streaming" in tests_to_run:
+            test_plan.append(("streaming", test_streaming_text, model, api_key))
+        if "introduction" in tests_to_run:
+            test_plan.append(("introduction", test_introduction, model, api_key))
+        if "tools" in tests_to_run:
+            test_plan.append(("tools", test_tool_calling, model, api_key))
+        if "web_search" in tests_to_run:
+            test_plan.append(("web_search", test_web_search, model, api_key))
+            test_plan.append(("web_search (high)", test_web_search, model, api_key, "high"))
+        if "web_search_fn" in tests_to_run:
+            test_plan.append(("web_search_fn", test_function_tools_with_web_search, model, api_key))
+        if "mcp" in tests_to_run:
+            test_plan.append(("mcp_list_tools", test_mcp_list_tools, model, api_key))
+            test_plan.append(("mcp_tool_execution", test_mcp_tool_execution, model, api_key))
+        if "reset" in tests_to_run:
+            test_plan.append(("reset", test_conversation_reset, model, api_key))
+
+        for test_entry in test_plan:
+            test_name, test_fn, *test_args = test_entry
+            try:
+                await test_fn(*test_args)
+            except Exception as e:
+                print(f"\n✗ Error in {test_name} for {model}: {e}")
+                import traceback
+
+                traceback.print_exc()
+                failures.append((model, test_name, str(e)))
 
     print("\n" + "=" * 60)
-    print("All tests completed!")
+    if failures:
+        print(f"DONE — {len(failures)} failure(s):")
+        for model, test_name, error in failures:
+            print(f"  ✗ {model} / {test_name}: {error}")
+    else:
+        print("All tests passed!")
     print("=" * 60)
-    return 0
+    return 1 if failures else 0
 
 
 if __name__ == "__main__":
@@ -564,8 +665,9 @@ if __name__ == "__main__":
     # Suppress litellm colored output
     litellm.suppress_debug_info = True
 
-    # Suppress loguru output
-    logger.disable("line")
+    # Suppress loguru output unless --debug
+    if not args.debug:
+        logger.disable("line")
 
     try:
         exit_code = asyncio.run(main(args))
@@ -574,6 +676,7 @@ if __name__ == "__main__":
         exit_code = 1
     finally:
         # Suppress SSL cleanup errors on exit
-        sys.stderr = open(os.devnull, "w")
+        devnull = open(os.devnull, "w")
+        sys.stderr = devnull
 
     sys.exit(exit_code)
