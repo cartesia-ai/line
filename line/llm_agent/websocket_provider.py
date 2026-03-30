@@ -247,7 +247,7 @@ def _plan_chat(
     *,
     history: List[ConversationEntry],
     model: str,
-    default_reasoning_effort: str,
+    default_reasoning_effort: Optional[str],
     messages: List[Message],
     tools: Optional[List[FunctionTool]],
     config: LlmConfig,
@@ -326,7 +326,7 @@ def _plan_chat(
 def _build_request(
     *,
     model: str,
-    default_reasoning_effort: str,
+    default_reasoning_effort: Optional[str],
     instructions: Optional[str],
     tool_defs: Optional[List[Dict[str, Any]]],
     cfg: LlmConfig,
@@ -351,7 +351,8 @@ def _build_request(
     if tool_defs is not None:
         request["tools"] = tool_defs
     reasoning_effort = cfg.reasoning_effort or default_reasoning_effort
-    request["reasoning"] = {"effort": reasoning_effort}
+    if reasoning_effort is not None:
+        request["reasoning"] = {"effort": reasoning_effort}
     if cfg.temperature is not None:
         request["temperature"] = cfg.temperature
     if cfg.max_tokens is not None:
