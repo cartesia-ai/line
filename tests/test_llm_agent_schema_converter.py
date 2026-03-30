@@ -42,17 +42,6 @@ class NestedItem(TypedDict):
     tags: list[str]
 
 
-class ComplexItem(TypedDict):
-    """A TypedDict with various field types."""
-
-    id: str
-    count: int
-    price: float
-    active: bool
-    tags: list[str]
-    metadata: dict  # This should generate a warning
-
-
 # =============================================================================
 # Tests for _is_typeddict
 # =============================================================================
