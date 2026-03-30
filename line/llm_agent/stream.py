@@ -238,8 +238,11 @@ class _WsEventStream:
         """Consume WS events until the response terminates."""
         while True:
             event = json.loads(await self._ws.recv())
-            if event.get("type", "") in _TERMINAL_EVENTS:
+            evt_type = event.get("type", "")
+            if evt_type in _TERMINAL_EVENTS:
                 self._on_response_done(event.get("response") or {})
+                return
+            if evt_type == "error":
                 return
 
     async def __aiter__(self) -> AsyncIterator[StreamChunk]:
