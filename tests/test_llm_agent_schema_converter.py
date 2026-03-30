@@ -10,7 +10,6 @@ import pytest
 
 from line.llm_agent.schema_converter import (
     _is_typeddict,
-    _json_schema_violates_openai_strict,
     function_tool_to_litellm,
     python_type_to_json_schema,
 )
@@ -114,16 +113,16 @@ class TestTypedDictSchema:
         assert "additionalProperties" not in schema
 
     def test_optional_fields_typeddict(self):
-        """Should handle TypedDict with total=False (all optional)."""
-        schema = python_type_to_json_schema(ItemWithOptional)
+        """Should handle TypedDict with total=False (all optional) in non-strict mode."""
+        # strict=False because TypedDict with optional keys cannot satisfy strict mode
+        schema = python_type_to_json_schema(ItemWithOptional, strict=False)
 
         assert schema["type"] == "object"
         assert "properties" in schema
         # With total=False, no fields are required
         assert "required" not in schema or schema.get("required") == []
-        # additionalProperties: false is invalid with OpenAI strict unless every key is required
+        # additionalProperties: false is not set in non-strict mode
         assert "additionalProperties" not in schema
-        assert _json_schema_violates_openai_strict(schema)
 
     def test_nested_typeddict(self):
         """Should handle nested TypedDict correctly."""

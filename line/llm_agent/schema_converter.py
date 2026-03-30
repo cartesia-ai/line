@@ -50,96 +50,12 @@ from typing import Any, Literal, Optional, Type, Union, get_args, get_origin, ge
 from line.llm_agent.tools.utils import FunctionTool, ParameterInfo
 
 
-def _object_schema_incompatible_with_openai_strict(schema: dict[str, Any]) -> bool:
-    """Return True if an object-shaped JSON Schema node breaks OpenAI function strict mode.
-
-    OpenAI requires every object at every nesting level to set ``additionalProperties`` to
-    ``false``. When that lock is present, every key in ``properties`` must also appear in
-    ``required``. Objects that omit the lock (e.g. ``total=False`` TypedDict) are invalid
-    under a parent tool with ``strict: true`` and must trigger falling back to non-strict.
-    """
-    is_object = schema.get("type") == "object" or "properties" in schema
-    if not is_object:
-        return False
-
-    props = schema.get("properties")
-    if props is not None and not isinstance(props, dict):
-        return False
-
-    if schema.get("additionalProperties") is not False:
-        return True
-
-    if not isinstance(props, dict) or not props:
-        return False
-    required = set(schema.get("required", []))
-    return set(props.keys()) != required
-
-
-def _json_schema_violates_openai_strict(node: Any) -> bool:
-    """Walk a JSON Schema dict and detect object nodes invalid for OpenAI strict mode."""
-    if isinstance(node, dict):
-        if _object_schema_incompatible_with_openai_strict(node):
-            return True
-        for v in node.values():
-            if _json_schema_violates_openai_strict(v):
-                return True
-    elif isinstance(node, list):
-        for item in node:
-            if _json_schema_violates_openai_strict(item):
-                return True
-    return False
-
-
 def _is_typeddict(tp: Type) -> bool:
     """Check if a type is a TypedDict.
 
     TypedDict classes have __required_keys__ and __optional_keys__ attributes.
     """
     return isinstance(tp, type) and hasattr(tp, "__required_keys__") and hasattr(tp, "__optional_keys__")
-
-
-def _type_violates_openai_strict(tp: Type) -> bool:
-    """Check if a type annotation would violate OpenAI strict mode.
-
-    Returns True if the type contains:
-    - Plain dict or Dict[K, V] (no explicit properties)
-    - TypedDict with optional keys (cannot have additionalProperties: false)
-    """
-    # Plain dict
-    if tp is dict:
-        return True
-
-    # TypedDict with optional keys
-    if _is_typeddict(tp):
-        if tp.__optional_keys__:
-            return True
-        # Check nested fields recursively
-        try:
-            hints = get_type_hints(tp)
-        except Exception:
-            hints = getattr(tp, "__annotations__", {})
-        for field_type in hints.values():
-            if _type_violates_openai_strict(field_type):
-                return True
-        return False
-
-    origin = get_origin(tp)
-    args = get_args(tp)
-
-    # Dict[K, V]
-    if origin is dict:
-        return True
-
-    # list[X] - check item type
-    if origin is list and args:
-        return _type_violates_openai_strict(args[0])
-
-    # Union types - check all variants
-    if origin is Union:
-        non_none_args = [a for a in args if a is not type(None)]
-        return any(_type_violates_openai_strict(a) for a in non_none_args)
-
-    return False
 
 
 def python_type_to_json_schema(type_annotation: Type, *, strict: bool = True) -> dict[str, Any]:
@@ -212,10 +128,7 @@ def python_type_to_json_schema(type_annotation: Type, *, strict: bool = True) ->
         }
         if required:
             schema["required"] = required
-        # OpenAI strict mode requires every property in ``required`` when using
-        # additionalProperties: false. Skip locking for TypedDict fields that
-        # are optional (total=False or NotRequired).
-        if strict and not type_annotation.__optional_keys__:
+        if strict:
             schema["additionalProperties"] = False
         return schema
 
