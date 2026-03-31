@@ -98,15 +98,10 @@ def _normalize_messages(messages: List["Message"]) -> Optional[List["Message"]]:
     """
 
     # Index tool calls and responses for pairing
-    response_ids: set[str] = set()
-    invocation_ids: set[str] = set()
     tool_responses: Dict[str, Message] = {}
     for msg in messages:
         if msg.role == "tool" and msg.tool_call_id:
-            response_ids.add(msg.tool_call_id)
             tool_responses[msg.tool_call_id] = msg
-        for tc in msg.tool_calls or []:
-            invocation_ids.add(tc.id)
 
     result: List[Message] = []
     for msg in messages:
@@ -114,21 +109,19 @@ def _normalize_messages(messages: List["Message"]) -> Optional[List["Message"]]:
             continue  # placed after their tool call below
 
         tool_calls = msg.tool_calls or []
-        paired = [tc for tc in tool_calls if tc.id in response_ids]
+        paired = [tc for tc in tool_calls if tc.id in tool_responses]
+        unpaired = [tc for tc in tool_calls if tc.id not in tool_responses]
         has_content = msg.content is not None and msg.content.strip()
 
         if msg.role in ("user", "assistant") and not has_content and not paired:
             logger.warning(f"Dropping empty message with no tool calls: role={msg.role}, name={msg.name}")
             continue
 
-        for tc in tool_calls:
-            if tc.id not in response_ids:
-                logger.warning(f"Removing unpaired tool call: {tc.name} (id={tc.id})")
-
         result.append(Message(role=msg.role, content=msg.content, tool_calls=paired, tool_call_id=msg.tool_call_id, name=msg.name))
+        for tc in unpaired:
+            logger.warning(f"Removing unpaired tool call: {tc.name} (id={tc.id})")
         for tc in paired:
-            if tc.id in tool_responses:
-                result.append(tool_responses[tc.id])
+            result.append(tool_responses[tc.id])
 
     if not result:
         logger.warning("Skipping LLM call: no messages to send")
