@@ -9,10 +9,12 @@ from line.llm_agent.provider import (
     ChatStream,
     LlmProvider,
     Message,
+    ToolCall,
     _extract_instructions_and_messages,
     _get_model_config,
     _is_realtime_model,
     _is_websocket_model,
+    _normalize_messages,
 )
 from line.llm_agent.schema_converter import build_openai_tool_defs
 from line.llm_agent.tools.system import web_search
@@ -582,3 +584,181 @@ class TestEdgeCases:
         s = _feed_tool_args(None, obj)
         assert s.args == obj
         assert s.depth == 0
+
+
+# ---------------------------------------------------------------------------
+# _normalize_messages
+# ---------------------------------------------------------------------------
+
+
+class TestNormalizeMessages:
+    """Tests for _normalize_messages which filters empty/invalid messages."""
+
+    def test_empty_user_message_returns_none(self):
+        """Empty user message should result in no LLM call."""
+        assert _normalize_messages([Message(role="user", content="")]) is None
+
+    def test_whitespace_only_user_message_returns_none(self):
+        """Whitespace-only user message should result in no LLM call."""
+        assert _normalize_messages([Message(role="user", content="   \n\t  ")]) is None
+
+    def test_empty_user_message_after_valid_conversation_returns_none(self):
+        """Empty message following valid conversation should result in no LLM call."""
+        result = _normalize_messages(
+            [
+                Message(role="user", content="Hi"),
+                Message(role="assistant", content="Hello!"),
+                Message(role="user", content=""),
+            ]
+        )
+        # Empty user message filtered → ends with assistant → None
+        assert result is None
+
+    def test_empty_user_messages_filtered_from_mixed_history(self):
+        """Empty user messages in history should be filtered before sending to LLM."""
+        result = _normalize_messages(
+            [
+                Message(role="user", content="First message"),
+                Message(role="assistant", content="Response to first"),
+                Message(role="user", content=""),  # Empty - should be filtered
+                Message(role="user", content="Second message"),
+            ]
+        )
+        assert result is not None
+        user_messages = [msg for msg in result if msg.role == "user"]
+        for msg in user_messages:
+            assert msg.content.strip() != "", f"Found empty user message: {msg}"
+
+    def test_empty_messages_list_returns_none(self):
+        """Empty messages list should result in no LLM call."""
+        assert _normalize_messages([]) is None
+
+    def test_tool_result_with_empty_content_preserved(self):
+        """Tool-result messages with empty content must NOT be filtered."""
+
+        result = _normalize_messages(
+            [
+                Message(role="user", content="Call the tool"),
+                Message(
+                    role="assistant",
+                    content=None,
+                    tool_calls=[ToolCall(id="call_1", name="my_tool", arguments="{}")],
+                ),
+                Message(role="tool", content="", tool_call_id="call_1", name="my_tool"),
+            ]
+        )
+        assert result is not None
+        tool_msgs = [msg for msg in result if msg.role == "tool"]
+        assert len(tool_msgs) == 1
+
+    def test_tool_responses_placed_after_their_tool_call(self):
+        """Tool responses must appear immediately after the assistant message that invoked them."""
+
+        result = _normalize_messages(
+            [
+                Message(role="user", content="Do stuff"),
+                Message(
+                    role="assistant",
+                    content=None,
+                    tool_calls=[ToolCall(id="c1", name="tool_a", arguments="{}")],
+                ),
+                Message(role="user", content="Meanwhile"),
+                Message(role="tool", content="result_a", tool_call_id="c1", name="tool_a"),
+            ]
+        )
+        assert result is not None
+        roles = [m.role for m in result]
+        assert roles == ["user", "assistant", "tool", "user"]
+        assert result[2].tool_call_id == "c1"
+
+    def test_multiple_tool_responses_reordered_to_follow_assistant(self):
+        """Multiple tool responses scattered in the history are grouped after their assistant."""
+
+        result = _normalize_messages(
+            [
+                Message(role="user", content="Go"),
+                Message(
+                    role="assistant",
+                    content=None,
+                    tool_calls=[
+                        ToolCall(id="c1", name="t1", arguments="{}"),
+                        ToolCall(id="c2", name="t2", arguments="{}"),
+                    ],
+                ),
+                Message(role="user", content="Extra context"),
+                Message(role="tool", content="r2", tool_call_id="c2", name="t2"),
+                Message(role="tool", content="r1", tool_call_id="c1", name="t1"),
+            ]
+        )
+        assert result is not None
+        roles = [m.role for m in result]
+        assert roles == ["user", "assistant", "tool", "tool", "user"]
+        # Order follows tool_calls order in the assistant message, not input order
+        assert result[2].tool_call_id == "c1"
+        assert result[3].tool_call_id == "c2"
+
+    def test_tool_responses_already_adjacent_stay_in_place(self):
+        """When tool responses are already correctly placed, order is preserved."""
+
+        result = _normalize_messages(
+            [
+                Message(role="user", content="Hi"),
+                Message(
+                    role="assistant",
+                    content=None,
+                    tool_calls=[ToolCall(id="c1", name="t1", arguments="{}")],
+                ),
+                Message(role="tool", content="done", tool_call_id="c1", name="t1"),
+                Message(role="user", content="Thanks"),
+            ]
+        )
+        assert result is not None
+        roles = [m.role for m in result]
+        assert roles == ["user", "assistant", "tool", "user"]
+
+    def test_interleaved_tool_calls_across_multiple_assistants(self):
+        """Tool responses from different assistant turns are each placed after their own turn."""
+
+        result = _normalize_messages(
+            [
+                Message(role="user", content="Start"),
+                Message(
+                    role="assistant",
+                    content=None,
+                    tool_calls=[ToolCall(id="a1", name="ta", arguments="{}")],
+                ),
+                Message(
+                    role="assistant",
+                    content=None,
+                    tool_calls=[ToolCall(id="b1", name="tb", arguments="{}")],
+                ),
+                Message(role="tool", content="rb", tool_call_id="b1", name="tb"),
+                Message(role="tool", content="ra", tool_call_id="a1", name="ta"),
+            ]
+        )
+        assert result is not None
+        roles = [m.role for m in result]
+        assert roles == ["user", "assistant", "tool", "assistant", "tool"]
+        assert result[2].tool_call_id == "a1"
+        assert result[4].tool_call_id == "b1"
+
+    def test_duplicate_tool_call_id_preserves_all_responses(self):
+        """Multiple tool responses sharing the same tool_call_id are all kept."""
+
+        result = _normalize_messages(
+            [
+                Message(role="user", content="Go"),
+                Message(
+                    role="assistant",
+                    content=None,
+                    tool_calls=[ToolCall(id="c1", name="t1", arguments="{}")],
+                ),
+                Message(role="tool", content="first", tool_call_id="c1", name="t1"),
+                Message(role="tool", content="second", tool_call_id="c1", name="t1"),
+            ]
+        )
+        assert result is not None
+        tool_msgs = [m for m in result if m.role == "tool"]
+        assert len(tool_msgs) == 2
+        assert tool_msgs[0].content == "first"
+        assert tool_msgs[1].content == "second"

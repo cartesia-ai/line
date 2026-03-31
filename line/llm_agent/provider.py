@@ -10,8 +10,11 @@ Model naming:
 - Google: "gemini/gemini-2.5-flash-preview-09-2025"
 """
 
+from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Any, AsyncIterator, Dict, List, Optional, Protocol, Tuple, runtime_checkable
+from typing import Any, AsyncIterable, AsyncIterator, Dict, List, Optional, Protocol, Tuple, runtime_checkable
+
+from loguru import logger
 
 from line.llm_agent.config import LlmConfig, _merge_configs, _normalize_config
 from line.llm_agent.tools.utils import FunctionTool, _merge_tools, _normalize_tools
@@ -71,6 +74,85 @@ def _extract_instructions_and_messages(
 
     instructions = "\n\n".join(system_parts) if system_parts else None
     return instructions, non_system
+
+
+def _normalize_messages(messages: List["Message"]) -> Optional[List["Message"]]:
+    """Normalize and validate messages before sending to the LLM backend.
+
+    Applies the following transformations in order:
+
+    1. **Filter empty messages** – user/assistant messages with no meaningful
+       content (empty or whitespace-only) *and* no tool calls are dropped.
+    2. **Remove unpaired tool calls** – every assistant-side ``tool_calls``
+       entry must have a corresponding ``role="tool"`` response.  Unpaired
+       tool calls are logged and removed.  Any orphaned tool responses
+       (responses with no matching tool call) are also dropped.
+    3. **Reorder tool responses** – tool response messages are moved to
+       appear immediately after the assistant message whose tool call
+       triggered them, regardless of their original position.
+    4. **Validate terminal message** – the conversation must not end with an
+       assistant message (providers require user/tool to continue), and the
+       final user message must be non-empty.
+
+    Returns the cleaned message list, or ``None`` when the list is empty or
+    fatally invalid (caller should skip the LLM call).
+    """
+
+    # Index tool calls and responses for pairing
+    tool_responses: Dict[str, List[Message]] = defaultdict(list)
+    for msg in messages:
+        if msg.role == "tool" and msg.tool_call_id:
+            tool_responses[msg.tool_call_id].append(msg)
+
+    result: List[Message] = []
+    for msg in messages:
+        if msg.role == "tool":
+            continue  # placed after their tool call below
+
+        tool_calls = msg.tool_calls or []
+        paired = [tc for tc in tool_calls if tc.id in tool_responses]
+        unpaired = [tc for tc in tool_calls if tc.id not in tool_responses]
+        has_content = msg.content is not None and msg.content.strip()
+
+        if msg.role in ("user", "assistant") and not has_content and not paired:
+            logger.warning(f"Dropping empty message with no tool calls: role={msg.role}, name={msg.name}")
+            continue
+
+        result.append(
+            Message(
+                role=msg.role,
+                content=msg.content,
+                tool_calls=paired,
+                tool_call_id=msg.tool_call_id,
+                name=msg.name,
+            )
+        )
+        for tc in unpaired:
+            logger.warning(f"Dropping unpaired tool call: {tc.name} (id={tc.id})")
+        for tc in paired:
+            result.extend(tool_responses[tc.id])
+
+    if not result:
+        logger.warning("Skipping LLM call: no messages to send")
+        return None
+
+    # 4. Validate terminal message
+    last = result[-1]
+    if last.role == "assistant":
+        logger.warning("Skipping LLM call: conversation cannot end with assistant message")
+        return None
+
+    if last.role == "user" and (not last.content or not last.content.strip()):
+        logger.warning("Skipping LLM call: last user message must be non-empty")
+        return None
+
+    return result
+
+
+async def _empty_stream() -> AsyncIterable[StreamChunk]:
+    """Return an empty async iterable of StreamChunks."""
+    return
+    yield  # pragma: no cover – makes this an async generator
 
 
 # ---------------------------------------------------------------------------
@@ -199,7 +281,11 @@ class LlmProvider:
         tools: Optional[List[Any]] = None,
         config: Optional[LlmConfig] = None,
         **kwargs: Any,
-    ) -> ChatStream:
+    ) -> "ChatStream":
+        normalized = _normalize_messages(messages)
+        if normalized is None:
+            return _empty_stream()
+
         effective_config = _merge_configs(self._config, config) if config else self._config
         effective_tools, web_search_options = _normalize_tools(
             _merge_tools(self._tools, tools), model=self._model
@@ -209,7 +295,7 @@ class LlmProvider:
         if web_search_options is not None:
             kwargs = {**kwargs, "web_search_options": web_search_options}
 
-        return backend.chat(messages, effective_tools, config=effective_config, **kwargs)
+        return backend.chat(normalized, effective_tools, config=effective_config, **kwargs)
 
     def _set_tools(self, tools: Optional[List[Any]]) -> None:
         """Replace the provider's default tool specs."""
