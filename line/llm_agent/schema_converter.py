@@ -225,6 +225,28 @@ def build_parameters_schema(parameters: dict[str, ParameterInfo], *, strict: boo
     return schema
 
 
+def _build_function_tool_payload(tool: FunctionTool, *, strict: bool = True) -> dict[str, Any]:
+    """Build the shared OpenAI-style function payload for a FunctionTool."""
+    params_schema = build_parameters_schema(tool.parameters)
+
+    # Disable strict mode if any parameters are optional, since OpenAI strict
+    # mode requires every property to be listed in 'required'.
+    has_optional = any(not p.required for p in tool.parameters.values())
+    use_strict = strict and not has_optional
+
+    if use_strict:
+        params_schema["additionalProperties"] = False
+
+    payload: dict[str, Any] = {
+        "name": tool.name,
+        "description": tool.description,
+        "parameters": params_schema,
+    }
+    if use_strict:
+        payload["strict"] = True
+    return payload
+
+
 def function_tool_to_litellm(tool: FunctionTool, *, strict: bool = True) -> dict[str, Any]:
     """
     Convert a FunctionTool to LiteLLM (OpenAI Chat Completions) tool format.
@@ -270,7 +292,7 @@ def function_tool_to_openai(
     *,
     strict: bool = True,
     responses_api: bool = False,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Convert a FunctionTool to OpenAI/Realtimes API tool format."""
     payload = _build_function_tool_payload(tool, strict=strict)
     if responses_api:

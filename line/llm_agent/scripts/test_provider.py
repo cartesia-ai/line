@@ -64,6 +64,7 @@ from line.llm_agent import (
     web_search,
 )
 from line.llm_agent.provider import LlmProvider, Message
+from line.llm_agent.schema_converter import function_tool_to_litellm
 
 # =============================================================================
 # Test Tools
@@ -521,6 +522,7 @@ async def test_conversation_reset(model: str, api_key: str):
         raise AssertionError(f"Branch A failed — expected 'banana', got: {response_a.strip()!r}")
     else:
         raise AssertionError(f"Branch B failed — expected 'giraffe', got: {response_b.strip()!r}")
+
 
 async def test_nested_objects(model: str, api_key: str):
     """Test tool calling with nested objects using TypedDict.
