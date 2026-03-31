@@ -10,6 +10,7 @@ Model naming:
 - Google: "gemini/gemini-2.5-flash-preview-09-2025"
 """
 
+from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterable, AsyncIterator, Dict, List, Optional, Protocol, Tuple, runtime_checkable
 
@@ -98,10 +99,10 @@ def _normalize_messages(messages: List["Message"]) -> Optional[List["Message"]]:
     """
 
     # Index tool calls and responses for pairing
-    tool_responses: Dict[str, Message] = {}
+    tool_responses: Dict[str, List[Message]] = defaultdict(list)
     for msg in messages:
         if msg.role == "tool" and msg.tool_call_id:
-            tool_responses[msg.tool_call_id] = msg
+            tool_responses[msg.tool_call_id].append(msg)
 
     result: List[Message] = []
     for msg in messages:
@@ -117,17 +118,25 @@ def _normalize_messages(messages: List["Message"]) -> Optional[List["Message"]]:
             logger.warning(f"Dropping empty message with no tool calls: role={msg.role}, name={msg.name}")
             continue
 
-        result.append(Message(role=msg.role, content=msg.content, tool_calls=paired, tool_call_id=msg.tool_call_id, name=msg.name))
+        result.append(
+            Message(
+                role=msg.role,
+                content=msg.content,
+                tool_calls=paired,
+                tool_call_id=msg.tool_call_id,
+                name=msg.name,
+            )
+        )
         for tc in unpaired:
-            logger.warning(f"Removing unpaired tool call: {tc.name} (id={tc.id})")
+            logger.warning(f"Dropping unpaired tool call: {tc.name} (id={tc.id})")
         for tc in paired:
-            result.append(tool_responses[tc.id])
+            result.extend(tool_responses[tc.id])
 
     if not result:
         logger.warning("Skipping LLM call: no messages to send")
         return None
 
-    # 3. Validate terminal message
+    # 4. Validate terminal message
     last = result[-1]
     if last.role == "assistant":
         logger.warning("Skipping LLM call: conversation cannot end with assistant message")
