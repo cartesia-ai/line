@@ -227,12 +227,14 @@ def build_parameters_schema(parameters: dict[str, ParameterInfo], *, strict: boo
 
 def _build_function_tool_payload(tool: FunctionTool, *, strict: bool = True) -> dict[str, Any]:
     """Build the shared OpenAI-style function payload for a FunctionTool."""
-    params_schema = build_parameters_schema(tool.parameters, strict=strict)
-
     # Disable strict mode if any parameters are optional, since OpenAI strict
     # mode requires every property to be listed in 'required'.
+    # This must be computed BEFORE calling build_parameters_schema so that
+    # strict validation does not raise for tools that will use non-strict mode.
     has_optional = any(not p.required for p in tool.parameters.values())
     use_strict = strict and not has_optional
+
+    params_schema = build_parameters_schema(tool.parameters, strict=use_strict)
 
     if use_strict:
         params_schema["additionalProperties"] = False

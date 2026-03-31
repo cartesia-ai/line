@@ -274,3 +274,32 @@ class TestFunctionToolWithTypedDict:
 
         with pytest.raises(ValueError, match="cannot satisfy OpenAI strict mode"):
             function_tool_to_litellm(add_items)
+
+    def test_tool_with_optional_param_dict_type_succeeds(self):
+        """Tool with optional param containing dict should NOT raise.
+
+        When a tool has optional parameters, strict mode is disabled at the
+        top-level because OpenAI strict mode requires all properties to be
+        in 'required'. This test ensures that strict checks for nested types
+        (like dict) are also disabled - strict validation should not run
+        if strict mode will ultimately be disabled.
+        """
+        from typing import Optional
+
+        @loopback_tool
+        async def with_optional_dict(
+            ctx: ToolEnv,
+            name: Annotated[str, "Name"],
+            options: Annotated[Optional[dict], "Optional options"] = None,
+        ):
+            """A tool with optional dict parameter."""
+            pass
+
+        # This should NOT raise - strict mode is disabled due to optional param
+        schema = function_tool_to_litellm(with_optional_dict)
+
+        # Verify strict mode is disabled (no "strict": True in payload)
+        assert schema["function"].get("strict") is not True
+        # Verify additionalProperties is not set at top level
+        params = schema["function"]["parameters"]
+        assert "additionalProperties" not in params
