@@ -227,7 +227,7 @@ def build_parameters_schema(parameters: dict[str, ParameterInfo], *, strict: boo
 
 def _build_function_tool_payload(tool: FunctionTool, *, strict: bool = True) -> dict[str, Any]:
     """Build the shared OpenAI-style function payload for a FunctionTool."""
-    params_schema = build_parameters_schema(tool.parameters)
+    params_schema = build_parameters_schema(tool.parameters, strict=strict)
 
     # Disable strict mode if any parameters are optional, since OpenAI strict
     # mode requires every property to be listed in 'required'.
@@ -277,7 +277,7 @@ def function_tool_to_litellm(tool: FunctionTool, *, strict: bool = True) -> dict
         #         "description": "Get the weather",
         #         "parameters": {...},
         #         "strict": True
-        #     }s
+        #     }
         # }
         ```
     """
