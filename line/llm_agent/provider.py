@@ -94,59 +94,47 @@ def _normalize_messages(messages: List["Message"]) -> Optional[List["Message"]]:
     fatally invalid (caller should skip the LLM call).
     """
 
-    # 1. Filter empty user/assistant messages
-    filtered: List[Message] = []
-    for msg in messages:
-        if msg.role in ("user", "assistant"):
-            has_content = msg.content is not None and msg.content.strip()
-            has_tool_calls = bool(msg.tool_calls)
-            if not has_content and not has_tool_calls:
-                continue
-        filtered.append(msg)
-
-    # 2. Validate tool-call pairing
-    # Collect tool_call_ids that have tool responses
+    # Collect ids for pairing validation
     response_ids: set[str] = set()
-    for msg in filtered:
+    invocation_ids: set[str] = set()
+    for msg in messages:
         if msg.role == "tool" and msg.tool_call_id:
             response_ids.add(msg.tool_call_id)
+        for tc in msg.tool_calls or []:
+            invocation_ids.add(tc.id)
 
     result: List[Message] = []
-    for msg in filtered:
-        if msg.tool_calls:
-            paired = [tc for tc in msg.tool_calls if tc.id in response_ids]
-            unpaired = [tc for tc in msg.tool_calls if tc.id not in response_ids]
-            for tc in unpaired:
-                logger.warning(f"Removing unpaired tool call: {tc.name} (id={tc.id})")
-            if paired:
-                result.append(
-                    Message(
-                        role=msg.role,
-                        content=msg.content,
-                        tool_calls=paired,
-                        tool_call_id=msg.tool_call_id,
-                        name=msg.name,
-                    )
-                )
-            elif msg.content and msg.content.strip():
-                # Keep as plain text message without tool calls
-                result.append(Message(role=msg.role, content=msg.content))
-            # else: drop the message entirely
-        else:
+    for msg in messages:
+        # Filter empty user/assistant messages
+        has_content = msg.content is not None and msg.content.strip()
+        tool_calls = msg.tool_calls or []
+        has_paired_tool_calls = any(tc.id in response_ids for tc in tool_calls)
+        if msg.role in ("user", "assistant") and not has_content and not has_paired_tool_calls:
+            logger.warning(f"Dropping empty message with no tool calls: role={msg.role}, name={msg.name}")
+            continue
+
+        # Drop orphaned tool responses
+        if msg.role == "tool" and msg.tool_call_id and msg.tool_call_id not in invocation_ids:
+            logger.warning(f"Dropping orphaned tool response: {msg.name} (id={msg.tool_call_id})")
+            continue
+
+        if msg.role == "tool":
             result.append(msg)
+            continue
 
-    # Remove orphaned tool responses (no matching tool call in the conversation)
-    remaining_tc_ids: set[str] = set()
-    for msg in result:
-        if msg.tool_calls:
-            for tc in msg.tool_calls:
-                remaining_tc_ids.add(tc.id)
-
-    result = [
-        msg
-        for msg in result
-        if not (msg.role == "tool" and msg.tool_call_id and msg.tool_call_id not in remaining_tc_ids)
-    ]
+        paired = [tc for tc in tool_calls if tc.id in response_ids]
+        unpaired = [tc for tc in tool_calls if tc.id not in response_ids]
+        for tc in unpaired:
+            logger.warning(f"Removing unpaired tool call: {tc.name} (id={tc.id})")
+        result.append(
+            Message(
+                role=msg.role,
+                content=msg.content,
+                tool_calls=paired,
+                tool_call_id=msg.tool_call_id,
+                name=msg.name,
+            )
+        )
 
     if not result:
         logger.warning("Skipping LLM call: no messages to send")
@@ -297,7 +285,7 @@ class LlmProvider:
         tools: Optional[List[Any]] = None,
         config: Optional[LlmConfig] = None,
         **kwargs: Any,
-    ) -> AsyncIterable[StreamChunk]:
+    ) -> "ChatStream":
         normalized = _normalize_messages(messages)
         if normalized is None:
             return _empty_stream()
