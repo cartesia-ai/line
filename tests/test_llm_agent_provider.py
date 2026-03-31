@@ -9,6 +9,7 @@ from line.llm_agent.provider import (
     ChatStream,
     LlmProvider,
     Message,
+    ToolCall,
     _extract_instructions_and_messages,
     _get_model_config,
     _is_realtime_model,
@@ -634,7 +635,6 @@ class TestNormalizeMessages:
 
     def test_tool_result_with_empty_content_preserved(self):
         """Tool-result messages with empty content must NOT be filtered."""
-        from line.llm_agent.provider import ToolCall
 
         result = _normalize_messages(
             [
@@ -650,3 +650,115 @@ class TestNormalizeMessages:
         assert result is not None
         tool_msgs = [msg for msg in result if msg.role == "tool"]
         assert len(tool_msgs) == 1
+
+    def test_tool_responses_placed_after_their_tool_call(self):
+        """Tool responses must appear immediately after the assistant message that invoked them."""
+
+        result = _normalize_messages(
+            [
+                Message(role="user", content="Do stuff"),
+                Message(
+                    role="assistant",
+                    content=None,
+                    tool_calls=[ToolCall(id="c1", name="tool_a", arguments="{}")],
+                ),
+                Message(role="user", content="Meanwhile"),
+                Message(role="tool", content="result_a", tool_call_id="c1", name="tool_a"),
+            ]
+        )
+        assert result is not None
+        roles = [m.role for m in result]
+        assert roles == ["user", "assistant", "tool", "user"]
+        assert result[2].tool_call_id == "c1"
+
+    def test_multiple_tool_responses_reordered_to_follow_assistant(self):
+        """Multiple tool responses scattered in the history are grouped after their assistant."""
+
+        result = _normalize_messages(
+            [
+                Message(role="user", content="Go"),
+                Message(
+                    role="assistant",
+                    content=None,
+                    tool_calls=[
+                        ToolCall(id="c1", name="t1", arguments="{}"),
+                        ToolCall(id="c2", name="t2", arguments="{}"),
+                    ],
+                ),
+                Message(role="user", content="Extra context"),
+                Message(role="tool", content="r2", tool_call_id="c2", name="t2"),
+                Message(role="tool", content="r1", tool_call_id="c1", name="t1"),
+            ]
+        )
+        assert result is not None
+        roles = [m.role for m in result]
+        assert roles == ["user", "assistant", "tool", "tool", "user"]
+        # Order follows tool_calls order in the assistant message, not input order
+        assert result[2].tool_call_id == "c1"
+        assert result[3].tool_call_id == "c2"
+
+    def test_tool_responses_already_adjacent_stay_in_place(self):
+        """When tool responses are already correctly placed, order is preserved."""
+
+        result = _normalize_messages(
+            [
+                Message(role="user", content="Hi"),
+                Message(
+                    role="assistant",
+                    content=None,
+                    tool_calls=[ToolCall(id="c1", name="t1", arguments="{}")],
+                ),
+                Message(role="tool", content="done", tool_call_id="c1", name="t1"),
+                Message(role="user", content="Thanks"),
+            ]
+        )
+        assert result is not None
+        roles = [m.role for m in result]
+        assert roles == ["user", "assistant", "tool", "user"]
+
+    def test_interleaved_tool_calls_across_multiple_assistants(self):
+        """Tool responses from different assistant turns are each placed after their own turn."""
+
+        result = _normalize_messages(
+            [
+                Message(role="user", content="Start"),
+                Message(
+                    role="assistant",
+                    content=None,
+                    tool_calls=[ToolCall(id="a1", name="ta", arguments="{}")],
+                ),
+                Message(
+                    role="assistant",
+                    content=None,
+                    tool_calls=[ToolCall(id="b1", name="tb", arguments="{}")],
+                ),
+                Message(role="tool", content="rb", tool_call_id="b1", name="tb"),
+                Message(role="tool", content="ra", tool_call_id="a1", name="ta"),
+            ]
+        )
+        assert result is not None
+        roles = [m.role for m in result]
+        assert roles == ["user", "assistant", "tool", "assistant", "tool"]
+        assert result[2].tool_call_id == "a1"
+        assert result[4].tool_call_id == "b1"
+
+    def test_duplicate_tool_call_id_preserves_all_responses(self):
+        """Multiple tool responses sharing the same tool_call_id are all kept."""
+
+        result = _normalize_messages(
+            [
+                Message(role="user", content="Go"),
+                Message(
+                    role="assistant",
+                    content=None,
+                    tool_calls=[ToolCall(id="c1", name="t1", arguments="{}")],
+                ),
+                Message(role="tool", content="first", tool_call_id="c1", name="t1"),
+                Message(role="tool", content="second", tool_call_id="c1", name="t1"),
+            ]
+        )
+        assert result is not None
+        tool_msgs = [m for m in result if m.role == "tool"]
+        assert len(tool_msgs) == 2
+        assert tool_msgs[0].content == "first"
+        assert tool_msgs[1].content == "second"

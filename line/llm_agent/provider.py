@@ -10,6 +10,7 @@ Model naming:
 - Google: "gemini/gemini-2.5-flash-preview-09-2025"
 """
 
+from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterable, AsyncIterator, Dict, List, Optional, Protocol, Tuple, runtime_checkable
 
@@ -86,7 +87,10 @@ def _normalize_messages(messages: List["Message"]) -> Optional[List["Message"]]:
        entry must have a corresponding ``role="tool"`` response.  Unpaired
        tool calls are logged and removed.  Any orphaned tool responses
        (responses with no matching tool call) are also dropped.
-    3. **Validate terminal message** – the conversation must not end with an
+    3. **Reorder tool responses** – tool response messages are moved to
+       appear immediately after the assistant message whose tool call
+       triggered them, regardless of their original position.
+    4. **Validate terminal message** – the conversation must not end with an
        assistant message (providers require user/tool to continue), and the
        final user message must be non-empty.
 
@@ -94,38 +98,26 @@ def _normalize_messages(messages: List["Message"]) -> Optional[List["Message"]]:
     fatally invalid (caller should skip the LLM call).
     """
 
-    # Collect ids for pairing validation
-    response_ids: set[str] = set()
-    invocation_ids: set[str] = set()
+    # Index tool calls and responses for pairing
+    tool_responses: Dict[str, List[Message]] = defaultdict(list)
     for msg in messages:
         if msg.role == "tool" and msg.tool_call_id:
-            response_ids.add(msg.tool_call_id)
-        for tc in msg.tool_calls or []:
-            invocation_ids.add(tc.id)
+            tool_responses[msg.tool_call_id].append(msg)
 
     result: List[Message] = []
     for msg in messages:
-        # Filter empty user/assistant messages
-        has_content = msg.content is not None and msg.content.strip()
+        if msg.role == "tool":
+            continue  # placed after their tool call below
+
         tool_calls = msg.tool_calls or []
-        has_paired_tool_calls = any(tc.id in response_ids for tc in tool_calls)
-        if msg.role in ("user", "assistant") and not has_content and not has_paired_tool_calls:
+        paired = [tc for tc in tool_calls if tc.id in tool_responses]
+        unpaired = [tc for tc in tool_calls if tc.id not in tool_responses]
+        has_content = msg.content is not None and msg.content.strip()
+
+        if msg.role in ("user", "assistant") and not has_content and not paired:
             logger.warning(f"Dropping empty message with no tool calls: role={msg.role}, name={msg.name}")
             continue
 
-        # Drop orphaned tool responses
-        if msg.role == "tool" and msg.tool_call_id and msg.tool_call_id not in invocation_ids:
-            logger.warning(f"Dropping orphaned tool response: {msg.name} (id={msg.tool_call_id})")
-            continue
-
-        if msg.role == "tool":
-            result.append(msg)
-            continue
-
-        paired = [tc for tc in tool_calls if tc.id in response_ids]
-        unpaired = [tc for tc in tool_calls if tc.id not in response_ids]
-        for tc in unpaired:
-            logger.warning(f"Removing unpaired tool call: {tc.name} (id={tc.id})")
         result.append(
             Message(
                 role=msg.role,
@@ -135,12 +127,16 @@ def _normalize_messages(messages: List["Message"]) -> Optional[List["Message"]]:
                 name=msg.name,
             )
         )
+        for tc in unpaired:
+            logger.warning(f"Dropping unpaired tool call: {tc.name} (id={tc.id})")
+        for tc in paired:
+            result.extend(tool_responses[tc.id])
 
     if not result:
         logger.warning("Skipping LLM call: no messages to send")
         return None
 
-    # 3. Validate terminal message
+    # 4. Validate terminal message
     last = result[-1]
     if last.role == "assistant":
         logger.warning("Skipping LLM call: conversation cannot end with assistant message")
