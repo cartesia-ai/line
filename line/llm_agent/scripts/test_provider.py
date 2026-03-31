@@ -63,12 +63,7 @@ from line.llm_agent import (
     mcp_tool,
     web_search,
 )
-<<<<<<< HEAD
 from line.llm_agent.provider import LlmProvider, Message
-=======
-from line.llm_agent.provider import LLMProvider, Message
-from line.llm_agent.schema_converter import function_tool_to_litellm
->>>>>>> b7a0e6d (Addressing comments)
 
 # =============================================================================
 # Test Tools
