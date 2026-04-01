@@ -442,6 +442,7 @@ _HISTORY_EVENT_TYPES = (
     CallEnded,
     AgentHandedOff,
     UserTurnStarted,
+    UserCustomSent,
     UserDtmfSent,
     UserTextSent,
     UserTurnEnded,
