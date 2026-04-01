@@ -237,11 +237,6 @@ class LlmProvider:
             raise ValueError("Missing API key in LlmProvider initialization")
         mcfg = _get_model_config(model, backend=backend)
 
-        logger.info(f"Model config: {mcfg}")
-        logger.info(f"Backend: {mcfg.backend}")
-        logger.info(f"Supports reasoning effort: {mcfg.supports_reasoning_effort}")
-        logger.info(f"Default reasoning effort: {mcfg.default_reasoning_effort}")
-
         self._model = model
         self._tools = list(tools or [])
         normalized_config = _normalize_config(config or LlmConfig())
