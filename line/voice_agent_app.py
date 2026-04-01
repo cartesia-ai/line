@@ -12,6 +12,7 @@ ConversationRunner - Manages the websocket loop for a single conversation,
 
 import asyncio
 from datetime import datetime, timezone
+from importlib.metadata import version as _pkg_version
 import json
 import os
 import re
@@ -22,7 +23,7 @@ from urllib.parse import urlencode
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from loguru import logger
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 import uvicorn
 
 from line._harness_types import (
@@ -188,6 +189,7 @@ class VoiceAgentApp:
             "agent_call_id": call_request.agent_call_id,
             "agent": json.dumps(call_request.agent.model_dump()),
             "metadata": json.dumps(call_request.metadata),
+            "line_version": _pkg_version("cartesia-line"),
         }
 
         query_string = urlencode(url_params)
@@ -262,6 +264,9 @@ class VoiceAgentApp:
         """Run the voice agent server."""
         port = port or int(os.getenv("PORT", 8000))
         uvicorn.run(self.fastapi_app, host=host, port=port)
+
+
+_input_message_adapter = TypeAdapter(InputMessage, config=ConfigDict(extra="ignore"))
 
 
 class ConversationRunner:
@@ -361,7 +366,11 @@ class ConversationRunner:
             try:
                 # Receive message from WebSocket
                 message = await self.websocket.receive_json()
-                input_msg = TypeAdapter(InputMessage).validate_python(message)
+                try:
+                    input_msg = _input_message_adapter.validate_python(message)
+                except ValidationError:
+                    logger.warning(f"Dropping unparseable websocket message: {message}")
+                    continue
 
                 # Convert and process the input message
                 event = self._convert_input_message(input_msg)
