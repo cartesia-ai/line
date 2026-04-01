@@ -448,8 +448,6 @@ def _get_model_config(model: str, *, backend: Optional[str] = None) -> _ModelCon
 def _is_openai_model(model: str) -> bool:
     """Return True for OpenAI models (``chatgpt/`` or ``gpt-`` prefixed)."""
     lower = model.lower()
-    if lower.startswith("openai/"):
-        lower = lower[len("openai/") :]
     return lower.startswith("chatgpt/") or lower.startswith("gpt-")
 
 
