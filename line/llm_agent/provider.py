@@ -237,6 +237,11 @@ class LlmProvider:
             raise ValueError("Missing API key in LlmProvider initialization")
         mcfg = _get_model_config(model, backend=backend)
 
+        logger.info(f"Model config: {mcfg}")
+        logger.info(f"Backend: {mcfg.backend}")
+        logger.info(f"Supports reasoning effort: {mcfg.supports_reasoning_effort}")
+        logger.info(f"Default reasoning effort: {mcfg.default_reasoning_effort}")
+
         self._model = model
         self._tools = list(tools or [])
         normalized_config = _normalize_config(config or LlmConfig())
@@ -245,6 +250,7 @@ class LlmProvider:
 
         if mcfg.backend == "realtime":
             from line.llm_agent.realtime_provider import _RealtimeProvider
+            logger.info(f"Realtime provider selected for model: {model}")
 
             self._backend: ProviderProtocol = _RealtimeProvider(
                 model=model,
@@ -253,6 +259,7 @@ class LlmProvider:
         elif mcfg.backend == "websocket":
             from line.llm_agent.http_provider import _HttpProvider
             from line.llm_agent.websocket_provider import _WebSocketProvider
+            logger.info(f"WebSocket provider selected for model: {model}")
 
             self._backend = _WebSocketProvider(
                 model=model,
@@ -267,7 +274,7 @@ class LlmProvider:
             )
         else:
             from line.llm_agent.http_provider import _HttpProvider
-
+            logger.info(f"HTTP provider selected for model: {model}")
             self._backend = _HttpProvider(
                 model=model,
                 api_key=api_key,
@@ -444,9 +451,11 @@ def _get_model_config(model: str, *, backend: Optional[str] = None) -> _ModelCon
 
 
 def _is_openai_model(model: str) -> bool:
-    """Return True for explicit ``openai/``-prefixed model names."""
+    """Return True for OpenAI models (``chatgpt/`` or ``gpt-`` prefixed)."""
     lower = model.lower()
-    return lower.startswith("openai/") or lower.startswith("chatgpt/")
+    if lower.startswith("openai/"):
+        lower = lower[len("openai/") :]
+    return lower.startswith("chatgpt/") or lower.startswith("gpt-")
 
 
 def _is_realtime_model(model: str) -> bool:
@@ -454,19 +463,32 @@ def _is_realtime_model(model: str) -> bool:
     return _is_openai_model(model) and "realtime" in model.lower().split("/", 1)[-1]
 
 
-_WEBSOCKET_MODELS = ("gpt-5.2", "gpt-5.2-pro", "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano")
+def _supports_responses_api(model: str) -> bool:
+    """Check if a model supports the /v1/responses endpoint via LiteLLM model_cost."""
+    import litellm
+
+    # In LiteLLM's model_cost, OpenAI models are keyed without the "openai/" prefix
+    # (e.g., "gpt-5.4" not "openai/gpt-5.4"), but other prefixes like "chatgpt/"
+    # have their own distinct entries (e.g., "chatgpt/gpt-5.4").
+    lower = model.lower()
+    if lower.startswith("openai/"):
+        lookup = lower[len("openai/") :]
+    else:
+        lookup = lower
+    info = litellm.model_cost.get(lookup, {})
+    endpoints = info.get("supported_endpoints", [])
+    return "/v1/responses" in endpoints
 
 
 def _is_websocket_model(model: str) -> bool:
     """Check if a model should use the WebSocket (Responses API) backend.
 
-    Only matches models listed in ``_WEBSOCKET_MODELS``.  Requires the
-    ``openai/`` prefix.
+    Returns True for OpenAI models that support the /v1/responses endpoint,
+    as detected via LiteLLM's model_cost registry.
     """
     if not _is_openai_model(model):
         return False
-    model = model.lower().split("/", 1)[-1]
-    return model in _WEBSOCKET_MODELS
+    return _supports_responses_api(model)
 
 
 # Backward-compat alias — emits a deprecation warning on instantiation.
