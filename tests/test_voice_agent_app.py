@@ -334,6 +334,59 @@ class TestConversationRunner:
         assert isinstance(runner.history[3], UserTurnEnded)
         assert isinstance(runner.history[4], CallEnded)
 
+    @pytest.mark.asyncio
+    async def test_unknown_message_type_is_dropped(self):
+        """Messages with an unrecognized 'type' are logged and skipped, not fatal."""
+        ws = create_mock_websocket()
+        call_count = 0
+
+        async def receive_messages():
+            nonlocal call_count
+            call_count += 1
+            messages = [
+                {"type": "totally_unknown", "foo": "bar"},
+                {"type": "message", "content": "hello"},
+                {"type": "user_state", "value": "idle"},
+            ]
+            if call_count <= len(messages):
+                return messages[call_count - 1]
+            raise WebSocketDisconnect()
+
+        ws.receive_json = receive_messages
+
+        runner = ConversationRunner(ws, noop_agent, env)
+        await runner.run()
+
+        # The unknown message should have been dropped; the rest processed normally.
+        # History: CallStarted, UserTextSent, UserTurnEnded, CallEnded
+        assert any(isinstance(ev, UserTextSent) for ev in runner.history)
+        assert not runner.shutdown_event.is_set() or isinstance(runner.history[-1], CallEnded)
+
+    @pytest.mark.asyncio
+    async def test_extra_fields_are_ignored(self):
+        """Messages with extra unknown fields should parse successfully."""
+        ws = create_mock_websocket()
+        call_count = 0
+
+        async def receive_messages():
+            nonlocal call_count
+            call_count += 1
+            messages = [
+                {"type": "message", "content": "hello", "extra_field": 123, "nested": {"a": 1}},
+                {"type": "user_state", "value": "idle"},
+            ]
+            if call_count <= len(messages):
+                return messages[call_count - 1]
+            raise WebSocketDisconnect()
+
+        ws.receive_json = receive_messages
+
+        runner = ConversationRunner(ws, noop_agent, env)
+        await runner.run()
+
+        # Should have processed both messages without error.
+        assert any(isinstance(ev, UserTextSent) and ev.content == "hello" for ev in runner.history)
+
     def test_turn_content_collects_events_since_turn_started(self):
         """Verify _turn_content collects the right events."""
         ws = create_mock_websocket()
