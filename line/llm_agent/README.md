@@ -97,6 +97,31 @@ config = LlmConfig.from_call_request(
 - `system_prompt=""` is treated as None and falls back to defaults (a valid system prompt is always required)
 - `introduction=""` is preserved (agent waits for user to speak first rather than using a default)
 
+### Backend Override
+
+The SDK supports three backends and automatically selects one based on the model:
+
+| Backend | Auto-selected for | Description |
+|---------|-------------------|-------------|
+| `http` | Most models (Anthropic, Google, etc.) | Standard HTTP via LiteLLM |
+| `websocket` | `gpt-5.2`, `gpt-5.2-pro`, `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.4-nano` | OpenAI Responses API over WebSocket |
+| `realtime` | `gpt-4o-realtime-preview` and other `*-realtime-*` models | OpenAI Realtime API |
+
+To override the auto-selected backend, pass `backend` to `LlmAgent`:
+
+```python
+# Force gpt-5.2 to use HTTP instead of its default websocket backend
+agent = LlmAgent(
+    model="gpt-5.2",
+    api_key=os.getenv("OPENAI_API_KEY"),
+    backend="http",
+)
+```
+
+Not all combinations are valid — realtime models cannot be overridden, and only websocket-compatible models can use the `websocket` backend. The SDK will raise a `ValueError` for invalid combinations.
+
+For a full list of supported models, see the [LiteLLM model docs](https://models.litellm.ai/).
+
 ## Built-in Tools
 
 The SDK provides commonly-used tools out of the box:

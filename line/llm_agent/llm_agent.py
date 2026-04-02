@@ -78,11 +78,12 @@ class LlmAgent:
         tools: Optional[List[ToolSpec]] = None,
         config: Optional[LlmConfig] = None,
         max_tool_iterations: int = 10,
+        backend: Optional[str] = None,
     ):
         if not api_key:
             raise ValueError("Missing API key in LLmAgent initialization")
 
-        model_config = _get_model_config(model)
+        model_config = _get_model_config(model, backend=backend)
 
         # Resolve the base config to insert default values for any _UNSET sentinels.
         effective_config = _normalize_config(config or LlmConfig())
@@ -105,6 +106,7 @@ class LlmAgent:
             api_key=api_key,
             config=effective_config,
             tools=self._tools,
+            backend=backend,
         )
 
         self._introduction_sent = False
