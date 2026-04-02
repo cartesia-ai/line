@@ -245,6 +245,7 @@ class LlmProvider:
 
         if mcfg.backend == "realtime":
             from line.llm_agent.realtime_provider import _RealtimeProvider
+
             logger.info(f"Realtime provider selected for model: {model}")
 
             self._backend: ProviderProtocol = _RealtimeProvider(
@@ -254,6 +255,7 @@ class LlmProvider:
         elif mcfg.backend == "websocket":
             from line.llm_agent.http_provider import _HttpProvider
             from line.llm_agent.websocket_provider import _WebSocketProvider
+
             logger.info(f"WebSocket provider selected for model: {model}")
 
             self._backend = _WebSocketProvider(
@@ -269,6 +271,7 @@ class LlmProvider:
             )
         else:
             from line.llm_agent.http_provider import _HttpProvider
+
             logger.info(f"HTTP provider selected for model: {model}")
             self._backend = _HttpProvider(
                 model=model,
