@@ -246,6 +246,8 @@ class LlmProvider:
         if mcfg.backend == "realtime":
             from line.llm_agent.realtime_provider import _RealtimeProvider
 
+            logger.info(f"Realtime provider selected for model: {model}")
+
             self._backend: ProviderProtocol = _RealtimeProvider(
                 model=model,
                 api_key=api_key,
@@ -253,6 +255,8 @@ class LlmProvider:
         elif mcfg.backend == "websocket":
             from line.llm_agent.http_provider import _HttpProvider
             from line.llm_agent.websocket_provider import _WebSocketProvider
+
+            logger.info(f"WebSocket provider selected for model: {model}")
 
             self._backend = _WebSocketProvider(
                 model=model,
@@ -268,6 +272,7 @@ class LlmProvider:
         else:
             from line.llm_agent.http_provider import _HttpProvider
 
+            logger.info(f"HTTP provider selected for model: {model}")
             self._backend = _HttpProvider(
                 model=model,
                 api_key=api_key,
@@ -443,10 +448,34 @@ def _get_model_config(model: str, *, backend: Optional[str] = None) -> _ModelCon
     )
 
 
-def _is_openai_model(model: str) -> bool:
-    """Return True for explicit ``openai/``-prefixed model names."""
+def _get_model_info(model: str) -> dict:
+    """Get model info from LiteLLM's model_cost registry.
+
+    Strips the ``openai/`` prefix for lookup since LiteLLM keys OpenAI models
+    without it (e.g., ``gpt-5.4`` not ``openai/gpt-5.4``).
+    """
+    import litellm
+
     lower = model.lower()
-    return lower.startswith("openai/") or lower.startswith("chatgpt/")
+    if lower.startswith("openai/"):
+        lookup = lower[len("openai/") :]
+    else:
+        lookup = lower
+    return litellm.model_cost.get(lookup, {})
+
+
+def _is_openai_model(model: str) -> bool:
+    """Return True for OpenAI models via LiteLLM's model_cost registry."""
+    info = _get_model_info(model)
+    provider = info.get("litellm_provider")
+    if provider:
+        # "openai" for direct API, "chatgpt" for ChatGPT API - both use OpenAI endpoints
+        return provider in ("openai", "chatgpt")
+    # Fallback to pattern matching for models not yet in LiteLLM registry
+    lower = model.lower()
+    if lower.startswith("openai/"):
+        lower = lower[len("openai/") :]
+    return lower.startswith(("gpt-", "o1", "o3", "o4", "chatgpt/", "codex"))
 
 
 def _is_realtime_model(model: str) -> bool:
@@ -454,19 +483,17 @@ def _is_realtime_model(model: str) -> bool:
     return _is_openai_model(model) and "realtime" in model.lower().split("/", 1)[-1]
 
 
-_WEBSOCKET_MODELS = ("gpt-5.2", "gpt-5.2-pro", "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano")
-
-
 def _is_websocket_model(model: str) -> bool:
     """Check if a model should use the WebSocket (Responses API) backend.
 
-    Only matches models listed in ``_WEBSOCKET_MODELS``.  Requires the
-    ``openai/`` prefix.
+    Returns True for OpenAI models that support the /v1/responses endpoint,
+    as detected via LiteLLM's model_cost registry.
     """
-    if not _is_openai_model(model):
+    info = _get_model_info(model)
+    if info.get("litellm_provider") not in ("openai", "chatgpt"):
         return False
-    model = model.lower().split("/", 1)[-1]
-    return model in _WEBSOCKET_MODELS
+    endpoints = info.get("supported_endpoints", [])
+    return "/v1/responses" in endpoints
 
 
 # Backward-compat alias — emits a deprecation warning on instantiation.
