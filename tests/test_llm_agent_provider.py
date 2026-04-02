@@ -320,12 +320,11 @@ def test_backend_override_invalid_value():
 
 
 def test_is_websocket_model_matches_gpt52_variants():
-    assert _is_websocket_model("openai/gpt-5.2")
-    assert _is_websocket_model("openai/gpt-5.2-pro")
-    assert _is_websocket_model("openai/gpt-5.4")
-    assert _is_websocket_model("openai/gpt-5.4-mini")
-    assert not _is_websocket_model("gpt-5.2")  # requires openai/ prefix
-    assert not _is_websocket_model("gpt-5.4-mini")  # requires openai/ prefix
+    assert _is_websocket_model("gpt-5.2")
+    assert _is_websocket_model("gpt-5.2-pro")
+    assert _is_websocket_model("gpt-5.4")
+    assert _is_websocket_model("gpt-5.4-mini")
+    assert _is_websocket_model("chatgpt/gpt-5.4-pro")
     assert not _is_websocket_model("azure/gpt-5.2")
     assert not _is_websocket_model("openrouter/gpt-5.2")
     assert not _is_websocket_model("openai/gpt-4o")
@@ -333,7 +332,7 @@ def test_is_websocket_model_matches_gpt52_variants():
 
 def test_is_realtime_model_matches_only_direct_openai_models():
     assert _is_realtime_model("openai/gpt-4o-realtime-preview")
-    assert not _is_realtime_model("gpt-4o-realtime-preview")  # requires openai/ prefix
+    assert _is_realtime_model("gpt-4o-realtime-preview")  # detected via LiteLLM registry
     assert not _is_realtime_model("azure/gpt-4o-realtime-preview")
     assert not _is_realtime_model("openrouter/gpt-4o-realtime-preview")
 
