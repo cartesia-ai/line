@@ -332,7 +332,7 @@ def test_is_websocket_model_matches_gpt52_variants():
 
 def test_is_realtime_model_matches_only_direct_openai_models():
     assert _is_realtime_model("openai/gpt-4o-realtime-preview")
-    assert not _is_realtime_model("gpt-4o-realtime-preview")  # requires openai/ prefix
+    assert _is_realtime_model("gpt-4o-realtime-preview")  # detected via LiteLLM registry
     assert not _is_realtime_model("azure/gpt-4o-realtime-preview")
     assert not _is_realtime_model("openrouter/gpt-4o-realtime-preview")
 
