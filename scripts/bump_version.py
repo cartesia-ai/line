@@ -182,7 +182,16 @@ def main():
     # Show commits since last version bump to help write the PR description
     try:
         last_bump_commit = subprocess.run(
-            ["git", "log", "HEAD", "--grep=Bump version", "--grep=Version bump", "--grep=Bump to", "--format=%H", "-1"],
+            [
+                "git",
+                "log",
+                "HEAD",
+                "--grep=Bump version",
+                "--grep=Version bump",
+                "--grep=Bump to",
+                "--format=%H",
+                "-1",
+            ],
             capture_output=True,
             text=True,
             cwd=root_dir,
