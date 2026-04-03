@@ -15,6 +15,7 @@ Usage:
 import argparse
 from pathlib import Path
 import re
+import subprocess
 import sys
 from typing import Union
 
@@ -178,6 +179,38 @@ def main():
                 else:
                     print(f"  ⚠️  Skipped {rel_path} (no cartesia-line dependency)")
 
+    # Show commits since last version bump to help write the PR description
+    try:
+        last_bump_commit = subprocess.run(
+            [
+                "git",
+                "log",
+                "HEAD",
+                "--grep=Bump version",
+                "--grep=Version bump",
+                "--grep=Bump to",
+                "--format=%H",
+                "-1",
+            ],
+            capture_output=True,
+            text=True,
+            cwd=root_dir,
+        ).stdout.strip()
+        if last_bump_commit:
+            commit_log = subprocess.run(
+                ["git", "log", f"{last_bump_commit}..HEAD", "--pretty=format:* %s (%h)"],
+                capture_output=True,
+                text=True,
+                cwd=root_dir,
+            ).stdout.strip()
+            if commit_log:
+                print(f"\nChanges since last version bump:\n{commit_log}")
+    except Exception:
+        print(
+            "❌ Error: Could not get commits since last version bump",
+        )
+        pass
+
     if args.dry_run:
         print("\n[DRY RUN] No files were modified")
     else:
@@ -186,6 +219,7 @@ def main():
         print("  1. Review the changes: git diff")
         print("  2. Commit the changes: git add -A && git commit -m 'Bump version to " + new_version + "'")
         print("  3. Push and create a release")
+        print("  4. In the PR description, include the changes since last version bump:")
 
 
 if __name__ == "__main__":
