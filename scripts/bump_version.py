@@ -206,7 +206,9 @@ def main():
             if commit_log:
                 print(f"\nChanges since last version bump:\n{commit_log}")
     except Exception:
-        print("❌ Error: Could not get commits since last version bump",)
+        print(
+            "❌ Error: Could not get commits since last version bump",
+        )
         pass
 
     if args.dry_run:
