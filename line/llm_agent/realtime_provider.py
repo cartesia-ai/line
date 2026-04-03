@@ -114,7 +114,7 @@ class _RealtimeProvider:
             tool_defs = build_openai_tool_defs(
                 tools,
                 web_search_options=web_search_options,
-                strict=False,
+                strict=config.strict_tool_schemas,
                 responses_api=True,
             )
             desired_context = _context_identity(
@@ -291,7 +291,7 @@ def _plan_chat(
     tool_defs = build_openai_tool_defs(
         tools,
         web_search_options=web_search_options,
-        strict=False,
+        strict=config.strict_tool_schemas,
         responses_api=True,
     )
     desired_context = _context_identity(
