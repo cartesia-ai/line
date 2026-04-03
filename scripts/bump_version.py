@@ -206,7 +206,7 @@ def main():
         print(f"\n✅ Version bumped to {new_version}")
         print("\nNext steps:")
         print("  1. Review the changes: git diff")
-        print("  2. Commit the changes: git add -A && git commit -m 'Bump version to " + new_version + "")
+        print("  2. Commit the changes: git add -A && git commit -m 'Bump version to " + new_version + "'")
         print("  3. Push and create a release")
         print("  4. In the PR description, include the changes since last version bump:")
 
