@@ -36,11 +36,12 @@ The script will test whichever providers have API keys set.
 
 import argparse
 import asyncio
+import json
 import logging
 import os
 import pathlib
 import sys
-from typing import Annotated
+from typing import Annotated, TypedDict
 import warnings
 
 import litellm
@@ -63,6 +64,7 @@ from line.llm_agent import (
     web_search,
 )
 from line.llm_agent.provider import LlmProvider, Message
+from line.llm_agent.schema_converter import function_tool_to_litellm
 
 # =============================================================================
 # Test Tools
@@ -95,6 +97,37 @@ async def calculate(ctx, expression: Annotated[str, "Math expression to evaluate
         return "Invalid expression"
     except Exception as e:
         return f"Error: {e}"
+
+
+# =============================================================================
+# Nested Object Tools (TypedDict vs list[dict])
+# =============================================================================
+
+
+class MenuItem(TypedDict):
+    """A menu item for ordering."""
+
+    menu_item_id: str
+    quantity: int
+    modifiers: list[str]
+
+
+@loopback_tool
+async def add_to_order(
+    ctx,
+    items: Annotated[list[MenuItem], "List of menu items to add to the order"],
+) -> str:
+    """Add items to a restaurant order. Uses TypedDict for proper schema generation."""
+    return json.dumps({"success": True, "items_added": len(items), "items": items})
+
+
+@loopback_tool
+async def add_to_order_broken(
+    ctx,
+    items: Annotated[list[dict], "List of menu items with format [{'menu_item_id': str, 'quantity': int}]"],
+) -> str:
+    """Add items using list[dict]. Fails strict schema conversion unless strict_tool_schemas=False."""
+    return json.dumps({"success": True, "items_added": len(items), "items": items})
 
 
 # =============================================================================
@@ -491,6 +524,195 @@ async def test_conversation_reset(model: str, api_key: str):
         raise AssertionError(f"Branch B failed — expected 'giraffe', got: {response_b.strip()!r}")
 
 
+async def test_nested_objects(model: str, api_key: str):
+    """Test tool calling with nested objects using TypedDict.
+
+    This test validates that:
+    1. TypedDict generates proper JSON schemas with all properties defined
+    2. The schema includes additionalProperties: false for OpenAI compatibility
+    3. The LLM can correctly call tools with nested object parameters
+
+    Use TypedDict instead of list[dict]: with strict tool schemas (default), bare dict
+    shapes fail at conversion before any API call.
+    """
+    print("\n" + "=" * 60)
+    print(f"Testing nested objects (TypedDict) with {model}")
+    print("=" * 60)
+
+    agent = LlmAgent(
+        model=model,
+        api_key=api_key,
+        tools=[add_to_order],
+        config=LlmConfig(
+            system_prompt="""You are a restaurant order assistant.
+When the user wants to order food, use the add_to_order tool.
+
+Available menu items:
+- item_001: Grilled Oysters ($15)
+- item_002: Lobster Roll ($25)
+- item_003: Fish Tacos ($12)
+
+Always include menu_item_id, quantity, and modifiers (can be empty list).""",
+        ),
+    )
+
+    env = TurnEnv()
+    user_message = "I'd like to order 2 grilled oysters please"
+    event = UserTextSent(
+        content=user_message,
+        history=[UserTextSent(content=user_message)],
+    )
+
+    print(f"User: {user_message}")
+    print("\nAgent response:")
+
+    tool_called = False
+    tool_args = None
+    error_occurred = False
+
+    try:
+        async for output in agent.process(env, event):
+            if isinstance(output, AgentSendText):
+                print(f"  Text: {output.text}")
+            elif isinstance(output, AgentToolCalled):
+                tool_called = True
+                tool_args = output.tool_args
+                print(f"  [Tool call]: {output.tool_name}")
+                print(f"  [Tool args]: {json.dumps(output.tool_args, indent=4)}")
+            elif isinstance(output, AgentToolReturned):
+                print(f"  [Tool result]: {output.result}")
+    except Exception as e:
+        error_occurred = True
+        print(f"  [ERROR]: {e}")
+    finally:
+        await agent.cleanup()
+
+    # Validate results
+    print("\n--- Validation ---")
+    if error_occurred:
+        print("✗ Test failed: Error occurred during tool call")
+        return False
+    elif not tool_called:
+        print("✗ Test failed: Tool was never called")
+        return False
+    elif tool_args is None or "items" not in tool_args:
+        print("✗ Test failed: 'items' not in tool arguments")
+        return False
+    elif not tool_args["items"]:
+        print("✗ Test failed: 'items' is empty")
+        return False
+    else:
+        # Validate item structure
+        items = tool_args["items"]
+        valid = True
+        for item in items:
+            if "menu_item_id" not in item or "quantity" not in item:
+                valid = False
+                break
+        if valid:
+            print(f"✓ Nested objects test passed (items: {items})")
+            return True
+        else:
+            print("✗ Test failed: Item structure is invalid")
+            return False
+
+
+async def test_nested_objects_without_typeddict(model: str, api_key: str):
+    """list[dict] under default strict schemas raises at conversion; opt-out path still works.
+
+    First asserts ``function_tool_to_litellm(..., strict=True)`` raises. Then runs the agent
+    with ``LlmConfig(strict_tool_schemas=False)`` so non-strict tool definitions are allowed.
+    """
+    print("\n" + "=" * 60)
+    print(f"Testing nested objects WITHOUT TypedDict (list[dict]) with {model}")
+    print("=" * 60)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        try:
+            function_tool_to_litellm(add_to_order_broken)
+        except ValueError as e:
+            print(f"✓ Strict conversion rejected list[dict] as expected: {e!s}")
+        else:
+            print("✗ Expected ValueError from function_tool_to_litellm(strict=True)")
+            return False
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        litellm_tool = function_tool_to_litellm(add_to_order_broken, strict=False)
+    fn = litellm_tool["function"]
+    assert fn.get("strict") is not True
+    items_param = fn["parameters"]["properties"]["items"]
+    assert items_param["type"] == "array"
+    assert items_param["items"] == {"type": "object"}
+    print("✓ With strict=False: tool spec has untyped object array items (as expected)")
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        agent = LlmAgent(
+            model=model,
+            api_key=api_key,
+            tools=[add_to_order_broken],
+            config=LlmConfig(
+                strict_tool_schemas=False,
+                system_prompt="""You are a restaurant order assistant.
+When the user wants to order food, use the add_to_order_broken tool.
+
+Available menu items:
+- item_001: Grilled Oysters ($15)
+
+Always include menu_item_id and quantity.""",
+            ),
+        )
+
+    env = TurnEnv()
+    user_message = "Order 2 grilled oysters"
+    event = UserTextSent(
+        content=user_message,
+        history=[UserTextSent(content=user_message)],
+    )
+
+    print(f"User: {user_message}")
+    print("\nAgent response:")
+
+    tool_called = False
+    tool_args = None
+    error_occurred = False
+    try:
+        async for output in agent.process(env, event):
+            if isinstance(output, AgentSendText):
+                print(f"  Text: {output.text}")
+            elif isinstance(output, AgentToolCalled):
+                tool_called = True
+                tool_args = output.tool_args
+                print(f"  [Tool call]: {output.tool_name}")
+                print(f"  [Tool args]: {json.dumps(output.tool_args, indent=4)}")
+            elif isinstance(output, AgentToolReturned):
+                print(f"  [Tool result]: {output.result}")
+    except Exception as e:
+        error_occurred = True
+        print(f"  [ERROR]: {e}")
+    finally:
+        await agent.cleanup()
+
+    print("\n--- Validation ---")
+    if error_occurred:
+        print("✗ Test failed: Error occurred during agent run")
+        return False
+    if not tool_called:
+        print("✗ Test failed: Tool was never called")
+        return False
+    if tool_args is None or "items" not in tool_args or not tool_args["items"]:
+        print("✗ Test failed: missing or empty 'items' in tool arguments")
+        return False
+    for item in tool_args["items"]:
+        if "menu_item_id" not in item or "quantity" not in item:
+            print("✗ Test failed: item structure invalid")
+            return False
+    print(f"✓ list[dict] path passed (items: {tool_args['items']})")
+    return True
+
+
 # =============================================================================
 # Main
 # =============================================================================
@@ -511,6 +733,8 @@ AVAILABLE_TESTS = [
     "streaming",  # test_streaming_text
     "introduction",  # test_introduction
     "tools",  # test_tool_calling
+    "nested_objects",  # test_nested_objects (TypedDict support)
+    "nested_objects_fail",  # test_nested_objects_without_typeddict (strict rejects; opt-out live call)
     "web_search",  # test_web_search
     "web_search_fn",  # test_function_tools_with_web_search
     "mcp",  # test_mcp_list_tools and test_mcp_tool_execution
@@ -619,6 +843,10 @@ async def main(args):
             test_plan.append(("introduction", test_introduction, model, api_key))
         if "tools" in tests_to_run:
             test_plan.append(("tools", test_tool_calling, model, api_key))
+        if "nested_objects" in tests_to_run:
+            test_plan.append(("nested_objects", test_nested_objects, model, api_key))
+        if "nested_objects_fail" in tests_to_run:
+            test_plan.append(("nested_objects_fail", test_nested_objects_without_typeddict, model, api_key))
         if "web_search" in tests_to_run:
             test_plan.append(("web_search", test_web_search, model, api_key))
             test_plan.append(("web_search (high)", test_web_search, model, api_key, "high"))

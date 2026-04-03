@@ -106,7 +106,7 @@ class _HttpProvider:
             llm_kwargs.update(config.extra)
 
         if tools:
-            llm_kwargs["tools"] = tools_to_litellm(tools)
+            llm_kwargs["tools"] = tools_to_litellm(tools, strict=config.strict_tool_schemas)
 
         llm_kwargs.update(kwargs)
 
