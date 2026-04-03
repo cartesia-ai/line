@@ -12,7 +12,6 @@ ConversationRunner - Manages the websocket loop for a single conversation,
 
 import asyncio
 from datetime import datetime, timezone
-from importlib.metadata import version as _pkg_version
 import json
 import os
 import re
@@ -47,6 +46,7 @@ from line._harness_types import (
     TransferOutput,
     TTSConfig,
     UserStateInput,
+    ValidationErrorInput,
 )
 from line.agent import Agent, AgentSpec, EventFilter, TurnEnv
 from line.events import (
@@ -189,7 +189,7 @@ class VoiceAgentApp:
             "agent_call_id": call_request.agent_call_id,
             "agent": json.dumps(call_request.agent.model_dump()),
             "metadata": json.dumps(call_request.metadata),
-            "line_version": _pkg_version("cartesia-line"),
+            "cartesia_version": "2026-04-03",
         }
 
         query_string = urlencode(url_params)
@@ -374,6 +374,8 @@ class ConversationRunner:
 
                 # Convert and process the input message
                 event = self._convert_input_message(input_msg)
+                if event is None:
+                    continue
                 ev, self.history = self._process_input_event(self.history, event)
                 if ev is None:
                     continue
@@ -461,7 +463,7 @@ class ConversationRunner:
             logger.warning(f"Failed to send error via WebSocket: {e}")
 
     ######### Event Parsing Methods #########
-    def _convert_input_message(self, message: InputMessage) -> InputEvent:
+    def _convert_input_message(self, message: InputMessage) -> Optional[InputEvent]:
         """Convert an InputMessage to an InputEvent (with history=None)."""
         if isinstance(message, UserStateInput):
             if message.value == UserState.SPEAKING:
@@ -496,6 +498,14 @@ class ConversationRunner:
 
         elif isinstance(message, CustomInput):
             return UserCustomSent(metadata=message.metadata)
+
+        elif isinstance(message, ValidationErrorInput):
+            # TODO: parse to a real event if we want to expose validation errors to the agent; for now just
+            # log and ignore
+            logger.warning(
+                f"Received validation error from client: {message.error_type} - {message.error_message}"
+            )
+            return None
 
         raise ValueError(f"Unhandled input message type: {type(message).__name__}")
 
