@@ -40,7 +40,7 @@ See [LiteLLM docs](https://docs.litellm.ai/docs/providers) for 100+ more provide
 | `websocket` | `gpt-5.2`, `gpt-5.2-pro`, `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.4-nano` and other Responses API models| OpenAI Responses API over WebSocket |
 | `realtime` | `gpt-4o-realtime-preview` and other `*-realtime-*` models | OpenAI Realtime API |
 
-Not all combinations are valid — realtime models cannot be overridden, and only WebSocket-compatible models can use the `websocket` backend. See [supported models](https://models.litellm.ai/) for the full list.
+See [supported models](https://models.litellm.ai/) for the full list.
 
 ## Configuration
 
