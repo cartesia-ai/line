@@ -41,6 +41,7 @@ from line._harness_types import (
     MessageOutput,
     OutputMessage,
     STTConfig,
+    StartInput,
     ToolCallOutput,
     TranscriptionInput,
     TransferOutput,
@@ -183,12 +184,6 @@ class VoiceAgentApp:
                 raise HTTPException(status_code=500, detail="Server error in call processing") from e
 
         url_params = {
-            "call_id": call_request.call_id,
-            "from": call_request.from_,
-            "to": call_request.to,
-            "agent_call_id": call_request.agent_call_id,
-            "agent": json.dumps(call_request.agent.model_dump()),
-            "metadata": json.dumps(call_request.metadata),
             "cartesia_version": "2026-04-03",
         }
 
@@ -214,31 +209,28 @@ class VoiceAgentApp:
         await websocket.accept()
         logger.info("Client connected")
 
-        query_params = dict(websocket.query_params)
+        # Wait for the start message from the external service
+        try:
+            start_data = await websocket.receive_json()
+        except (WebSocketDisconnect, json.JSONDecodeError) as e:
+            logger.error(f"Failed to receive start message: {e}")
+            return
 
-        metadata = {}
-        if "metadata" in query_params:
-            try:
-                metadata = json.loads(query_params["metadata"])
-            except (json.JSONDecodeError, TypeError):
-                logger.warning(f"Invalid metadata JSON: {query_params['metadata']}")
-                metadata = {}
-
-        agent_data = {}
-        if "agent" in query_params:
-            try:
-                agent_data = json.loads(query_params["agent"])
-            except (json.JSONDecodeError, TypeError):
-                logger.warning(f"Invalid agent JSON: {query_params['agent']}")
-                agent_data = {}
+        try:
+            start_msg = StartInput(**start_data)
+        except Exception as e:
+            logger.error(f"Invalid start message: {e}")
+            await websocket.send_json(ErrorOutput(content=f"Invalid start message: {e}").model_dump())
+            await websocket.close()
+            return
 
         call_request = CallRequest(
-            call_id=query_params.get("call_id", "unknown"),
-            from_=query_params.get("from", "unknown"),
-            to=query_params.get("to", "unknown"),
-            agent_call_id=query_params.get("agent_call_id", "unknown"),
-            agent=AgentConfig(**agent_data),
-            metadata=metadata,
+            call_id=start_msg.call_id,
+            from_=start_msg.from_,
+            to=start_msg.to,
+            agent_call_id=start_msg.agent_call_id,
+            agent=AgentConfig(**start_msg.agent),
+            metadata=start_msg.metadata or {},
         )
 
         runner: Optional[ConversationRunner] = None
