@@ -564,6 +564,61 @@ class TestInactivityTimeout:
         assert len(timeout_events) == 0, "No timeout should fire when user speaks in time"
 
     @pytest.mark.asyncio
+    async def test_timeout_not_fired_during_agent_speaking(self):
+        """Verify timer from interrupted turn is cleared when agent starts new response.
+
+        Regression test: when a user interrupts the agent, the sequence is:
+        UserTurnStarted → AgentTurnEnded → ... → AgentTurnStarted (new response)
+        The AgentTurnEnded from the interruption should NOT cause a timeout while
+        the agent is speaking its new response.
+        """
+        ws = create_mock_websocket()
+        received_events: List[InputEvent] = []
+
+        async def tracking_agent(env, event):
+            received_events.append(event)
+            if isinstance(event, (CallStarted, UserTurnEnded)):
+                yield AgentSendText(text="response")
+            return
+            yield
+
+        call_count = 0
+
+        async def receive_messages():
+            nonlocal call_count
+            call_count += 1
+            messages = [
+                # Agent speaks intro
+                {"type": "agent_state", "value": "speaking"},
+                {"type": "agent_speech", "content": "Hello"},
+                {"type": "agent_state", "value": "idle"},
+                # User interrupts — UserTurnStarted before AgentTurnEnded
+                {"type": "user_state", "value": "speaking"},
+                {"type": "message", "content": "hi"},
+                {"type": "user_state", "value": "idle"},
+                # Agent starts new response — should clear stale timer
+                {"type": "agent_state", "value": "speaking"},
+                {"type": "agent_speech", "content": "response"},
+                {"type": "agent_state", "value": "idle"},
+            ]
+            if call_count <= len(messages):
+                return messages[call_count - 1]
+            raise WebSocketDisconnect()
+
+        ws.receive_json = receive_messages
+
+        call_request = _make_call_request(inactivity_timeout_ms=100)
+        runner = ConversationRunner(ws, tracking_agent, env, call_request)
+        await asyncio.wait_for(runner.run(), timeout=5.0)
+
+        # No InactivityTimeout should fire because user spoke and agent
+        # started a new response (clearing the stale timer)
+        timeout_events = [e for e in received_events if isinstance(e, InactivityTimeout)]
+        assert len(timeout_events) == 0, (
+            "No timeout should fire when agent starts a new response after interruption"
+        )
+
+    @pytest.mark.asyncio
     async def test_no_timeout_when_disabled(self):
         """Verify no timeout fires when inactivity_timeout_ms is not set."""
         ws = create_mock_websocket()

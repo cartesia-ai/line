@@ -424,7 +424,7 @@ class ConversationRunner:
                 # Track inactivity timeout state
                 if isinstance(ev, AgentTurnEnded):
                     self._agent_turn_ended_time = time.time()
-                elif isinstance(ev, UserTurnStarted):
+                elif isinstance(ev, (UserTurnStarted, AgentTurnStarted)):
                     self._agent_turn_ended_time = None  # Reset timer
 
                 await self._handle_event(TurnEnv(), ev)
