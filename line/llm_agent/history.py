@@ -23,6 +23,7 @@ from line.events import (
     CallStarted,
     CustomHistoryEntry,
     HistoryEvent,
+    InactivityTimeout,
     InputEvent,
     LogMessage,
     LogMetric,
@@ -492,6 +493,7 @@ def _to_history_event(event: object) -> Optional[HistoryEvent]:
             AgentTextSent,
             AgentDtmfSent,
             AgentTurnEnded,
+            InactivityTimeout,
         ),
     ):
         return event
