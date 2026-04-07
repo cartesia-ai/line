@@ -2,7 +2,7 @@
 
 from datetime import datetime
 import os
-from typing import Annotated
+from typing import Annotated, Optional
 
 from loguru import logger
 from tavily import AsyncTavilyClient
@@ -10,9 +10,7 @@ from tavily import AsyncTavilyClient
 from line.llm_agent import LlmAgent, LlmConfig, ToolEnv, end_call, loopback_tool
 from line.voice_agent_app import AgentEnv, CallRequest, VoiceAgentApp
 
-today = datetime.now().strftime("%Y-%m-%d")
-
-SYSTEM_PROMPT = f"""Today is {today}. You are a sharp, fast research assistant on a live voice call.
+SYSTEM_PROMPT_TEMPLATE = """Today is {today}. You are a sharp, fast research assistant on a live voice call.
 
 You have two web tools powered by Tavily:
 
@@ -55,9 +53,8 @@ async def web_search(
         "The search query. Be specific and include key terms.",
     ],
     time_range: Annotated[
-        str,
-        "The time range to search for. Use 'day', 'week', 'month', or 'year'.",
-    ] = "month",
+        Optional[str], "Optional time range filter. Use 'day', 'week', 'month', or 'year' for recent topics. "
+    ] = None,
 ) -> str:
     """Search the web for current information.
     Use when you need up-to-date facts, news, or any information that requires factual accuracy."""
@@ -69,12 +66,10 @@ async def web_search(
 
     try:
         client = AsyncTavilyClient(api_key=api_key, client_source="cartesia-line-agent")
-        response = await client.search(
-            query=query,
-            time_range=time_range,
-            search_depth="fast",
-            max_results=5,
-        )
+        search_kwargs: dict = {"query": query, "search_depth": "fast", "max_results": 5}
+        if time_range is not None:
+            search_kwargs["time_range"] = time_range
+        response = await client.search(**search_kwargs)
 
         results = response.get("results", [])
         if not results:
@@ -143,12 +138,13 @@ async def web_extract(
 
 
 async def get_agent(env: AgentEnv, call_request: CallRequest):
+    today = datetime.now().strftime("%Y-%m-%d")
     return LlmAgent(
         model="openai/gpt-4o-mini",
         api_key=os.getenv("OPENAI_API_KEY"),
         tools=[web_search, web_extract, end_call],
         config=LlmConfig(
-            system_prompt=SYSTEM_PROMPT,
+            system_prompt=SYSTEM_PROMPT_TEMPLATE.format(today=today),
             introduction=INTRODUCTION,
             max_tokens=MAX_OUTPUT_TOKENS,
             temperature=TEMPERATURE,
