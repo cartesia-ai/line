@@ -11,7 +11,7 @@ dependencies = [
 ]
 
 [tool.uv.sources]
-cartesia-line = { git = "https://github.com/drago-balto/line.git", rev = "7a0be8eb6275aca68485d866d337516d66850d04" }
+cartesia-line = { git = "https://github.com/drago-balto/line.git", rev = "a4da5ac81a7f64e4bbd5809773aa0506159f1c3a" }
 
 [tool.setuptools]
 py-modules = ["main"]

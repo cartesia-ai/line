@@ -315,6 +315,10 @@ class ConversationRunner:
             logger.info(f"Inactivity timeout enabled: {self.inactivity_timeout_ms}ms")
 
     @property
+    def _is_agent_task_running(self) -> bool:
+        return self.agent_task is not None and not self.agent_task.done()
+
+    @property
     def shutdown_event(self) -> asyncio.Event:
         if self._shutdown_event is None:
             self._shutdown_event = asyncio.Event()
@@ -389,10 +393,14 @@ class ConversationRunner:
                     remaining_ms = self.inactivity_timeout_ms - elapsed_ms
                     if remaining_ms > 0:
                         receive_timeout = remaining_ms / 1000.0
-                    else:
-                        # Timeout already expired, fire event immediately
+                    elif not self._is_agent_task_running:
+                        # Timeout expired and agent is idle — fire
                         await self._fire_inactivity_timeout()
                         continue
+                    else:
+                        # Timeout expired but agent task still running (e.g. tool
+                        # executing) — poll again shortly to re-check
+                        receive_timeout = 0.5
 
                 # Receive message from WebSocket (with optional timeout)
                 try:
@@ -404,7 +412,8 @@ class ConversationRunner:
                     else:
                         message = await self.websocket.receive_json()
                 except asyncio.TimeoutError:
-                    await self._fire_inactivity_timeout()
+                    if not self._is_agent_task_running:
+                        await self._fire_inactivity_timeout()
                     continue
 
                 try:
