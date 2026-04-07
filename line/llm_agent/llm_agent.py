@@ -592,7 +592,7 @@ class LlmAgent:
                         )
                     )
             elif isinstance(event, InactivityTimeout):
-                messages.append(Message(role="user", content="[The user has not responded.]"))
+                messages.append(Message(role="system", content="[The user has not responded.]"))
             elif isinstance(event, AgentToolReturned):
                 messages.append(
                     Message(

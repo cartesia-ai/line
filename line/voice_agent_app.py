@@ -63,6 +63,7 @@ from line.events import (
     AgentTurnEnded,
     AgentTurnStarted,
     AgentUpdateCall,
+    AgentUpdateInactivityTimeout,
     CallEnded,
     CallStarted,
     InactivityTimeout,
@@ -492,6 +493,16 @@ class ConversationRunner:
         async def runner():
             try:
                 async for output in self.agent_callable(turn_env, event):
+                    # Handle runner-internal events before mapping
+                    if isinstance(output, AgentUpdateInactivityTimeout):
+                        self.inactivity_timeout_ms = output.timeout_ms
+                        if output.timeout_ms is not None:
+                            logger.info(f"Inactivity timeout updated: {output.timeout_ms}ms")
+                        else:
+                            logger.info("Inactivity timeout disabled")
+                            self._agent_turn_ended_time = None
+                        continue
+
                     if isinstance(output, AgentSendText):
                         self.emitted_agent_text.append((output.text, output.interruptible))
                     mapped = self._map_output_event(output)

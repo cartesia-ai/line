@@ -79,6 +79,13 @@ class AgentSendCustom(BaseModel):
     metadata: Dict[str, Any]
 
 
+class AgentUpdateInactivityTimeout(BaseModel):
+    """Update the inactivity timeout during a call. None disables it."""
+
+    type: Literal["agent_update_inactivity_timeout"] = "agent_update_inactivity_timeout"
+    timeout_ms: Optional[int] = None
+
+
 OutputEvent = Union[
     AgentSendText,
     AgentSendDtmf,
@@ -90,6 +97,7 @@ OutputEvent = Union[
     LogMessage,
     AgentUpdateCall,
     AgentSendCustom,
+    AgentUpdateInactivityTimeout,
 ]
 
 
@@ -254,6 +262,7 @@ __all__ = [
     "LogMessage",
     "AgentUpdateCall",
     "AgentSendCustom",
+    "AgentUpdateInactivityTimeout",
     "OutputEvent",
     # Custom
     "CustomHistoryEntry",

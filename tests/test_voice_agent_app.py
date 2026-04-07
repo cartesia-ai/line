@@ -24,6 +24,7 @@ from line.events import (
     AgentToolCalled,
     AgentToolReturned,
     AgentUpdateCall,
+    AgentUpdateInactivityTimeout,
     CallEnded,
     CallStarted,
     InactivityTimeout,
@@ -837,6 +838,110 @@ class TestInactivityTimeout:
         sent_msgs = [call[0][0] for call in ws.send_json.call_args_list]
         re_prompt_sent = any(msg.get("content") == "Are you there?" for msg in sent_msgs)
         assert re_prompt_sent, "Agent's re-prompt should be sent via websocket"
+
+    @pytest.mark.asyncio
+    async def test_dynamic_timeout_update(self):
+        """Verify agent can update inactivity timeout dynamically via AgentUpdateInactivityTimeout."""
+        ws = create_mock_websocket()
+        timeout_fired = asyncio.Event()
+        agent_responded = asyncio.Event()
+
+        async def updating_agent(env, event):
+            if isinstance(event, CallStarted):
+                # Disable timeout during intro
+                yield AgentUpdateInactivityTimeout(timeout_ms=None)
+                yield AgentSendText(text="Hello")
+            elif isinstance(event, UserTurnEnded):
+                # Re-enable with a short timeout
+                yield AgentUpdateInactivityTimeout(timeout_ms=100)
+                yield AgentSendText(text="Got it.")
+                agent_responded.set()
+            elif isinstance(event, InactivityTimeout):
+                timeout_fired.set()
+            return
+            yield
+
+        call_count = 0
+
+        async def receive_messages():
+            nonlocal call_count
+            call_count += 1
+            messages_phase1 = [
+                # Agent intro — timeout is disabled
+                {"type": "agent_state", "value": "speaking"},
+                {"type": "agent_speech", "content": "Hello"},
+                {"type": "agent_state", "value": "idle"},
+                # User speaks
+                {"type": "user_state", "value": "speaking"},
+                {"type": "message", "content": "test"},
+                {"type": "user_state", "value": "idle"},
+            ]
+            if call_count <= len(messages_phase1):
+                return messages_phase1[call_count - 1]
+
+            # Wait for agent task to process the update before sending TTS events
+            phase2_start = len(messages_phase1)
+            if call_count == phase2_start + 1:
+                await agent_responded.wait()
+                return {"type": "agent_state", "value": "speaking"}
+            if call_count == phase2_start + 2:
+                return {"type": "agent_speech", "content": "Got it."}
+            if call_count == phase2_start + 3:
+                return {"type": "agent_state", "value": "idle"}
+            # Now silence — timeout should fire
+            await timeout_fired.wait()
+            raise WebSocketDisconnect()
+
+        ws.receive_json = receive_messages
+
+        call_request = _make_call_request(inactivity_timeout_ms=5000)
+        runner = ConversationRunner(ws, updating_agent, env, call_request)
+        await asyncio.wait_for(runner.run(), timeout=5.0)
+
+        # Timeout should have fired with the updated 100ms value (not the original 5000ms)
+        assert timeout_fired.is_set()
+        # Runner should reflect the updated value
+        assert runner.inactivity_timeout_ms == 100
+
+    @pytest.mark.asyncio
+    async def test_dynamic_timeout_disable(self):
+        """Verify agent can disable inactivity timeout dynamically."""
+        ws = create_mock_websocket()
+        received_events: List[InputEvent] = []
+
+        async def disabling_agent(env, event):
+            received_events.append(event)
+            if isinstance(event, CallStarted):
+                yield AgentUpdateInactivityTimeout(timeout_ms=None)
+                yield AgentSendText(text="Hello")
+            return
+            yield
+
+        call_count = 0
+
+        async def receive_messages():
+            nonlocal call_count
+            call_count += 1
+            messages = [
+                {"type": "agent_state", "value": "speaking"},
+                {"type": "agent_speech", "content": "Hello"},
+                {"type": "agent_state", "value": "idle"},
+            ]
+            if call_count <= len(messages):
+                return messages[call_count - 1]
+            # Wait briefly — no timeout should fire
+            await asyncio.sleep(0.5)
+            raise WebSocketDisconnect()
+
+        ws.receive_json = receive_messages
+
+        call_request = _make_call_request(inactivity_timeout_ms=100)
+        runner = ConversationRunner(ws, disabling_agent, env, call_request)
+        await asyncio.wait_for(runner.run(), timeout=5.0)
+
+        assert runner.inactivity_timeout_ms is None
+        timeout_events = [e for e in received_events if isinstance(e, InactivityTimeout)]
+        assert len(timeout_events) == 0, "No timeout should fire when disabled"
 
 
 # ============================================================

@@ -19,6 +19,7 @@ from line.events import (
     AgentTurnEnded,
     AgentTurnStarted,
     AgentUpdateCall,
+    AgentUpdateInactivityTimeout,
     CallEnded,
     CallStarted,
     CustomHistoryEntry,
@@ -498,7 +499,9 @@ def _to_history_event(event: object) -> Optional[HistoryEvent]:
     ):
         return event
     # Non-history OutputEvents are filtered out
-    elif isinstance(event, (AgentTransferCall, LogMetric, LogMessage, AgentUpdateCall)):
+    elif isinstance(
+        event, (AgentTransferCall, LogMetric, LogMessage, AgentUpdateCall, AgentUpdateInactivityTimeout)
+    ):
         return None
     else:
         raise ValueError(f"Unknown event type in history: {type(event).__name__}")
