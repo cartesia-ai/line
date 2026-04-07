@@ -174,6 +174,7 @@ class _WebSocketProvider:
                 tool_defs=tool_defs,
                 cfg=config,
                 generate=False,
+                input=[],  # No input for warmup
             )
             await self._ws.send(json.dumps(request))
 
