@@ -13,6 +13,7 @@ ConversationRunner - Manages the websocket loop for a single conversation,
 import asyncio
 from datetime import datetime, timezone
 import json
+from importlib.metadata import version as _pkg_version
 import os
 import re
 import traceback
@@ -208,30 +209,59 @@ class VoiceAgentApp:
         """Websocket endpoint that manages the complete call lifecycle."""
         await websocket.accept()
         logger.info("Client connected")
+        logger.info(f"Line SDK version: {_pkg_version('cartesia-line')}")
 
-        # Wait for the start message from the external service
-        try:
-            start_data = await websocket.receive_json()
-        except (WebSocketDisconnect, json.JSONDecodeError) as e:
-            logger.error(f"Failed to receive start message: {e}")
-            return
+        query_params = dict(websocket.query_params)
+        uses_start_message = "cartesia_version" in query_params
 
-        try:
-            start_msg = StartInput(**start_data)
-        except Exception as e:
-            logger.error(f"Invalid start message: {e}")
-            await websocket.send_json(ErrorOutput(content=f"Invalid start message: {e}").model_dump())
-            await websocket.close()
-            return
+        if uses_start_message:
+            # New flow: call data arrives via a start message over the websocket
+            logger.info("Using start message for call data")
+            try:
+                start_data = await asyncio.wait_for(websocket.receive_json(), timeout=1.0)
+                start_msg = StartInput(**start_data)
+                call_request = CallRequest(
+                    call_id=start_msg.call_id,
+                    from_=start_msg.from_,
+                    to=start_msg.to,
+                    agent_call_id=start_msg.agent_call_id,
+                    agent=AgentConfig(**start_msg.agent),
+                    metadata=start_msg.metadata or {},
+                )
+                uses_start_message = True
+            except WebSocketDisconnect:
+                logger.error("WebSocket disconnected before start message received")
+                return
+            except Exception as e:
+                logger.warning(f"Failed to parse start message, falling back to URL params: {e}")
+                uses_start_message = False
 
-        call_request = CallRequest(
-            call_id=start_msg.call_id,
-            from_=start_msg.from_,
-            to=start_msg.to,
-            agent_call_id=start_msg.agent_call_id,
-            agent=AgentConfig(**start_msg.agent),
-            metadata=start_msg.metadata or {},
-        )
+        if not uses_start_message:
+            # Legacy flow: call data comes from URL query params
+            metadata = {}
+            if "metadata" in query_params:
+                try:
+                    metadata = json.loads(query_params["metadata"])
+                except (json.JSONDecodeError, TypeError):
+                    logger.warning(f"Invalid metadata JSON: {query_params['metadata']}")
+                    metadata = {}
+
+            agent_data = {}
+            if "agent" in query_params:
+                try:
+                    agent_data = json.loads(query_params["agent"])
+                except (json.JSONDecodeError, TypeError):
+                    logger.warning(f"Invalid agent JSON: {query_params['agent']}")
+                    agent_data = {}
+
+            call_request = CallRequest(
+                call_id=query_params.get("call_id", "unknown"),
+                from_=query_params.get("from", "unknown"),
+                to=query_params.get("to", "unknown"),
+                agent_call_id=query_params.get("agent_call_id", "unknown"),
+                agent=AgentConfig(**agent_data),
+                metadata=metadata,
+            )
 
         runner: Optional[ConversationRunner] = None
         # Create the AgentEnv with the current event loop
