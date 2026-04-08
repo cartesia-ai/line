@@ -36,6 +36,7 @@ from line.events import (
 from line.voice_agent_app import (
     AgentEnv,
     ConversationRunner,
+    _call_request_from_start_data,
     _consume_expected_ack_back_prefix,
     _get_processed_history,
     _parse_committed,
@@ -1274,3 +1275,65 @@ class TestEventMessageTruncation:
         event = LogMessage(name="test", level="info", message="hi", metadata={"ts": datetime.now()})
         output = self._map(event)
         assert isinstance(output.metadata, dict)
+
+
+# ============================================================
+# Start message tests
+# ============================================================
+
+
+class TestCallRequestFromStartData:
+    """Tests for _call_request_from_start_data parsing."""
+
+    def test_valid_start_message(self):
+        data = {
+            "type": "start",
+            "call_id": "call-123",
+            "from": "+15551234567",
+            "to": "+15559876543",
+            "agent_call_id": "ac-456",
+            "agent": {"system_prompt": "You are helpful.", "introduction": "Hello!"},
+            "metadata": {"key": "value"},
+        }
+        result = _call_request_from_start_data(data)
+        assert result.call_id == "call-123"
+        assert result.from_ == "+15551234567"
+        assert result.to == "+15559876543"
+        assert result.agent_call_id == "ac-456"
+        assert result.agent.system_prompt == "You are helpful."
+        assert result.agent.introduction == "Hello!"
+        assert result.metadata == {"key": "value"}
+
+    def test_defaults_for_missing_fields(self):
+        data = {"type": "start"}
+        result = _call_request_from_start_data(data)
+        assert result.call_id == "unknown"
+        assert result.from_ == "unknown"
+        assert result.to == "unknown"
+        assert result.agent_call_id == "unknown"
+        assert result.agent.system_prompt is None
+        assert result.agent.introduction is None
+        assert result.metadata == {}
+
+    def test_null_metadata_becomes_empty_dict(self):
+        data = {"type": "start", "metadata": None}
+        result = _call_request_from_start_data(data)
+        assert result.metadata == {}
+
+    def test_extra_fields_ignored(self):
+        data = {
+            "type": "start",
+            "call_id": "call-123",
+            "from": "+1555",
+            "to": "+1555",
+            "agent_call_id": "ac-1",
+            "agent": {},
+            "future_field": "should be ignored",
+        }
+        result = _call_request_from_start_data(data)
+        assert result.call_id == "call-123"
+
+    def test_invalid_agent_raises(self):
+        data = {"type": "start", "agent": "not-a-dict"}
+        with pytest.raises(Exception):
+            _call_request_from_start_data(data)

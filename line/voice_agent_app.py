@@ -120,6 +120,7 @@ class AgentEnv:
     def __init__(self, loop: Optional[asyncio.AbstractEventLoop] = None):
         self.loop = loop
 
+SUPPORT_UNKNOWN_MESSAGES_KEY = "cartesia_version"
 
 load_dotenv()
 
@@ -155,6 +156,11 @@ class VoiceAgentApp:
         )
         ws_adder(self.ws_route, self.websocket_endpoint)
 
+    # Agent code that sets cartesia_version in the websocket URL can handle
+    # unknown message types (e.g. start messages, future new message types).
+    def _supports_unknown_messages(self, query_params: Dict[str, str]) -> bool:
+        return SUPPORT_UNKNOWN_MESSAGES_KEY in query_params
+
     async def create_chat_session(self, request: Request) -> dict:
         """Create a new chat session and return the websocket URL."""
         body = await request.json()
@@ -185,7 +191,7 @@ class VoiceAgentApp:
                 raise HTTPException(status_code=500, detail="Server error in call processing") from e
 
         url_params = {
-            "cartesia_version": "2026-04-03",
+            SUPPORT_UNKNOWN_MESSAGES_KEY: "2026-04-03",
         }
 
         query_string = urlencode(url_params)
@@ -212,31 +218,26 @@ class VoiceAgentApp:
         logger.info(f"Line SDK version: {_pkg_version('cartesia-line')}")
 
         query_params = dict(websocket.query_params)
-        uses_start_message = "cartesia_version" in query_params
+        supports_unknown_messages = self._supports_unknown_messages(query_params)
 
-        if uses_start_message:
+        if supports_unknown_messages:
             # New flow: call data arrives via a start message over the websocket
-            logger.info("Using start message for call data")
             try:
                 start_data = await asyncio.wait_for(websocket.receive_json(), timeout=1.0)
-                start_msg = StartInput(**start_data)
-                call_request = CallRequest(
-                    call_id=start_msg.call_id,
-                    from_=start_msg.from_,
-                    to=start_msg.to,
-                    agent_call_id=start_msg.agent_call_id,
-                    agent=AgentConfig(**start_msg.agent),
-                    metadata=start_msg.metadata or {},
-                )
-                uses_start_message = True
             except WebSocketDisconnect:
                 logger.error("WebSocket disconnected before start message received")
                 return
-            except Exception as e:
-                logger.warning(f"Failed to parse start message, falling back to URL params: {e}")
-                uses_start_message = False
+            except (asyncio.TimeoutError, json.JSONDecodeError) as e:
+                logger.warning(f"No Start message received, falling back to URL params: {e}")
+                supports_unknown_messages = False
+            else:
+                try:
+                    call_request = _call_request_from_start_data(start_data)
+                except Exception as e:
+                    logger.warning(f"Invalid start message, falling back to URL params: {e}")
+                    supports_unknown_messages = False
 
-        if not uses_start_message:
+        if not supports_unknown_messages:
             # Legacy flow: call data comes from URL query params
             metadata = {}
             if "metadata" in query_params:
@@ -286,6 +287,19 @@ class VoiceAgentApp:
         """Run the voice agent server."""
         port = port or int(os.getenv("PORT", 8000))
         uvicorn.run(self.fastapi_app, host=host, port=port)
+
+
+def _call_request_from_start_data(data: dict) -> CallRequest:
+    """Parse a start message dict into a CallRequest."""
+    start_msg = StartInput(**data)
+    return CallRequest(
+        call_id=start_msg.call_id,
+        from_=start_msg.from_,
+        to=start_msg.to,
+        agent_call_id=start_msg.agent_call_id,
+        agent=AgentConfig(**start_msg.agent),
+        metadata=start_msg.metadata or {},
+    )
 
 
 _input_message_adapter = TypeAdapter(InputMessage, config=ConfigDict(extra="ignore"))

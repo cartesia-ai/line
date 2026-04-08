@@ -51,20 +51,6 @@ class CustomInput(BaseModel):
     type: Literal["custom"] = "custom"
 
 
-class StartInput(BaseModel):
-    """Start message sent by the external service with call parameters."""
-
-    type: Literal["start"] = "start"
-    call_id: str = "unknown"
-    from_: str = Field(default="unknown", alias="from")
-    to: str = "unknown"
-    agent_call_id: str = "unknown"
-    agent: Dict[str, Any] = Field(default_factory=dict)
-    metadata: Optional[Dict[str, Any]] = None
-
-    model_config = ConfigDict(populate_by_name=True)
-
-
 InputMessage = Union[
     TranscriptionInput,
     DTMFInput,
@@ -158,3 +144,29 @@ OutputMessage = Union[
     ConfigOutput,
     CustomOutput,
 ]
+
+
+########################################################
+#  Connection-level messages
+#  These are handled during websocket setup, before
+#  the conversation loop. Not part of InputMessage.
+########################################################
+
+
+class StartInput(BaseModel):
+    """Start message sent by the harness with call parameters.
+
+    Delivered once at connection start when the harness detects
+    cartesia_version in the websocket URL. Carries the same call
+    context that legacy clients pass via URL query params.
+    """
+
+    type: Literal["start"] = "start"
+    call_id: str = "unknown"
+    from_: str = Field(default="unknown", alias="from")
+    to: str = "unknown"
+    agent_call_id: str = "unknown"
+    agent: Dict[str, Any] = Field(default_factory=dict)
+    metadata: Optional[Dict[str, Any]] = None
+
+    model_config = ConfigDict(populate_by_name=True)
