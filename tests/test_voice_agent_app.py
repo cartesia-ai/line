@@ -1335,5 +1335,5 @@ class TestCallRequestFromStartData:
 
     def test_invalid_agent_raises(self):
         data = {"type": "start", "agent": "not-a-dict"}
-        with pytest.raises(Exception):
+        with pytest.raises(TypeError):
             _call_request_from_start_data(data)

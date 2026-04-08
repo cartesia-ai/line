@@ -12,8 +12,8 @@ ConversationRunner - Manages the websocket loop for a single conversation,
 
 import asyncio
 from datetime import datetime, timezone
-import json
 from importlib.metadata import version as _pkg_version
+import json
 import os
 import re
 import traceback
@@ -41,8 +41,8 @@ from line._harness_types import (
     LogMetricOutput,
     MessageOutput,
     OutputMessage,
-    STTConfig,
     StartInput,
+    STTConfig,
     ToolCallOutput,
     TranscriptionInput,
     TransferOutput,
@@ -119,6 +119,7 @@ class UserState:
 class AgentEnv:
     def __init__(self, loop: Optional[asyncio.AbstractEventLoop] = None):
         self.loop = loop
+
 
 SUPPORT_UNKNOWN_MESSAGES_KEY = "cartesia_version"
 
