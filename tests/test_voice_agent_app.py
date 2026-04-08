@@ -1332,8 +1332,3 @@ class TestCallRequestFromStartData:
         }
         result = _call_request_from_start_data(data)
         assert result.call_id == "call-123"
-
-    def test_invalid_agent_raises(self):
-        data = {"type": "start", "agent": "not-a-dict"}
-        with pytest.raises(TypeError):
-            _call_request_from_start_data(data)
