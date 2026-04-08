@@ -198,7 +198,18 @@ class VoiceAgentApp:
         query_string = urlencode(url_params)
         websocket_url = f"{self.ws_route}?{query_string}"
 
-        response = {"websocket_url": websocket_url}
+        # Build call_data for the harness to include in the start message.
+        # This ensures pre_call_handler enrichments (metadata) reach the websocket session.
+        call_data = {
+            "call_id": call_request.call_id,
+            "from": call_request.from_,
+            "to": call_request.to,
+            "agent_call_id": call_request.agent_call_id,
+            "agent": call_request.agent.model_dump(exclude_none=True),
+            "metadata": call_request.metadata or {},
+        }
+
+        response = {"websocket_url": websocket_url, "call_data": call_data}
         if config:
             response["config"] = config
         return response
@@ -229,14 +240,17 @@ class VoiceAgentApp:
                 logger.error("WebSocket disconnected before start message received")
                 return
             except (asyncio.TimeoutError, json.JSONDecodeError) as e:
-                logger.warning(f"No Start message received, falling back to URL params: {e}")
-                supports_unknown_messages = False
-            else:
-                try:
-                    call_request = _call_request_from_start_data(start_data)
-                except Exception as e:
-                    logger.warning(f"Invalid start message, falling back to URL params: {e}")
-                    supports_unknown_messages = False
+                logger.error(f"Failed to receive start message: {e}")
+                await websocket.send_json(ErrorOutput(content=f"Failed to receive start message: {e}").model_dump())
+                await websocket.close()
+                return
+            try:
+                call_request = _call_request_from_start_data(start_data)
+            except Exception as e:
+                logger.error(f"Invalid start message: {e}")
+                await websocket.send_json(ErrorOutput(content=f"Invalid start message: {e}").model_dump())
+                await websocket.close()
+                return
 
         if not supports_unknown_messages:
             # Legacy flow: call data comes from URL query params
