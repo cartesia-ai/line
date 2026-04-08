@@ -49,6 +49,10 @@ class LlmConfig:
     # Tool schema settings
     strict_tool_schemas: bool = _UNSET
 
+    # Inactivity timeout: ms to wait for user to start speaking after agent finishes.
+    # If exceeded, an InactivityTimeout event is fired. None = disabled.
+    inactivity_timeout_ms: Optional[int] = _UNSET
+
     @classmethod
     def from_call_request(
         cls,
@@ -135,6 +139,7 @@ _FIELD_DEFAULTS: Dict[str, Any] = {
     "timeout": None,
     "extra": dict,  # callable → invoked each time
     "strict_tool_schemas": True,
+    "inactivity_timeout_ms": None,
 }
 
 

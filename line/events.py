@@ -79,6 +79,13 @@ class AgentSendCustom(BaseModel):
     metadata: Dict[str, Any]
 
 
+class AgentUpdateInactivityTimeout(BaseModel):
+    """Update the inactivity timeout during a call. None disables it."""
+
+    type: Literal["agent_update_inactivity_timeout"] = "agent_update_inactivity_timeout"
+    timeout_ms: Optional[int] = None
+
+
 OutputEvent = Union[
     AgentSendText,
     AgentSendDtmf,
@@ -90,6 +97,7 @@ OutputEvent = Union[
     LogMessage,
     AgentUpdateCall,
     AgentSendCustom,
+    AgentUpdateInactivityTimeout,
 ]
 
 
@@ -133,6 +141,15 @@ class AgentHandedOff(BaseModel):
     """Event emitted when control is transferred to the tool target."""
 
     type: Literal["agent_handed_off"] = "agent_handed_off"
+    event_id: str = Field(default_factory=_generate_event_id)
+    history: Optional[List["InputEvent"]] = None
+
+
+class InactivityTimeout(BaseModel):
+    """Fired when user hasn't started speaking within the configured timeout after agent finished."""
+
+    type: Literal["inactivity_timeout"] = "inactivity_timeout"
+    timeout_ms: int  # The configured timeout that expired
     event_id: str = Field(default_factory=_generate_event_id)
     history: Optional[List["InputEvent"]] = None
 
@@ -215,6 +232,7 @@ InputEvent = Union[
     AgentDtmfSent,
     AgentTurnEnded,
     AgentHandedOff,
+    InactivityTimeout,
     CallEnded,
 ]
 
@@ -244,6 +262,7 @@ __all__ = [
     "LogMessage",
     "AgentUpdateCall",
     "AgentSendCustom",
+    "AgentUpdateInactivityTimeout",
     "OutputEvent",
     # Custom
     "CustomHistoryEntry",
@@ -259,6 +278,7 @@ __all__ = [
     "AgentDtmfSent",
     "AgentTurnEnded",
     "UserCustomSent",
+    "InactivityTimeout",
     "InputEvent",
     # History
     "HistoryEvent",

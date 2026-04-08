@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 import json
 import os
 import re
+import time
 import traceback
 from typing import Any, AsyncIterable, Awaitable, Callable, Dict, List, Optional, Tuple
 from urllib.parse import urlencode
@@ -62,8 +63,10 @@ from line.events import (
     AgentTurnEnded,
     AgentTurnStarted,
     AgentUpdateCall,
+    AgentUpdateInactivityTimeout,
     CallEnded,
     CallStarted,
+    InactivityTimeout,
     InputEvent,
     LogMessage,
     LogMetric,
@@ -89,6 +92,7 @@ class AgentConfig(BaseModel):
 
     system_prompt: Optional[str] = None  # System prompt to define the agent's role and behavior
     introduction: Optional[str] = None  # Introduction message for the agent to start the call with
+    inactivity_timeout_ms: Optional[int] = None  # Timeout (ms) after agent finishes speaking to wait for user
 
 
 class CallRequest(BaseModel):
@@ -247,7 +251,7 @@ class VoiceAgentApp:
         env = AgentEnv(loop)
         try:
             agent_spec = await self.get_agent(env, call_request)
-            runner = ConversationRunner(websocket, agent_spec, env)
+            runner = ConversationRunner(websocket, agent_spec, env, call_request)
         except Exception:
             error_msg = traceback.format_exc()
             error_string = f"Error in get_agent for {call_request.call_id}: {error_msg}"
@@ -277,7 +281,13 @@ class ConversationRunner:
     the websocket.
     """
 
-    def __init__(self, websocket: WebSocket, agent_spec: AgentSpec, env: AgentEnv):
+    def __init__(
+        self,
+        websocket: WebSocket,
+        agent_spec: AgentSpec,
+        env: AgentEnv,
+        call_request: Optional[CallRequest] = None,
+    ):
         """
         Initialize the ConversationRunner.
 
@@ -285,6 +295,7 @@ class ConversationRunner:
             websocket: The WebSocket connection.
             agent_spec: Agent or (Agent, run_filter, cancel_filter).
             env: Environment passed to the agent.
+            call_request: Optional CallRequest with agent configuration.
         """
         self.websocket = websocket
         self.env = env
@@ -295,6 +306,18 @@ class ConversationRunner:
 
         self.agent_callable, self.run_filter, self.cancel_filter = self._prepare_agent(agent_spec)
         self.agent_task: Optional[asyncio.Task] = None
+
+        # Inactivity timeout tracking
+        self.inactivity_timeout_ms: Optional[int] = (
+            call_request.agent.inactivity_timeout_ms if call_request else None
+        )
+        self._agent_turn_ended_time: Optional[float] = None
+        if self.inactivity_timeout_ms:
+            logger.info(f"Inactivity timeout enabled: {self.inactivity_timeout_ms}ms")
+
+    @property
+    def _is_agent_task_running(self) -> bool:
+        return self.agent_task is not None and not self.agent_task.done()
 
     @property
     def shutdown_event(self) -> asyncio.Event:
@@ -314,7 +337,7 @@ class ConversationRunner:
         """Extract agent callable and filters from agent_spec."""
 
         def default_run(ev: InputEvent) -> bool:
-            return isinstance(ev, (CallStarted, UserTurnEnded, CallEnded))
+            return isinstance(ev, (CallStarted, UserTurnEnded, InactivityTimeout, CallEnded))
 
         def default_cancel(ev: InputEvent) -> bool:
             return isinstance(ev, UserTurnStarted)
@@ -364,8 +387,36 @@ class ConversationRunner:
 
         while not self.shutdown_event.is_set():
             try:
-                # Receive message from WebSocket
-                message = await self.websocket.receive_json()
+                # Calculate timeout for receiving the next message
+                receive_timeout: Optional[float] = None
+                if self.inactivity_timeout_ms and self._agent_turn_ended_time:
+                    elapsed_ms = (time.time() - self._agent_turn_ended_time) * 1000
+                    remaining_ms = self.inactivity_timeout_ms - elapsed_ms
+                    if remaining_ms > 0:
+                        receive_timeout = remaining_ms / 1000.0
+                    elif not self._is_agent_task_running:
+                        # Timeout expired and agent is idle — fire
+                        await self._fire_inactivity_timeout()
+                        continue
+                    else:
+                        # Timeout expired but agent task still running (e.g. tool
+                        # executing) — poll again shortly to re-check
+                        receive_timeout = 0.5
+
+                # Receive message from WebSocket (with optional timeout)
+                try:
+                    if receive_timeout is not None:
+                        message = await asyncio.wait_for(
+                            self.websocket.receive_json(),
+                            timeout=receive_timeout,
+                        )
+                    else:
+                        message = await self.websocket.receive_json()
+                except asyncio.TimeoutError:
+                    if not self._is_agent_task_running:
+                        await self._fire_inactivity_timeout()
+                    continue
+
                 try:
                     input_msg = _input_message_adapter.validate_python(message)
                 except ValidationError:
@@ -379,6 +430,13 @@ class ConversationRunner:
                 ev, self.history = self._process_input_event(self.history, event)
                 if ev is None:
                     continue
+
+                # Track inactivity timeout state
+                if isinstance(ev, AgentTurnEnded):
+                    self._agent_turn_ended_time = time.time()
+                elif isinstance(ev, (UserTurnStarted, AgentTurnStarted)):
+                    self._agent_turn_ended_time = None  # Reset timer
+
                 await self._handle_event(TurnEnv(), ev)
 
             except WebSocketDisconnect:
@@ -418,6 +476,16 @@ class ConversationRunner:
         elif self.cancel_filter(event):
             await self._cancel_agent_task()
 
+    async def _fire_inactivity_timeout(self) -> None:
+        """Fire an InactivityTimeout event and reset the timer."""
+        if self.inactivity_timeout_ms is None:
+            return
+        logger.info(f"-> Inactivity timeout ({self.inactivity_timeout_ms}ms) fired")
+        timeout_event = InactivityTimeout(timeout_ms=self.inactivity_timeout_ms)
+        ev, self.history = self._process_input_event(self.history, timeout_event)
+        self._agent_turn_ended_time = None  # Reset timer
+        await self._handle_event(TurnEnv(), ev)
+
     async def _start_agent_task(self, turn_env: TurnEnv, event: InputEvent) -> None:
         """Start the agent async iterable for the given event."""
         await self._cancel_agent_task()
@@ -425,6 +493,16 @@ class ConversationRunner:
         async def runner():
             try:
                 async for output in self.agent_callable(turn_env, event):
+                    # Handle runner-internal events before mapping
+                    if isinstance(output, AgentUpdateInactivityTimeout):
+                        self.inactivity_timeout_ms = output.timeout_ms
+                        if output.timeout_ms is not None:
+                            logger.info(f"Inactivity timeout updated: {output.timeout_ms}ms")
+                        else:
+                            logger.info("Inactivity timeout disabled")
+                            self._agent_turn_ended_time = None
+                        continue
+
                     if isinstance(output, AgentSendText):
                         self.emitted_agent_text.append((output.text, output.interruptible))
                     mapped = self._map_output_event(output)
@@ -587,6 +665,9 @@ class ConversationRunner:
         elif isinstance(processed_event, UserCustomSent):
             event = UserCustomSent(history=processed_history, **base_data)
             logger.debug(f"-> 📦 Custom event with metadata: {event.metadata}")
+        elif isinstance(processed_event, InactivityTimeout):
+            event = InactivityTimeout(history=processed_history, **base_data)
+            logger.info(f"-> ⏱️ Inactivity timeout ({event.timeout_ms}ms)")
         else:
             raise ValueError(f"Unknown event type: {type(processed_event).__name__}")
 

@@ -36,6 +36,7 @@ from line.events import (
     CallStarted,
     CustomHistoryEntry,
     HistoryEvent,
+    InactivityTimeout,
     InputEvent,
     LogMetric,
     OutputEvent,
@@ -590,6 +591,8 @@ class LlmAgent:
                             name=event.tool_name,
                         )
                     )
+            elif isinstance(event, InactivityTimeout):
+                messages.append(Message(role="system", content="[The user has not responded.]"))
             elif isinstance(event, AgentToolReturned):
                 messages.append(
                     Message(
