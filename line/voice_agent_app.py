@@ -178,13 +178,14 @@ class VoiceAgentApp:
         )
 
         config = None
+        metadata = call_request.metadata.copy()
         if self.pre_call_handler:
             try:
                 result = await self.pre_call_handler(call_request)
                 if result is None:
                     raise HTTPException(status_code=403, detail="Call rejected")
 
-                call_request.metadata.update(result.metadata)
+                metadata.update(result.metadata)
                 config = result.config
 
             except HTTPException:
@@ -196,6 +197,7 @@ class VoiceAgentApp:
         response = {
             "websocket_url": self.ws_route,
             "cartesia_version": CARTESIA_VERSION,
+            "metadata": metadata,
         }
         if config:
             response["config"] = config
@@ -260,7 +262,7 @@ def _call_request_from_start_data(data: dict) -> CallRequest:
         to=start_msg.to,
         agent_call_id=start_msg.agent_call_id,
         agent=AgentConfig(**start_msg.agent),
-        metadata=start_msg.metadata or {},
+        metadata=start_msg.metadata,
     )
 
 
