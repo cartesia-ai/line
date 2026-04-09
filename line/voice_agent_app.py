@@ -18,7 +18,6 @@ import os
 import re
 import traceback
 from typing import Any, AsyncIterable, Awaitable, Callable, Dict, List, Optional, Tuple
-from urllib.parse import urlencode
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
@@ -121,7 +120,7 @@ class AgentEnv:
         self.loop = loop
 
 
-SUPPORT_UNKNOWN_MESSAGES_KEY = "cartesia_version"
+CARTESIA_VERSION = "2026-04-03"
 
 load_dotenv()
 
@@ -157,10 +156,13 @@ class VoiceAgentApp:
         )
         ws_adder(self.ws_route, self.websocket_endpoint)
 
-    # Agent code that sets cartesia_version in the websocket URL can handle
-    # unknown message types (e.g. start messages, future new message types).
-    def _supports_unknown_messages(self, query_params: Dict[str, str]) -> bool:
-        return SUPPORT_UNKNOWN_MESSAGES_KEY in query_params
+    @staticmethod
+    async def _close_with_error(websocket: WebSocket, error: str):
+        try:
+            await websocket.send_json(ErrorOutput(content=error).model_dump())
+        except Exception:
+            pass
+        await websocket.close()
 
     async def create_chat_session(self, request: Request) -> dict:
         """Create a new chat session and return the websocket URL."""
@@ -191,14 +193,10 @@ class VoiceAgentApp:
                 logger.error(f"Error in pre_call_handler: {str(e)}")
                 raise HTTPException(status_code=500, detail="Server error in call processing") from e
 
-        url_params = {
-            SUPPORT_UNKNOWN_MESSAGES_KEY: "2026-04-03",
+        response = {
+            "websocket_url": self.ws_route,
+            "cartesia_version": CARTESIA_VERSION,
         }
-
-        query_string = urlencode(url_params)
-        websocket_url = f"{self.ws_route}?{query_string}"
-
-        response = {"websocket_url": websocket_url}
         if config:
             response["config"] = config
         return response
@@ -218,52 +216,16 @@ class VoiceAgentApp:
         logger.info("Client connected")
         logger.info(f"Line SDK version: {_pkg_version('cartesia-line')}")
 
-        query_params = dict(websocket.query_params)
-        supports_unknown_messages = self._supports_unknown_messages(query_params)
-
-        if supports_unknown_messages:
-            # New flow: call data arrives via a start message over the websocket
-            try:
-                start_data = await asyncio.wait_for(websocket.receive_json(), timeout=1.0)
-            except WebSocketDisconnect:
-                logger.error("WebSocket disconnected before start message received")
-                return
-            except (asyncio.TimeoutError, json.JSONDecodeError) as e:
-                logger.warning(f"No Start message received, falling back to URL params: {e}")
-                supports_unknown_messages = False
-            else:
-                try:
-                    call_request = _call_request_from_start_data(start_data)
-                except Exception as e:
-                    logger.warning(f"Invalid start message, falling back to URL params: {e}")
-                    supports_unknown_messages = False
-
-        if not supports_unknown_messages:
-            # Legacy flow: call data comes from URL query params
-            metadata = {}
-            if "metadata" in query_params:
-                try:
-                    metadata = json.loads(query_params["metadata"])
-                except (json.JSONDecodeError, TypeError):
-                    logger.warning(f"Invalid metadata JSON: {query_params['metadata']}")
-                    metadata = {}
-
-            agent_data = {}
-            if "agent" in query_params:
-                try:
-                    agent_data = json.loads(query_params["agent"])
-                except (json.JSONDecodeError, TypeError):
-                    logger.warning(f"Invalid agent JSON: {query_params['agent']}")
-                    agent_data = {}
-
-            call_request = CallRequest(
-                call_id=query_params.get("call_id", "unknown"),
-                from_=query_params.get("from", "unknown"),
-                to=query_params.get("to", "unknown"),
-                agent_call_id=query_params.get("agent_call_id", "unknown"),
-                agent=AgentConfig(**agent_data),
-                metadata=metadata,
-            )
+        try:
+            start_data = await websocket.receive_json()
+            call_request = _call_request_from_start_data(start_data)
+        except WebSocketDisconnect:
+            logger.error("WebSocket disconnected before start message received")
+            return
+        except Exception as e:
+            logger.error(f"Failed to receive/parse start message: {e}")
+            await self._close_with_error(websocket, f"Failed to receive/parse start message: {e}")
+            return
 
         runner: Optional[ConversationRunner] = None
         # Create the AgentEnv with the current event loop
@@ -276,8 +238,7 @@ class VoiceAgentApp:
             error_msg = traceback.format_exc()
             error_string = f"Error in get_agent for {call_request.call_id}: {error_msg}"
             logger.error(error_string)
-            await websocket.send_json(ErrorOutput(content=error_string).model_dump())
-            await websocket.close()
+            await self._close_with_error(websocket, error_string)
             return
 
         # Create and run the conversation runner
