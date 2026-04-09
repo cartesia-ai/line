@@ -39,6 +39,7 @@ from line.events import (
     InputEvent,
     LogMetric,
     OutputEvent,
+    UserCustomSent,
     UserTextSent,
 )
 from line.llm_agent.background_queue import BackgroundQueue
@@ -549,6 +550,12 @@ class LlmAgent:
             # Handle InputEvent types
             if isinstance(event, UserTextSent):
                 messages.append(Message(role="user", content=event.content or ""))
+            elif isinstance(event, UserCustomSent):
+                # Custom events from the client carry metadata that may be useful
+                # as LLM context (e.g., "user purchased diamonds", "upsell dismissed").
+                meta = event.metadata or {}
+                content = json.dumps(meta) if meta else "[custom event]"
+                messages.append(Message(role="system", content=f"[Client event: {content}]"))
             elif isinstance(event, AgentTextSent):
                 messages.append(Message(role="assistant", content=event.content or ""))
             # Handle CustomHistoryEntry (injected history entries)
