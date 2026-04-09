@@ -338,8 +338,10 @@ class _WsEventStream:
                 # --- Error (protocol-level) ---
                 elif event_type == "error":
                     self.done = True
-                    error_msg = (event.get("error") or {}).get("message", "unknown error")
-                    raise RuntimeError(f"OpenAI WebSocket error: {error_msg}")
+                    error = event.get("error") or {}
+                    raise RuntimeError(
+                        f"OpenAI API error ({error.get('code', '')}): {error.get('message', 'unknown error')}"
+                    )
 
                 # --- Safely ignorable events ---
                 elif event_type in _IGNORED_EVENTS:
