@@ -18,21 +18,29 @@ from pydantic import BaseModel
 class TranscriptionInput(BaseModel):
     content: str
     type: Literal["message"] = "message"
+    event_id: Union[int, str, None] = None
+    turn_id: Union[int, str, None] = None
 
 
 class DTMFInput(BaseModel):
     button: str
     type: Literal["dtmf"] = "dtmf"
+    event_id: Union[int, str, None] = None
+    turn_id: Union[int, str, None] = None
 
 
 class UserStateInput(BaseModel):
     value: str
     type: Literal["user_state"] = "user_state"
+    event_id: Union[int, str, None] = None
+    turn_id: Union[int, str, None] = None
 
 
 class AgentStateInput(BaseModel):
     value: str
     type: Literal["agent_state"] = "agent_state"
+    event_id: Union[int, str, None] = None
+    turn_id: Union[int, str, None] = None
 
 
 class ValidationErrorInput(BaseModel):
@@ -44,11 +52,15 @@ class ValidationErrorInput(BaseModel):
 class AgentSpeechInput(BaseModel):
     content: str
     type: Literal["agent_speech"] = "agent_speech"
+    event_id: Union[int, str, None] = None
+    turn_id: Union[int, str, None] = None
 
 
 class CustomInput(BaseModel):
     metadata: Dict[str, object]
     type: Literal["custom"] = "custom"
+    event_id: Union[int, str, None] = None
+    turn_id: Union[int, str, None] = None
 
 
 InputMessage = Union[
@@ -73,12 +85,14 @@ class ErrorOutput(BaseModel):
 class DTMFOutput(BaseModel):
     type: Literal["dtmf"] = "dtmf"
     button: str
+    responding_to: Optional[str] = None
 
 
 class MessageOutput(BaseModel):
     type: Literal["message"] = "message"
     content: str
     interruptible: bool = True
+    responding_to: Optional[str] = None
 
 
 class ToolCallOutput(BaseModel):
@@ -87,15 +101,18 @@ class ToolCallOutput(BaseModel):
     arguments: Dict[str, object]
     result: Optional[str] = None
     id: Optional[str] = None
+    responding_to: Optional[str] = None
 
 
 class TransferOutput(BaseModel):
     type: Literal["transfer"] = "transfer"
     target_phone_number: str
+    responding_to: Optional[str] = None
 
 
 class EndCallOutput(BaseModel):
     type: Literal["end_call"] = "end_call"
+    responding_to: Optional[str] = None
 
 
 class LogEventOutput(BaseModel):
@@ -125,11 +142,13 @@ class ConfigOutput(BaseModel):
     tts: Optional[TTSConfig] = None
     stt: Optional[STTConfig] = None
     language: Optional[str] = None
+    responding_to: Optional[str] = None
 
 
 class CustomOutput(BaseModel):
     type: Literal["custom"] = "custom"
     metadata: Dict[str, object]
+    responding_to: Optional[str] = None
 
 
 OutputMessage = Union[

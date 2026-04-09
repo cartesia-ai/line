@@ -21,6 +21,7 @@ from typing import (
     Tuple,
     TypeVar,
     Union,
+    get_args,
 )
 
 from loguru import logger
@@ -39,6 +40,7 @@ from line.events import (
     InputEvent,
     LogMetric,
     OutputEvent,
+    RespondingToEvent,
     UserTextSent,
 )
 from line.llm_agent.background_queue import BackgroundQueue
@@ -177,6 +179,7 @@ class LlmAgent:
         # The triggering event is the last element in event.history
         current_event_id = event.history[-1].event_id if event.history else ""
         self.history._set_input(event.history or [], current_event_id)
+        responding_to_id = current_event_id or None
 
         # Compute effective config and tools for this #process invocation
         effective_config = _merge_configs(self._config, config) if config else self._config
@@ -186,7 +189,7 @@ class LlmAgent:
         if self._handoff_target is not None:
             async for output in self._handoff_target(env, event):
                 self.history._append_local(output)
-                yield output
+                yield _set_responding_to(output, responding_to_id)
             # Keep turn timing consistent across all process paths, including handoffs.
             yield LogMetric(name="agent_turn_ms", value=(time.perf_counter() - turn_start_time) * 1000)
             return
@@ -200,6 +203,8 @@ class LlmAgent:
                 output = AgentSendText(text=effective_config.introduction)
                 self.history._append_local(output)
                 self._introduction_sent = True
+
+                # Introduction is not responding to any event, so we don't set responding_to
                 yield output
             yield LogMetric(name="agent_turn_ms", value=(time.perf_counter() - turn_start_time) * 1000)
             try:
@@ -219,7 +224,7 @@ class LlmAgent:
         async for output in self._generate_response(
             env, event, effective_tools, effective_config, context=context, history=history
         ):
-            yield output
+            yield _set_responding_to(output, responding_to_id)
 
         yield LogMetric(name="agent_turn_ms", value=(time.perf_counter() - turn_start_time) * 1000)
 
@@ -765,3 +770,19 @@ def _construct_tool_events(
         result=result,
     )
     return called, returned
+
+
+def _set_responding_to(event: OutputEvent, event_id: Optional[str]) -> OutputEvent:
+    """Set responding_to on harness-facing events if not already set.
+
+    Called at the process() yield boundary so the harness knows which input event
+    triggered each output event. Skips events that already have responding_to set
+    (e.g., from a custom agent or handed-off agent that set it explicitly).
+    """
+    if (
+        event_id is not None
+        and isinstance(event, get_args(RespondingToEvent))
+        and event.responding_to is None
+    ):
+        event.responding_to = event_id
+    return event

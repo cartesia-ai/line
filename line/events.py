@@ -22,6 +22,7 @@ class AgentSendText(BaseModel):
     type: Literal["agent_send_text"] = "agent_send_text"
     text: str
     interruptible: bool = True
+    responding_to: Optional[str] = None
 
 
 class AgentToolCalled(BaseModel):
@@ -29,6 +30,7 @@ class AgentToolCalled(BaseModel):
     tool_call_id: str
     tool_name: str
     tool_args: Dict[str, Any] = Field(default_factory=dict)
+    responding_to: Optional[str] = None
 
 
 class AgentToolReturned(BaseModel):
@@ -41,16 +43,19 @@ class AgentToolReturned(BaseModel):
 
 class AgentEndCall(BaseModel):
     type: Literal["end_call"] = "end_call"
+    responding_to: Optional[str] = None
 
 
 class AgentTransferCall(BaseModel):
     type: Literal["agent_transfer_call"] = "agent_transfer_call"
     target_phone_number: str
+    responding_to: Optional[str] = None
 
 
 class AgentSendDtmf(BaseModel):
     type: Literal["agent_send_dtmf"] = "agent_send_dtmf"
     button: str
+    responding_to: Optional[str] = None
 
 
 class LogMetric(BaseModel):
@@ -72,12 +77,25 @@ class AgentUpdateCall(BaseModel):
     voice_id: Optional[str] = None
     pronunciation_dict_id: Optional[str] = None
     language: Optional[str] = None
+    responding_to: Optional[str] = None
 
 
 class AgentSendCustom(BaseModel):
     type: Literal["agent_send_custom"] = "agent_send_custom"
     metadata: Dict[str, Any]
+    responding_to: Optional[str] = None
 
+
+# OutputEvent types that carry a responding_to field (harness-facing action events).
+RespondingToEvent = Union[
+    AgentSendText,
+    AgentSendDtmf,
+    AgentEndCall,
+    AgentTransferCall,
+    AgentToolCalled,
+    AgentUpdateCall,
+    AgentSendCustom,
+]
 
 OutputEvent = Union[
     AgentSendText,
@@ -245,6 +263,7 @@ __all__ = [
     "AgentUpdateCall",
     "AgentSendCustom",
     "OutputEvent",
+    "RespondingToEvent",
     # Custom
     "CustomHistoryEntry",
     # Input
