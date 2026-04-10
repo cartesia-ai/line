@@ -12,12 +12,12 @@ ConversationRunner - Manages the websocket loop for a single conversation,
 
 import asyncio
 from datetime import datetime, timezone
+from importlib.metadata import version as _pkg_version
 import json
 import os
 import re
 import traceback
 from typing import Any, AsyncIterable, Awaitable, Callable, Dict, List, Optional, Tuple
-from urllib.parse import urlencode
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
@@ -40,6 +40,7 @@ from line._harness_types import (
     LogMetricOutput,
     MessageOutput,
     OutputMessage,
+    StartInput,
     STTConfig,
     ToolCallOutput,
     TranscriptionInput,
@@ -119,6 +120,8 @@ class AgentEnv:
         self.loop = loop
 
 
+CARTESIA_VERSION = "2026-04-03"
+
 load_dotenv()
 
 
@@ -153,6 +156,14 @@ class VoiceAgentApp:
         )
         ws_adder(self.ws_route, self.websocket_endpoint)
 
+    @staticmethod
+    async def _close_with_error(websocket: WebSocket, error: str):
+        try:
+            await websocket.send_json(ErrorOutput(content=error).model_dump())
+        except Exception:
+            pass
+        await websocket.close()
+
     async def create_chat_session(self, request: Request) -> dict:
         """Create a new chat session and return the websocket URL."""
         body = await request.json()
@@ -167,13 +178,14 @@ class VoiceAgentApp:
         )
 
         config = None
+        metadata = call_request.metadata.copy()
         if self.pre_call_handler:
             try:
                 result = await self.pre_call_handler(call_request)
                 if result is None:
                     raise HTTPException(status_code=403, detail="Call rejected")
 
-                call_request.metadata.update(result.metadata)
+                metadata.update(result.metadata)
                 config = result.config
 
             except HTTPException:
@@ -182,20 +194,11 @@ class VoiceAgentApp:
                 logger.error(f"Error in pre_call_handler: {str(e)}")
                 raise HTTPException(status_code=500, detail="Server error in call processing") from e
 
-        url_params = {
-            "call_id": call_request.call_id,
-            "from": call_request.from_,
-            "to": call_request.to,
-            "agent_call_id": call_request.agent_call_id,
-            "agent": json.dumps(call_request.agent.model_dump()),
-            "metadata": json.dumps(call_request.metadata),
-            "cartesia_version": "2026-04-03",
+        response = {
+            "websocket_url": self.ws_route,
+            "cartesia_version": CARTESIA_VERSION,
+            "metadata": metadata,
         }
-
-        query_string = urlencode(url_params)
-        websocket_url = f"{self.ws_route}?{query_string}"
-
-        response = {"websocket_url": websocket_url}
         if config:
             response["config"] = config
         return response
@@ -213,33 +216,18 @@ class VoiceAgentApp:
         """Websocket endpoint that manages the complete call lifecycle."""
         await websocket.accept()
         logger.info("Client connected")
+        logger.info(f"Line SDK version: {_pkg_version('cartesia-line')}")
 
-        query_params = dict(websocket.query_params)
-
-        metadata = {}
-        if "metadata" in query_params:
-            try:
-                metadata = json.loads(query_params["metadata"])
-            except (json.JSONDecodeError, TypeError):
-                logger.warning(f"Invalid metadata JSON: {query_params['metadata']}")
-                metadata = {}
-
-        agent_data = {}
-        if "agent" in query_params:
-            try:
-                agent_data = json.loads(query_params["agent"])
-            except (json.JSONDecodeError, TypeError):
-                logger.warning(f"Invalid agent JSON: {query_params['agent']}")
-                agent_data = {}
-
-        call_request = CallRequest(
-            call_id=query_params.get("call_id", "unknown"),
-            from_=query_params.get("from", "unknown"),
-            to=query_params.get("to", "unknown"),
-            agent_call_id=query_params.get("agent_call_id", "unknown"),
-            agent=AgentConfig(**agent_data),
-            metadata=metadata,
-        )
+        try:
+            start_data = await websocket.receive_json()
+            call_request = _call_request_from_start_data(start_data)
+        except WebSocketDisconnect:
+            logger.error("WebSocket disconnected before start message received")
+            return
+        except Exception as e:
+            logger.error(f"Failed to receive/parse start message: {e}")
+            await self._close_with_error(websocket, f"Failed to receive/parse start message: {e}")
+            return
 
         runner: Optional[ConversationRunner] = None
         # Create the AgentEnv with the current event loop
@@ -252,8 +240,7 @@ class VoiceAgentApp:
             error_msg = traceback.format_exc()
             error_string = f"Error in get_agent for {call_request.call_id}: {error_msg}"
             logger.error(error_string)
-            await websocket.send_json(ErrorOutput(content=error_string).model_dump())
-            await websocket.close()
+            await self._close_with_error(websocket, error_string)
             return
 
         # Create and run the conversation runner
@@ -264,6 +251,19 @@ class VoiceAgentApp:
         """Run the voice agent server."""
         port = port or int(os.getenv("PORT", 8000))
         uvicorn.run(self.fastapi_app, host=host, port=port)
+
+
+def _call_request_from_start_data(data: dict) -> CallRequest:
+    """Parse a start message dict into a CallRequest."""
+    start_msg = StartInput(**data)
+    return CallRequest(
+        call_id=start_msg.call_id,
+        from_=start_msg.from_,
+        to=start_msg.to,
+        agent_call_id=start_msg.agent_call_id,
+        agent=AgentConfig(**start_msg.agent),
+        metadata=start_msg.metadata,
+    )
 
 
 _input_message_adapter = TypeAdapter(InputMessage, config=ConfigDict(extra="ignore"))
