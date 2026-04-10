@@ -477,7 +477,7 @@ class ConversationRunner:
         """
         # Use harness-provided event_id if available, otherwise fall back to auto-generated UUID
         harness_id = getattr(message, "event_id", None)
-        event_id_kwargs = {"event_id": str(harness_id)} if harness_id is not None else {}
+        event_id_kwargs = {"event_id": harness_id} if harness_id is not None else {}
 
         if isinstance(message, UserStateInput):
             if message.value == UserState.SPEAKING:
