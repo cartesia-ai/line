@@ -475,9 +475,7 @@ class ConversationRunner:
         When the harness provides an event_id, it is used as the framework event_id
         so the agent can reference it in responding_to.
         """
-        # Use harness-provided event_id if available, otherwise fall back to auto-generated UUID
-        harness_id = message.model_dump().get("event_id", None)
-        event_id_kwargs = {"event_id": harness_id} if harness_id is not None else {}
+        event_id_kwargs = {"event_id": message.event_id} if message.event_id is not None else {}
 
         if isinstance(message, UserStateInput):
             if message.value == UserState.SPEAKING:
