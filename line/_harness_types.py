@@ -43,6 +43,7 @@ class ValidationErrorInput(BaseModel):
     error_message: str
     error_type: str
     type: Literal["validation_error"] = "validation_error"
+    event_id: Optional[str] = None
 
 
 class AgentSpeechInput(BaseModel):
