@@ -177,7 +177,6 @@ class LlmAgent:
         # The triggering event is the last element in event.history
         current_event_id = event.history[-1].event_id if event.history else ""
         self.history._set_input(event.history or [], current_event_id)
-        responding_to_id = current_event_id or None
 
         # Compute effective config and tools for this #process invocation
         effective_config = _merge_configs(self._config, config) if config else self._config
@@ -187,7 +186,7 @@ class LlmAgent:
         if self._handoff_target is not None:
             async for output in self._handoff_target(env, event):
                 self.history._append_local(output)
-                yield _set_responding_to(output, responding_to_id)
+                yield _set_responding_to(output, event.event_id)
             # Keep turn timing consistent across all process paths, including handoffs.
             yield LogMetric(name="agent_turn_ms", value=(time.perf_counter() - turn_start_time) * 1000)
             return
@@ -202,7 +201,7 @@ class LlmAgent:
                 self.history._append_local(output)
                 self._introduction_sent = True
 
-                yield _set_responding_to(output, responding_to_id)
+                yield _set_responding_to(output, event.event_id)
             yield LogMetric(name="agent_turn_ms", value=(time.perf_counter() - turn_start_time) * 1000)
             try:
                 await warmup_task
@@ -221,7 +220,7 @@ class LlmAgent:
         async for output in self._generate_response(
             env, event, effective_tools, effective_config, context=context, history=history
         ):
-            yield _set_responding_to(output, responding_to_id)
+            yield _set_responding_to(output, event.event_id)
 
         yield LogMetric(name="agent_turn_ms", value=(time.perf_counter() - turn_start_time) * 1000)
 
@@ -777,6 +776,6 @@ def _set_responding_to(event: OutputEvent, event_id: Optional[str]) -> OutputEve
     responding_to is left unset. Skips events that already have responding_to set
     (e.g., from a custom agent or handed-off agent that set it explicitly).
     """
-    if event_id is not None and event.responding_to is None:
+    if event_id and event.responding_to is None:
         event.responding_to = event_id
     return event

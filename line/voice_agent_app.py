@@ -476,7 +476,7 @@ class ConversationRunner:
         so the agent can reference it in responding_to.
         """
         # Use harness-provided event_id if available, otherwise fall back to auto-generated UUID
-        harness_id = getattr(message, "event_id", None)
+        harness_id = message.model_dump().get("event_id", None)
         event_id_kwargs = {"event_id": harness_id} if harness_id is not None else {}
 
         if isinstance(message, UserStateInput):
