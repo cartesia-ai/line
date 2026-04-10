@@ -186,7 +186,7 @@ class LlmAgent:
         if self._handoff_target is not None:
             async for output in self._handoff_target(env, event):
                 self.history._append_local(output)
-                yield output
+                yield _set_responding_to(output, event.event_id)
             # Keep turn timing consistent across all process paths, including handoffs.
             yield LogMetric(name="agent_turn_ms", value=(time.perf_counter() - turn_start_time) * 1000)
             return
@@ -200,7 +200,8 @@ class LlmAgent:
                 output = AgentSendText(text=effective_config.introduction)
                 self.history._append_local(output)
                 self._introduction_sent = True
-                yield output
+
+                yield _set_responding_to(output, event.event_id)
             yield LogMetric(name="agent_turn_ms", value=(time.perf_counter() - turn_start_time) * 1000)
             try:
                 await warmup_task
@@ -219,7 +220,7 @@ class LlmAgent:
         async for output in self._generate_response(
             env, event, effective_tools, effective_config, context=context, history=history
         ):
-            yield output
+            yield _set_responding_to(output, event.event_id)
 
         yield LogMetric(name="agent_turn_ms", value=(time.perf_counter() - turn_start_time) * 1000)
 
@@ -765,3 +766,16 @@ def _construct_tool_events(
         result=result,
     )
     return called, returned
+
+
+def _set_responding_to(event: OutputEvent, event_id: str) -> OutputEvent:
+    """Set responding_to on harness-facing events if not already set.
+
+    Called at the process() yield boundary so the harness knows which input event
+    triggered each output event. When event_id is empty string (e.g., no history available),
+    responding_to is left unset. Skips events that already have responding_to set
+    (e.g., from a custom agent or handed-off agent that set it explicitly).
+    """
+    if event_id and event.responding_to is None:
+        event.responding_to = event_id
+    return event

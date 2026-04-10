@@ -422,9 +422,15 @@ class ConversationRunner:
         """Start the agent async iterable for the given event."""
         await self._cancel_agent_task()
 
+        # Use the triggering event's event_id for setting responding_to
+        responding_to_id = event.event_id
+
         async def runner():
             try:
                 async for output in self.agent_callable(turn_env, event):
+                    # Set responding_to at the harness boundary (outermost layer)
+                    if output.responding_to is None:
+                        output.responding_to = responding_to_id
                     if isinstance(output, AgentSendText):
                         self.emitted_agent_text.append((output.text, output.interruptible))
                     mapped = self._map_output_event(output)
@@ -464,40 +470,46 @@ class ConversationRunner:
 
     ######### Event Parsing Methods #########
     def _convert_input_message(self, message: InputMessage) -> Optional[InputEvent]:
-        """Convert an InputMessage to an InputEvent (with history=None)."""
+        """Convert an InputMessage to an InputEvent (with history=None).
+
+        When the harness provides an event_id, it is used as the framework event_id
+        so the agent can reference it in responding_to.
+        """
+        event_id_kwargs = {"event_id": message.event_id} if message.event_id is not None else {}
+
         if isinstance(message, UserStateInput):
             if message.value == UserState.SPEAKING:
-                return UserTurnStarted()
+                return UserTurnStarted(**event_id_kwargs)
             elif message.value == UserState.IDLE:
                 content = self._turn_content(
                     self.history,
                     UserTurnStarted,
                     (UserTextSent, UserDtmfSent),
                 )
-                return UserTurnEnded(content=content)
+                return UserTurnEnded(content=content, **event_id_kwargs)
 
         elif isinstance(message, TranscriptionInput):
-            return UserTextSent(content=message.content)
+            return UserTextSent(content=message.content, **event_id_kwargs)
 
         elif isinstance(message, AgentStateInput):
             if message.value == UserState.SPEAKING:
-                return AgentTurnStarted()
+                return AgentTurnStarted(**event_id_kwargs)
             elif message.value == UserState.IDLE:
                 content = self._turn_content(
                     self.history,
                     AgentTurnStarted,
                     (AgentTextSent, AgentDtmfSent),
                 )
-                return AgentTurnEnded(content=content)
+                return AgentTurnEnded(content=content, **event_id_kwargs)
 
         elif isinstance(message, AgentSpeechInput):
-            return AgentTextSent(content=message.content)
+            return AgentTextSent(content=message.content, **event_id_kwargs)
 
         elif isinstance(message, DTMFInput):
-            return UserDtmfSent(button=message.button)
+            return UserDtmfSent(button=message.button, **event_id_kwargs)
 
         elif isinstance(message, CustomInput):
-            return UserCustomSent(metadata=message.metadata)
+            return UserCustomSent(metadata=message.metadata, **event_id_kwargs)
 
         elif isinstance(message, ValidationErrorInput):
             # TODO: parse to a real event if we want to expose validation errors to the agent; for now just
@@ -628,19 +640,23 @@ class ConversationRunner:
                 logger.info(f'<- 🤖🗣️ Agent said: "{event.text}"')
             else:
                 logger.info(f'<- 🤖🔒 Agent said (uninterruptible): "{event.text}"')
-            return MessageOutput(content=event.text, interruptible=event.interruptible)
+            return MessageOutput(
+                content=event.text, interruptible=event.interruptible, responding_to=event.responding_to
+            )
         if isinstance(event, AgentSendDtmf):
             logger.info(f"<- 🤖🔔 Agent DTMF sent: {event.button}")
-            return DTMFOutput(button=event.button)
+            return DTMFOutput(button=event.button, responding_to=event.responding_to)
         if isinstance(event, AgentEndCall):
             logger.info("<- 📞 End call")
-            return EndCallOutput()
+            return EndCallOutput(responding_to=event.responding_to)
         if isinstance(event, AgentTransferCall):
             logger.info(f"<- 📱 Transfer to: {event.target_phone_number}")
-            return TransferOutput(target_phone_number=event.target_phone_number)
+            return TransferOutput(
+                target_phone_number=event.target_phone_number, responding_to=event.responding_to
+            )
         if isinstance(event, LogMetric):
             logger.debug(f"<- 📈 Log metric: {event.name}={event.value}")
-            return LogMetricOutput(name=event.name, value=event.value)
+            return LogMetricOutput(name=event.name, value=event.value, responding_to=event.responding_to)
         if isinstance(event, LogMessage):
             logger.debug(f"<- 🪵 Log message: {event.name} [{event.level}] {event.message}")
             metadata = {
@@ -648,10 +664,14 @@ class ConversationRunner:
                 "message": event.message,
                 "metadata": self._truncate_dict_for_ws(event.metadata),
             }
-            return LogEventOutput(event=event.name, metadata=metadata)
+            return LogEventOutput(event=event.name, metadata=metadata, responding_to=event.responding_to)
         if isinstance(event, AgentToolCalled):
             logger.info(f"<- 🔧 Tool called: {event.tool_name}({event.tool_args})")
-            return ToolCallOutput(name=event.tool_name, arguments=self._truncate_dict_for_ws(event.tool_args))
+            return ToolCallOutput(
+                name=event.tool_name,
+                arguments=self._truncate_dict_for_ws(event.tool_args),
+                responding_to=event.responding_to,
+            )
         if isinstance(event, AgentToolReturned):
             logger.info(f"<- 🔧 Tool returned: {event.tool_name}({event.tool_args}) -> {event.result}")
             result_str = self._truncate_for_ws(event.result) if event.result is not None else None
@@ -659,6 +679,7 @@ class ConversationRunner:
                 name=event.tool_name,
                 arguments=self._truncate_dict_for_ws(event.tool_args),
                 result=result_str,
+                responding_to=event.responding_to,
             )
         if isinstance(event, AgentUpdateCall):
             # "multilingual" is a special sentinel: STT gets None (auto-detect),
@@ -679,10 +700,11 @@ class ConversationRunner:
                 ),
                 stt=STTConfig(language=effective_language) if event.language is not None else None,
                 language=effective_language,
+                responding_to=event.responding_to,
             )
         if isinstance(event, AgentSendCustom):
             logger.debug(f"<- 📦 Custom event with metadata: {event.metadata}")
-            return CustomOutput(metadata=event.metadata)
+            return CustomOutput(metadata=event.metadata, responding_to=event.responding_to)
 
         return ErrorOutput(content=f"Unhandled output event type: {type(event).__name__}")
 
