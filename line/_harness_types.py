@@ -119,12 +119,14 @@ class LogEventOutput(BaseModel):
     type: Literal["log_event"] = "log_event"
     event: str
     metadata: Optional[Dict[str, object]] = None
+    responding_to: Optional[str] = None
 
 
 class LogMetricOutput(BaseModel):
     type: Literal["log_metric"] = "log_metric"
     name: str
     value: object
+    responding_to: Optional[str] = None
 
 
 class TTSConfig(BaseModel):

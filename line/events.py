@@ -39,6 +39,7 @@ class AgentToolReturned(BaseModel):
     tool_name: str
     tool_args: Dict[str, Any] = Field(default_factory=dict)
     result: Any = None
+    responding_to: Optional[str] = None
 
 
 class AgentEndCall(BaseModel):
@@ -62,6 +63,7 @@ class LogMetric(BaseModel):
     type: Literal["log_metric"] = "log_metric"
     name: str
     value: Any
+    responding_to: Optional[str] = None
 
 
 class LogMessage(BaseModel):
@@ -70,6 +72,7 @@ class LogMessage(BaseModel):
     level: Literal["info", "error"]
     message: str
     metadata: Optional[Dict[str, Any]] = None
+    responding_to: Optional[str] = None
 
 
 class AgentUpdateCall(BaseModel):
@@ -85,17 +88,6 @@ class AgentSendCustom(BaseModel):
     metadata: Dict[str, Any]
     responding_to: Optional[str] = None
 
-
-# OutputEvent types that carry a responding_to field (harness-facing action events).
-RespondingToEvent = Union[
-    AgentSendText,
-    AgentSendDtmf,
-    AgentEndCall,
-    AgentTransferCall,
-    AgentToolCalled,
-    AgentUpdateCall,
-    AgentSendCustom,
-]
 
 OutputEvent = Union[
     AgentSendText,
@@ -263,7 +255,6 @@ __all__ = [
     "AgentUpdateCall",
     "AgentSendCustom",
     "OutputEvent",
-    "RespondingToEvent",
     # Custom
     "CustomHistoryEntry",
     # Input

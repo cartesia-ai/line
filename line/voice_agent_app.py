@@ -16,7 +16,7 @@ import json
 import os
 import re
 import traceback
-from typing import Any, AsyncIterable, Awaitable, Callable, Dict, List, Optional, Tuple, get_args
+from typing import Any, AsyncIterable, Awaitable, Callable, Dict, List, Optional, Tuple
 from urllib.parse import urlencode
 
 from dotenv import load_dotenv
@@ -68,7 +68,6 @@ from line.events import (
     LogMessage,
     LogMetric,
     OutputEvent,
-    RespondingToEvent,
     UserCustomSent,
     UserDtmfSent,
     UserTextSent,
@@ -423,14 +422,14 @@ class ConversationRunner:
         """Start the agent async iterable for the given event."""
         await self._cancel_agent_task()
 
-        # Use the triggering event's event_id for responding_to stamping
+        # Use the triggering event's event_id for setting responding_to
         responding_to_id = event.event_id
 
         async def runner():
             try:
                 async for output in self.agent_callable(turn_env, event):
                     # Set responding_to at the harness boundary (outermost layer)
-                    if isinstance(output, get_args(RespondingToEvent)) and output.responding_to is None:
+                    if output.responding_to is None:
                         output.responding_to = responding_to_id
                     if isinstance(output, AgentSendText):
                         self.emitted_agent_text.append((output.text, output.interruptible))
@@ -440,10 +439,7 @@ class ConversationRunner:
                         break
                     if mapped is None:
                         continue
-                    dump = mapped.model_dump()
-                    if dump.get("responding_to") is None:
-                        dump.pop("responding_to", None)
-                    await self.websocket.send_json(dump)
+                    await self.websocket.send_json(mapped.model_dump())
             except asyncio.CancelledError:
                 pass
             except Exception:
@@ -662,7 +658,7 @@ class ConversationRunner:
             )
         if isinstance(event, LogMetric):
             logger.debug(f"<- 📈 Log metric: {event.name}={event.value}")
-            return LogMetricOutput(name=event.name, value=event.value)
+            return LogMetricOutput(name=event.name, value=event.value, responding_to=event.responding_to)
         if isinstance(event, LogMessage):
             logger.debug(f"<- 🪵 Log message: {event.name} [{event.level}] {event.message}")
             metadata = {
@@ -670,7 +666,7 @@ class ConversationRunner:
                 "message": event.message,
                 "metadata": self._truncate_dict_for_ws(event.metadata),
             }
-            return LogEventOutput(event=event.name, metadata=metadata)
+            return LogEventOutput(event=event.name, metadata=metadata, responding_to=event.responding_to)
         if isinstance(event, AgentToolCalled):
             logger.info(f"<- 🔧 Tool called: {event.tool_name}({event.tool_args})")
             return ToolCallOutput(
@@ -685,6 +681,7 @@ class ConversationRunner:
                 name=event.tool_name,
                 arguments=self._truncate_dict_for_ws(event.tool_args),
                 result=result_str,
+                responding_to=event.responding_to,
             )
         if isinstance(event, AgentUpdateCall):
             # "multilingual" is a special sentinel: STT gets None (auto-detect),
