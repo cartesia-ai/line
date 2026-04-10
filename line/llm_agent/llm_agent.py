@@ -768,11 +768,11 @@ def _construct_tool_events(
     return called, returned
 
 
-def _set_responding_to(event: OutputEvent, event_id: Optional[str]) -> OutputEvent:
+def _set_responding_to(event: OutputEvent, event_id: str) -> OutputEvent:
     """Set responding_to on harness-facing events if not already set.
 
     Called at the process() yield boundary so the harness knows which input event
-    triggered each output event. When event_id is None (e.g., no history available),
+    triggered each output event. When event_id is empty string (e.g., no history available),
     responding_to is left unset. Skips events that already have responding_to set
     (e.g., from a custom agent or handed-off agent that set it explicitly).
     """
