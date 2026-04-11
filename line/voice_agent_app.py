@@ -290,6 +290,7 @@ class ConversationRunner:
         self.env = env
         # Lazy-init: asyncio.Event() requires a running event loop on Python 3.9.
         self._shutdown_event: Optional[asyncio.Event] = None
+        self._speech_done: Optional[asyncio.Event] = None
         self.history: List[InputEvent] = []
         self.emitted_agent_text: List[Tuple[str, bool]] = []  # (content, interruptible)
 
@@ -301,6 +302,14 @@ class ConversationRunner:
         if self._shutdown_event is None:
             self._shutdown_event = asyncio.Event()
         return self._shutdown_event
+
+    @property
+    def speech_done(self) -> asyncio.Event:
+        """Event that is set when the agent is not speaking (TTS idle)."""
+        if self._speech_done is None:
+            self._speech_done = asyncio.Event()
+            self._speech_done.set()  # Start in "done" state (no speech pending)
+        return self._speech_done
 
     ######### Initialization Methods #########
 
@@ -423,16 +432,28 @@ class ConversationRunner:
         await self._cancel_agent_task()
 
         async def runner():
+            has_sent_text = False
             try:
                 async for output in self.agent_callable(turn_env, event):
                     if isinstance(output, AgentSendText):
                         self.emitted_agent_text.append((output.text, output.interruptible))
+                        has_sent_text = True
                     mapped = self._map_output_event(output)
 
                     if self.shutdown_event.is_set():
                         break
                     if mapped is None:
                         continue
+
+                    # Wait for TTS to finish speaking before sending after_speech events
+                    if getattr(output, "after_speech", False) and has_sent_text:
+                        try:
+                            await asyncio.wait_for(self.speech_done.wait(), timeout=30.0)
+                        except asyncio.TimeoutError:
+                            logger.warning(
+                                f"Timed out waiting for speech to complete before {type(output).__name__}"
+                            )
+
                     await self.websocket.send_json(mapped.model_dump())
             except asyncio.CancelledError:
                 pass
@@ -481,8 +502,10 @@ class ConversationRunner:
 
         elif isinstance(message, AgentStateInput):
             if message.value == UserState.SPEAKING:
+                self.speech_done.clear()
                 return AgentTurnStarted()
             elif message.value == UserState.IDLE:
+                self.speech_done.set()
                 content = self._turn_content(
                     self.history,
                     AgentTurnStarted,

@@ -207,7 +207,7 @@ is possible."""
             ctx: ToolEnv,
             reason: Annotated[str, "The reason for ending the call"],
         ):
-            yield AgentEndCall()
+            yield AgentEndCall(after_speech=True)
 
         return construct_function_tool(
             _end_call_impl,
@@ -463,7 +463,7 @@ async def transfer_call(
 
     if message is not None:
         yield AgentSendText(text=message)
-    yield AgentTransferCall(target_phone_number=normalized_number)
+    yield AgentTransferCall(target_phone_number=normalized_number, after_speech=True)
 
 
 def agent_as_handoff(

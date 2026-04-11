@@ -41,11 +41,13 @@ class AgentToolReturned(BaseModel):
 
 class AgentEndCall(BaseModel):
     type: Literal["end_call"] = "end_call"
+    after_speech: bool = False
 
 
 class AgentTransferCall(BaseModel):
     type: Literal["agent_transfer_call"] = "agent_transfer_call"
     target_phone_number: str
+    after_speech: bool = False
 
 
 class AgentSendDtmf(BaseModel):
