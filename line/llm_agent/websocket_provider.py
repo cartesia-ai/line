@@ -133,6 +133,7 @@ class _WebSocketProvider:
                 except RuntimeError as exc:
                     if "previous_response_not_found" not in str(exc) or emitted_any or attempt >= 1:
                         raise
+                    self._history = []
                     attempt += 1
                     logger.debug(
                         "Responses API lost previous_response_id; retrying current turn from scratch"
@@ -174,6 +175,7 @@ class _WebSocketProvider:
                 tool_defs=tool_defs,
                 cfg=config,
                 generate=False,
+                input=[],  # No input for warmup
             )
             await self._ws.send(json.dumps(request))
 
@@ -227,10 +229,6 @@ class _WebSocketProvider:
             raise
 
         def on_response_done(response):
-            error_code = (response.get("error") or {}).get("code")
-            if error_code == "previous_response_not_found":
-                self._history = []
-                return
             if response.get("status") != "completed":
                 return
             self._history = update_history(self._history, response)
