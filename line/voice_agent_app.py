@@ -262,7 +262,7 @@ def _call_request_from_start_data(data: dict) -> CallRequest:
         to=start_msg.to,
         agent_call_id=start_msg.agent_call_id,
         agent=AgentConfig(**start_msg.agent),
-        metadata=start_msg.metadata,
+        metadata=start_msg.metadata or {},
     )
 
 

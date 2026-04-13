@@ -1313,7 +1313,7 @@ class TestCallRequestFromStartData:
         assert result.agent_call_id == "unknown"
         assert result.agent.system_prompt is None
         assert result.agent.introduction is None
-        assert result.metadata is None
+        assert result.metadata == {}
 
     def test_extra_fields_ignored(self):
         data = {
