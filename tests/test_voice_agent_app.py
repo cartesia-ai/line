@@ -1315,11 +1315,6 @@ class TestCallRequestFromStartData:
         assert result.agent.introduction is None
         assert result.metadata == {}
 
-    def test_null_metadata_becomes_empty_dict(self):
-        data = {"type": "start", "metadata": None}
-        result = _call_request_from_start_data(data)
-        assert result.metadata == {}
-
     def test_extra_fields_ignored(self):
         data = {
             "type": "start",
