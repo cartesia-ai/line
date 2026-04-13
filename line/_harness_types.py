@@ -4,9 +4,9 @@ Raw websocket message types
 ConversationRunner maps from these to the "internal" InputEvent and OutputEvent types.
 """
 
-from typing import Dict, Literal, Optional, Union
+from typing import Any, Dict, Literal, Optional, Union
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 ########################################################
 #  Copied and adapted from Bifrost agent_types.py
@@ -144,3 +144,29 @@ OutputMessage = Union[
     ConfigOutput,
     CustomOutput,
 ]
+
+
+########################################################
+#  Connection-level messages
+#  These are handled during websocket setup, before
+#  the conversation loop. Not part of InputMessage.
+########################################################
+
+
+class StartInput(BaseModel):
+    """Start message sent by the harness with call parameters.
+
+    Delivered once at connection start when the harness detects
+    cartesia_version in the websocket URL. Carries the same call
+    context that legacy clients pass via URL query params.
+    """
+
+    type: Literal["start"] = "start"
+    call_id: str = "unknown"
+    from_: str = Field(default="unknown", alias="from")
+    to: str = "unknown"
+    agent_call_id: str = "unknown"
+    agent: Dict[str, Any] = Field(default_factory=dict)
+    metadata: Optional[Dict[str, Any]] = None
+
+    model_config = ConfigDict(populate_by_name=True)
