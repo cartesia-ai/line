@@ -350,6 +350,10 @@ class LlmAgent:
                     self._tool_signatures[tc.id] = tc.thought_signature
 
             ctx = ToolEnv(turn_env=env)
+
+            # Track before tool calls are processed so backgrounded tools can reference the triggering event
+            triggering_event_id = event.event_id
+
             for tc in tool_calls_dict.values():
                 if not tc.is_complete:
                     continue
@@ -369,7 +373,7 @@ class LlmAgent:
                     # Backgroundable tool: run in a shielded task that survives cancellation
                     # Each yielded value triggers a loopback with AgentToolCalled/AgentToolReturned pair
                     self._execute_backgroundable_tool(
-                        normalized_func, ctx, tool_args, tc.id, tc.name, event.event_id
+                        normalized_func, ctx, tool_args, tc.id, tc.name, triggering_event_id
                     )
                     continue
 
