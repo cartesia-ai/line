@@ -166,6 +166,23 @@ class LlmAgent:
         Raises:
             TypeError: If config, tools, context, or history have invalid types.
         """
+        async for output in self._process_impl(
+            env, event, config=config, tools=tools, context=context, history=history
+        ):
+            yield _set_responding_to(output, event.event_id)
+
+    async def _process_impl(
+        self,
+        env: TurnEnv,
+        event: InputEvent,
+        *,
+        config: Optional[LlmConfig] = None,
+        tools: Optional[List[ToolSpec]] = None,
+        context: Union[str, List[HistoryEvent], None] = None,
+        history: Optional[List[HistoryEvent]] = None,
+    ) -> AsyncIterable[OutputEvent]:
+        """Internal implementation of process(). All yielded events are stamped
+        with responding_to by the process() wrapper."""
         turn_start_time = time.perf_counter()
 
         self._validate_config(config)
@@ -333,6 +350,10 @@ class LlmAgent:
                     self._tool_signatures[tc.id] = tc.thought_signature
 
             ctx = ToolEnv(turn_env=env)
+
+            # Track before tool calls are processed so backgrounded tools can reference the triggering event
+            triggering_event_id = event.event_id
+
             for tc in tool_calls_dict.values():
                 if not tc.is_complete:
                     continue
@@ -351,7 +372,9 @@ class LlmAgent:
                 if tool.tool_type == ToolType.LOOPBACK and tool.is_background:
                     # Backgroundable tool: run in a shielded task that survives cancellation
                     # Each yielded value triggers a loopback with AgentToolCalled/AgentToolReturned pair
-                    self._execute_backgroundable_tool(normalized_func, ctx, tool_args, tc.id, tc.name)
+                    self._execute_backgroundable_tool(
+                        normalized_func, ctx, tool_args, tc.id, tc.name, triggering_event_id
+                    )
                     continue
 
                 if tool.tool_type == ToolType.LOOPBACK:
@@ -610,6 +633,7 @@ class LlmAgent:
         tool_args: Dict[str, Any],
         tc_id: str,
         tc_name: str,
+        triggering_event_id: str,
     ) -> None:
         """Execute a backgroundable tool via the background queue.
 
@@ -621,6 +645,10 @@ class LlmAgent:
         from cancellation. Events are tagged with the CURRENT event_id at
         yield time so background tool results appear at the end of history
         when yielded after a new process() call has started.
+
+        responding_to is set to the triggering_event_id (captured at subscription
+        time) so background results reference the event that originally triggered
+        the tool, not whatever event happens to be processing when results are drained.
         """
 
         async def generate_events() -> AsyncIterable[Tuple[AgentToolCalled, AgentToolReturned]]:
@@ -629,6 +657,8 @@ class LlmAgent:
                 async for value in normalized_func(ctx, **tool_args):
                     call_id = f"{tc_id}-{n}"
                     called, returned = _construct_tool_events(call_id, tc_name, tool_args, value)
+                    called.responding_to = triggering_event_id
+                    returned.responding_to = triggering_event_id
                     self.history._append_local(called)
                     self.history._append_local(returned)
                     yield (called, returned)
@@ -636,6 +666,8 @@ class LlmAgent:
             except Exception as e:
                 logger.error(f"Error in Tool Call {tc_name}: {e}\n{traceback.format_exc(limit=-10)}")
                 called, returned = _construct_tool_events(f"{tc_id}-{n}", tc_name, tool_args, f"error: {e}")
+                called.responding_to = triggering_event_id
+                returned.responding_to = triggering_event_id
                 self.history._append_local(called)
                 self.history._append_local(returned)
                 yield (called, returned)
@@ -765,3 +797,16 @@ def _construct_tool_events(
         result=result,
     )
     return called, returned
+
+
+def _set_responding_to(event: OutputEvent, event_id: str) -> OutputEvent:
+    """Set responding_to on harness-facing events if not already set.
+
+    Called at the process() yield boundary so the harness knows which input event
+    triggered each output event. When event_id is empty string (e.g., no history available),
+    responding_to is left unset. Skips events that already have responding_to set
+    (e.g., from a custom agent or handed-off agent that set it explicitly).
+    """
+    if event_id and event.responding_to is None:
+        event.responding_to = event_id
+    return event
