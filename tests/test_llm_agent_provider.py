@@ -319,6 +319,128 @@ def test_backend_override_invalid_value():
         raise AssertionError("Expected ValueError for invalid backend value")
 
 
+# ---------------------------------------------------------------------------
+# _get_model_config
+# ---------------------------------------------------------------------------
+
+
+class TestGetModelConfig:
+    """Tests for _get_model_config backend routing and reasoning-effort detection."""
+
+    # -- Backend routing -------------------------------------------------------
+
+    def test_realtime_model_selects_realtime_backend(self):
+        cfg = _get_model_config("openai/gpt-4o-realtime-preview")
+        assert cfg.backend == "realtime"
+        assert cfg.supports_reasoning_effort is False
+        assert cfg.default_reasoning_effort is None
+
+    def test_websocket_model_selects_websocket_backend(self):
+        cfg = _get_model_config("openai/gpt-5.2")
+        assert cfg.backend == "websocket"
+
+    def test_websocket_model_with_http_override_selects_http(self):
+        cfg = _get_model_config("openai/gpt-5.2", backend="http")
+        assert cfg.backend == "http"
+
+    def test_websocket_model_with_explicit_websocket_backend(self):
+        cfg = _get_model_config("openai/gpt-5.2", backend="websocket")
+        assert cfg.backend == "websocket"
+
+    def test_plain_http_model_selects_http_backend(self):
+        cfg = _get_model_config("openai/gpt-4o")
+        assert cfg.backend == "http"
+
+    # -- Error cases -----------------------------------------------------------
+
+    def test_invalid_backend_raises(self):
+        try:
+            _get_model_config("openai/gpt-4o", backend="banana")
+        except ValueError as exc:
+            assert "Invalid backend" in str(exc)
+        else:
+            raise AssertionError("Expected ValueError")
+
+    def test_realtime_backend_with_non_realtime_model_raises(self):
+        try:
+            _get_model_config("openai/gpt-4o", backend="realtime")
+        except ValueError as exc:
+            assert "realtime" in str(exc).lower()
+        else:
+            raise AssertionError("Expected ValueError")
+
+    def test_non_realtime_backend_with_realtime_model_raises(self):
+        try:
+            _get_model_config("openai/gpt-4o-realtime-preview", backend="http")
+        except ValueError as exc:
+            assert "incompatible" in str(exc).lower()
+        else:
+            raise AssertionError("Expected ValueError")
+
+    def test_websocket_backend_with_non_websocket_model_raises(self):
+        try:
+            _get_model_config("openai/gpt-4o", backend="websocket")
+        except ValueError as exc:
+            assert "websocket" in str(exc).lower()
+        else:
+            raise AssertionError("Expected ValueError")
+
+    def test_unsupported_model_raises(self, monkeypatch):
+        import litellm
+
+        monkeypatch.setattr(litellm, "get_supported_openai_params", lambda model: None)
+        try:
+            _get_model_config("fake-provider/not-a-model")
+        except ValueError as exc:
+            assert "is not supported" in str(exc)
+        else:
+            raise AssertionError("Expected ValueError")
+
+    # -- Reasoning effort for websocket models ---------------------------------
+
+    def test_websocket_model_with_reasoning_support(self):
+        """Reasoning models (e.g. o3) routed via websocket get reasoning enabled."""
+        cfg = _get_model_config("openai/o3")
+        assert cfg.backend == "websocket"
+        assert cfg.supports_reasoning_effort is True
+        assert cfg.default_reasoning_effort == "low"
+
+    def test_websocket_model_without_reasoning_support(self):
+        """Non-reasoning websocket models (e.g. gpt-4.1) must not get reasoning params."""
+        cfg = _get_model_config("openai/gpt-4.1")
+        assert cfg.backend == "websocket"
+        assert cfg.supports_reasoning_effort is False
+        assert cfg.default_reasoning_effort is None
+
+    # -- Reasoning effort for HTTP models --------------------------------------
+
+    def test_http_model_without_reasoning_support(self):
+        cfg = _get_model_config("openai/gpt-4o")
+        assert cfg.supports_reasoning_effort is False
+        assert cfg.default_reasoning_effort is None
+
+    def test_http_model_with_reasoning_support(self):
+        """o4-mini goes through the HTTP path and supports reasoning."""
+        cfg = _get_model_config("openai/o4-mini")
+        assert cfg.backend == "http"
+        assert cfg.supports_reasoning_effort is True
+        assert cfg.default_reasoning_effort is not None
+
+    def test_websocket_model_forced_to_http_gets_correct_reasoning(self):
+        """gpt-4.1 forced to HTTP should still have reasoning disabled."""
+        cfg = _get_model_config("openai/gpt-4.1", backend="http")
+        assert cfg.backend == "http"
+        assert cfg.supports_reasoning_effort is False
+        assert cfg.default_reasoning_effort is None
+
+    def test_anthropic_model_reasoning_default_is_none(self):
+        """Anthropic models use None (not 'low') to skip the thinking block."""
+        cfg = _get_model_config("anthropic/claude-sonnet-4-20250514")
+        assert cfg.backend == "http"
+        assert cfg.supports_reasoning_effort is True
+        assert cfg.default_reasoning_effort is None
+
+
 def test_is_websocket_model_matches_gpt52_variants():
     assert _is_websocket_model("gpt-5.2")
     assert _is_websocket_model("gpt-5.2-pro")
