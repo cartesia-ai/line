@@ -382,9 +382,13 @@ def _get_model_config(model: str, *, backend: Optional[str] = None) -> _ModelCon
         raise ValueError(f"Invalid backend {backend!r}. Must be one of: {', '.join(sorted(_VALID_BACKENDS))}")
 
     # Realtime models — dedicated realtime backend, no override allowed.
+    if backend == "realtime" and not _is_realtime_model(model):
+        raise ValueError(
+            f"Backend 'realtime' requires a realtime model (e.g. gpt-4o-realtime-preview), got {model!r}"
+        )
+    if backend is not None and backend != "realtime" and _is_realtime_model(model):
+        raise ValueError(f"Realtime model {model!r} is incompatible with backend {backend!r}")
     if _is_realtime_model(model):
-        if backend is not None and backend != "realtime":
-            raise ValueError(f"Realtime model {model!r} is incompatible with backend {backend!r}")
         return _ModelConfig(
             backend="realtime",
             supports_reasoning_effort=False,
@@ -392,39 +396,30 @@ def _get_model_config(model: str, *, backend: Optional[str] = None) -> _ModelCon
         )
 
     # WebSocket models — auto-select websocket, but allow http override.
-    if _is_websocket_model(model):
-        effective = backend or "websocket"
-        if effective == "realtime":
-            raise ValueError(
-                f"Backend 'realtime' requires a realtime model (e.g. gpt-4o-realtime-preview), got {model!r}"
-            )
-        return _ModelConfig(
-            backend=effective,
-            supports_reasoning_effort=True,
-            default_reasoning_effort="low",
-        )
+    from litellm import get_supported_openai_params
 
-    # WebSocket/realtime backends require specific OpenAI models.
-    if backend == "websocket":
+    if backend == "websocket" and not _is_websocket_model(model):
         raise ValueError(
             f"Backend 'websocket' requires a websocket-compatible model (e.g. gpt-5.2), got {model!r}"
         )
-    if backend == "realtime":
-        raise ValueError(
-            f"Backend 'realtime' requires a realtime model (e.g. gpt-4o-realtime-preview), got {model!r}"
+    if _is_websocket_model(model) and backend in (None, "websocket"):
+        ws_supported = get_supported_openai_params(model=model) or []
+        ws_supports_reasoning = "reasoning_effort" in ws_supported
+        return _ModelConfig(
+            backend="websocket",
+            supports_reasoning_effort=ws_supports_reasoning,
+            default_reasoning_effort="low" if ws_supports_reasoning else None,
         )
 
     # Everything else — HTTP via LiteLLM.
-    from litellm import get_supported_openai_params
 
     supported = get_supported_openai_params(model=model)
     if supported is None:
         raise ValueError(
             f"Model {model} is not supported. See https://models.litellm.ai/ for supported models."
         )
-
     supports = "reasoning_effort" in supported
-    default: Optional[str] = "low"
+    default: Optional[str] = "low" if supports else None
     if supports:
         from litellm import get_llm_provider
         from litellm.utils import get_optional_params
