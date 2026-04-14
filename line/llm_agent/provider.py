@@ -398,10 +398,15 @@ def _get_model_config(model: str, *, backend: Optional[str] = None) -> _ModelCon
             raise ValueError(
                 f"Backend 'realtime' requires a realtime model (e.g. gpt-4o-realtime-preview), got {model!r}"
             )
+        # Not all websocket-capable models support reasoning_effort (e.g. gpt-4.1).
+        from litellm import get_supported_openai_params
+
+        ws_supported = get_supported_openai_params(model=model) or []
+        ws_supports_reasoning = "reasoning_effort" in ws_supported
         return _ModelConfig(
             backend=effective,
-            supports_reasoning_effort=True,
-            default_reasoning_effort="low",
+            supports_reasoning_effort=ws_supports_reasoning,
+            default_reasoning_effort="low" if ws_supports_reasoning else None,
         )
 
     # WebSocket/realtime backends require specific OpenAI models.
@@ -424,7 +429,7 @@ def _get_model_config(model: str, *, backend: Optional[str] = None) -> _ModelCon
         )
 
     supports = "reasoning_effort" in supported
-    default: Optional[str] = "low"
+    default: Optional[str] = "low" if supports else None
     if supports:
         from litellm import get_llm_provider
         from litellm.utils import get_optional_params
