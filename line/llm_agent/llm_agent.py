@@ -209,7 +209,7 @@ class LlmAgent:
             return
 
         # Handle CallStarted
-        if isinstance(event, (CallStarted, AgentHandedOff)):
+        if isinstance(event, CallStarted):
             warmup_task = asyncio.create_task(
                 self._llm.warmup(config=effective_config, tools=effective_tools)
             )
