@@ -787,6 +787,19 @@ async def test_introduction_sent_on_call_started(turn_env):
     assert outputs[0].text == "Hello! How can I help you?"
 
 
+async def test_introduction_sent_on_agent_handed_off(turn_env):
+    """Test that introduction is sent on CallStarted event."""
+    config = LlmConfig(introduction="Hello! How can I help you?")
+
+    agent, _ = create_agent_with_mock([], config=config)
+
+    outputs = await collect_outputs(agent, turn_env, AgentHandedOff())
+
+    assert len(outputs) == 1
+    assert isinstance(outputs[0], AgentSendText)
+    assert outputs[0].text == "Hello! How can I help you?"
+
+
 async def test_introduction_only_sent_once(turn_env):
     """Test that introduction is not sent on subsequent CallStarted events."""
     config = LlmConfig(introduction="Hello!")
