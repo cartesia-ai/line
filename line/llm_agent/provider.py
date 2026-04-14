@@ -395,9 +395,9 @@ def _get_model_config(model: str, *, backend: Optional[str] = None) -> _ModelCon
             default_reasoning_effort=None,
         )
 
-
     # WebSocket models — auto-select websocket, but allow http override.
     from litellm import get_supported_openai_params
+
     if backend == "websocket" and not _is_websocket_model(model):
         raise ValueError(
             f"Backend 'websocket' requires a websocket-compatible model (e.g. gpt-5.2), got {model!r}"
@@ -423,6 +423,7 @@ def _get_model_config(model: str, *, backend: Optional[str] = None) -> _ModelCon
     if supports:
         from litellm import get_llm_provider
         from litellm.utils import get_optional_params
+
         try:
             _, provider, _, _ = get_llm_provider(model=model)
             get_optional_params(model=model, custom_llm_provider=provider, reasoning_effort="none")

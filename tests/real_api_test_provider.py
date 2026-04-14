@@ -726,7 +726,7 @@ MODELS = [
     ("ANTHROPIC_API_KEY", "anthropic/claude-haiku-4-5"),
     ("GEMINI_API_KEY", "gemini/gemini-2.5-flash"),
     ("GEMINI_API_KEY", "gemini/gemini-3-flash-preview"),
-    ("OPENAI_API_KEY", "openai/gpt-4.1")
+    ("OPENAI_API_KEY", "openai/gpt-4.1"),
 ]
 
 # Available test names
