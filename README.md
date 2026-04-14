@@ -304,7 +304,7 @@ The transform receives the full history (input events + local events) as a list 
 
 ### Wrap with Custom Logic
 
-Implement the `Agent` protocol to add guardrails, logging, or preprocessing:
+Implement the `Agent` protocol to add guardrails, logging, or preprocessing.
 
 ```python
 from line.agent import TurnEnv
