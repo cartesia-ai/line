@@ -478,17 +478,22 @@ def _is_realtime_model(model: str) -> bool:
     return _is_openai_model(model) and "realtime" in model.lower().split("/", 1)[-1]
 
 
+_WEBSOCKET_MODELS = ("gpt-5.2", "gpt-5.2-pro", "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano", "gpt-5.4-pro")
+
+
 def _is_websocket_model(model: str) -> bool:
     """Check if a model should use the WebSocket (Responses API) backend.
 
     Returns True for OpenAI models that support the /v1/responses endpoint,
     as detected via LiteLLM's model_cost registry.
     """
-    info = _get_model_info(model)
-    if info.get("litellm_provider") not in ("openai", "chatgpt"):
+    if model in _WEBSOCKET_MODELS:
+        return True
+    match = model.lower().split("/", 1)
+    if len(match) == 1:
         return False
-    endpoints = info.get("supported_endpoints", [])
-    return "/v1/responses" in endpoints
+    model_prefix, model_suffix = match
+    return model_suffix in _WEBSOCKET_MODELS and model_prefix in ("openai", "chatgpt")
 
 
 # Backward-compat alias — emits a deprecation warning on instantiation.
