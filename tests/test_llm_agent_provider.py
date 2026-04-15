@@ -883,3 +883,435 @@ class TestNormalizeMessages:
         assert len(tool_msgs) == 2
         assert tool_msgs[0].content == "first"
         assert tool_msgs[1].content == "second"
+
+
+# ---------------------------------------------------------------------------
+# Gemini thought_signature / provider_specific_fields (http_provider.py)
+# ---------------------------------------------------------------------------
+
+
+class TestThoughtSignatureStreaming:
+    """Verify that thought_signature is captured from provider_specific_fields
+    during streaming and round-tripped through message building."""
+
+    def _make_chunk(self, tool_calls_delta=None, content=None, finish_reason=None):
+        """Build a minimal litellm-style streaming chunk."""
+
+        class _Delta:
+            pass
+
+        class _Choice:
+            pass
+
+        class _Chunk:
+            pass
+
+        delta = _Delta()
+        delta.content = content
+        delta.tool_calls = tool_calls_delta
+
+        choice = _Choice()
+        choice.delta = delta
+        choice.finish_reason = finish_reason
+
+        chunk = _Chunk()
+        chunk.choices = [choice]
+        return chunk
+
+    def _make_tc_delta(self, index, id=None, name=None, arguments=None, thought_signature=None):
+        """Build a minimal tool_call delta object with optional provider_specific_fields."""
+
+        class _Func:
+            pass
+
+        class _TC:
+            pass
+
+        tc = _TC()
+        tc.index = index
+        tc.id = id
+        tc.function = _Func() if (name or arguments) else None
+        if tc.function:
+            tc.function.name = name
+            tc.function.arguments = arguments
+        if thought_signature:
+            tc.provider_specific_fields = {"thought_signature": thought_signature}
+        else:
+            tc.provider_specific_fields = None
+        return tc
+
+    def test_thought_signature_captured_from_stream_chunk(self, monkeypatch):
+        """provider_specific_fields.thought_signature on a tool_call delta
+        should end up on the yielded ToolCall."""
+
+        chunks = [
+            self._make_chunk(tool_calls_delta=[
+                self._make_tc_delta(0, id="call_1", name="my_tool", arguments='{"a": 1}',
+                                    thought_signature="sig_abc"),
+            ]),
+            self._make_chunk(finish_reason="tool_calls"),
+        ]
+
+        async def _fake_acompletion(**kwargs):
+            class _Response:
+                async def __aiter__(self_inner):
+                    for c in chunks:
+                        yield c
+
+                async def aclose(self_inner):
+                    pass
+
+            return _Response()
+
+        monkeypatch.setattr("line.llm_agent.http_provider.acompletion", _fake_acompletion)
+
+        provider = _HttpProvider(model="gemini/gemini-2.5-flash")
+
+        collected = []
+
+        async def _consume():
+            async for chunk in provider.chat(
+                [Message(role="user", content="hi")],
+                config=_normalize_config(LlmConfig()),
+            ):
+                collected.append(chunk)
+
+        asyncio.run(_consume())
+
+        all_tcs = [tc for chunk in collected for tc in chunk.tool_calls]
+        assert any(tc.thought_signature == "sig_abc" for tc in all_tcs)
+
+    def test_thought_signature_none_when_no_provider_fields(self, monkeypatch):
+        """When provider_specific_fields is absent, thought_signature stays None."""
+
+        chunks = [
+            self._make_chunk(tool_calls_delta=[
+                self._make_tc_delta(0, id="call_1", name="my_tool", arguments='{"a": 1}'),
+            ]),
+            self._make_chunk(finish_reason="tool_calls"),
+        ]
+
+        async def _fake_acompletion(**kwargs):
+            class _Response:
+                async def __aiter__(self_inner):
+                    for c in chunks:
+                        yield c
+
+                async def aclose(self_inner):
+                    pass
+
+            return _Response()
+
+        monkeypatch.setattr("line.llm_agent.http_provider.acompletion", _fake_acompletion)
+
+        provider = _HttpProvider(model="openai/gpt-4o")
+
+        collected = []
+
+        async def _consume():
+            async for chunk in provider.chat(
+                [Message(role="user", content="hi")],
+                config=_normalize_config(LlmConfig()),
+            ):
+                collected.append(chunk)
+
+        asyncio.run(_consume())
+
+        all_tcs = [tc for chunk in collected for tc in chunk.tool_calls]
+        assert all(tc.thought_signature is None for tc in all_tcs)
+
+    def test_thought_signature_round_trips_through_message_building(self):
+        """ToolCall.thought_signature should appear in provider_specific_fields
+        when _build_messages serializes tool calls."""
+
+        provider = _HttpProvider(model="gemini/gemini-2.5-flash")
+        messages = [
+            Message(
+                role="assistant",
+                content=None,
+                tool_calls=[
+                    ToolCall(id="call_1", name="my_tool", arguments='{"x": 1}',
+                             thought_signature="sig_xyz"),
+                ],
+            ),
+            Message(role="tool", content="result", tool_call_id="call_1", name="my_tool"),
+        ]
+
+        built = provider._build_messages(messages, _normalize_config(LlmConfig()))
+        assistant_msg = built[0]
+        tc_dict = assistant_msg["tool_calls"][0]
+        assert tc_dict["provider_specific_fields"] == {"thought_signature": "sig_xyz"}
+
+    def test_no_provider_specific_fields_when_no_thought_signature(self):
+        """Without thought_signature, provider_specific_fields key should be absent."""
+
+        provider = _HttpProvider(model="openai/gpt-4o")
+        messages = [
+            Message(
+                role="assistant",
+                content=None,
+                tool_calls=[
+                    ToolCall(id="call_1", name="my_tool", arguments='{"x": 1}'),
+                ],
+            ),
+            Message(role="tool", content="result", tool_call_id="call_1", name="my_tool"),
+        ]
+
+        built = provider._build_messages(messages, _normalize_config(LlmConfig()))
+        tc_dict = built[0]["tool_calls"][0]
+        assert "provider_specific_fields" not in tc_dict
+
+
+# ---------------------------------------------------------------------------
+# get_supported_openai_params usage (provider.py:399-416)
+# ---------------------------------------------------------------------------
+
+
+class TestGetSupportedOpenaiParamsUsage:
+    """Verify that get_supported_openai_params drives backend selection and
+    reasoning_effort detection correctly."""
+
+    def test_model_with_reasoning_in_supported_params(self, monkeypatch):
+        """When get_supported_openai_params includes 'reasoning_effort',
+        the config should report supports_reasoning_effort=True."""
+        import litellm
+        import litellm.utils
+
+        monkeypatch.setattr(
+            litellm, "get_supported_openai_params",
+            lambda model: ["temperature", "reasoning_effort", "max_tokens"],
+        )
+        # Also need to patch get_optional_params to not raise
+        monkeypatch.setattr(
+            litellm, "get_llm_provider",
+            lambda model: (model, "test_provider", None, None),
+        )
+        monkeypatch.setattr(
+            litellm.utils, "get_optional_params",
+            lambda model, custom_llm_provider, reasoning_effort: {},
+        )
+
+        cfg = _get_model_config("test-provider/test-reasoning-model")
+        assert cfg.backend == "http"
+        assert cfg.supports_reasoning_effort is True
+        assert cfg.default_reasoning_effort == "none"
+
+    def test_model_without_reasoning_in_supported_params(self, monkeypatch):
+        """When get_supported_openai_params lacks 'reasoning_effort',
+        the config should report supports_reasoning_effort=False."""
+        import litellm
+
+        monkeypatch.setattr(
+            litellm, "get_supported_openai_params",
+            lambda model: ["temperature", "max_tokens"],
+        )
+
+        cfg = _get_model_config("test-provider/test-no-reasoning-model")
+        assert cfg.backend == "http"
+        assert cfg.supports_reasoning_effort is False
+        assert cfg.default_reasoning_effort is None
+
+    def test_get_optional_params_raises_falls_back_for_anthropic(self, monkeypatch):
+        """When get_optional_params raises for an Anthropic model,
+        default_reasoning_effort should be None (the Anthropic hack)."""
+        import litellm
+        import litellm.utils
+
+        monkeypatch.setattr(
+            litellm, "get_supported_openai_params",
+            lambda model: ["reasoning_effort", "temperature"],
+        )
+
+        def _raise(*a, **kw):
+            raise Exception("unsupported value")
+
+        monkeypatch.setattr(litellm, "get_llm_provider", lambda model: (model, "anthropic", None, None))
+        monkeypatch.setattr(litellm.utils, "get_optional_params", _raise)
+
+        cfg = _get_model_config("anthropic/claude-test-model")
+        assert cfg.supports_reasoning_effort is True
+        assert cfg.default_reasoning_effort is None
+
+    def test_get_optional_params_raises_non_anthropic_gets_low(self, monkeypatch):
+        """When get_optional_params raises for a non-Anthropic model,
+        default_reasoning_effort should be 'low'."""
+        import litellm
+        import litellm.utils
+
+        monkeypatch.setattr(
+            litellm, "get_supported_openai_params",
+            lambda model: ["reasoning_effort", "temperature"],
+        )
+
+        def _raise(*a, **kw):
+            raise Exception("unsupported value")
+
+        monkeypatch.setattr(litellm, "get_llm_provider", lambda model: (model, "openai", None, None))
+        monkeypatch.setattr(litellm.utils, "get_optional_params", _raise)
+
+        cfg = _get_model_config("openai/some-reasoning-model")
+        assert cfg.supports_reasoning_effort is True
+        assert cfg.default_reasoning_effort == "low"
+
+    def test_get_supported_params_returns_none_raises(self, monkeypatch):
+        """When get_supported_openai_params returns None, model is rejected."""
+        import litellm
+
+        monkeypatch.setattr(litellm, "get_supported_openai_params", lambda model: None)
+
+        try:
+            _get_model_config("fake/unsupported-model")
+        except ValueError as exc:
+            assert "is not supported" in str(exc)
+        else:
+            raise AssertionError("Expected ValueError")
+
+
+# ---------------------------------------------------------------------------
+# Schema converter (schema_converter.py)
+# ---------------------------------------------------------------------------
+
+
+class TestSchemaConverter:
+    """Verify tool schema conversion to litellm format produces valid output."""
+
+    def _make_tool(self, name, description, params):
+        """Build a FunctionTool with the given parameters."""
+        from line.llm_agent.tools.utils import FunctionTool, ParameterInfo, ToolType
+
+        return FunctionTool(
+            name=name,
+            description=description,
+            func=lambda ctx: None,
+            parameters=params,
+            tool_type=ToolType.LOOPBACK,
+        )
+
+    def test_basic_string_param_tool(self):
+        from line.llm_agent.schema_converter import function_tool_to_litellm
+        from line.llm_agent.tools.utils import ParameterInfo
+
+        tool = self._make_tool("greet", "Say hello", {
+            "name": ParameterInfo(name="name", type_annotation=str, description="Name", required=True),
+        })
+        result = function_tool_to_litellm(tool)
+        assert result["type"] == "function"
+        fn = result["function"]
+        assert fn["name"] == "greet"
+        assert fn["description"] == "Say hello"
+        assert fn["parameters"]["properties"]["name"]["type"] == "string"
+        assert "name" in fn["parameters"]["required"]
+        assert fn["strict"] is True
+        assert fn["parameters"]["additionalProperties"] is False
+
+    def test_multiple_param_types(self):
+        from line.llm_agent.schema_converter import function_tool_to_litellm
+        from line.llm_agent.tools.utils import ParameterInfo
+
+        tool = self._make_tool("search", "Search items", {
+            "query": ParameterInfo(name="query", type_annotation=str, description="Query", required=True),
+            "limit": ParameterInfo(name="limit", type_annotation=int, description="Max results", required=True),
+            "fuzzy": ParameterInfo(name="fuzzy", type_annotation=bool, description="Fuzzy match", required=True),
+        })
+        result = function_tool_to_litellm(tool)
+        props = result["function"]["parameters"]["properties"]
+        assert props["query"]["type"] == "string"
+        assert props["limit"]["type"] == "integer"
+        assert props["fuzzy"]["type"] == "boolean"
+
+    def test_optional_param_disables_strict(self):
+        from line.llm_agent.schema_converter import function_tool_to_litellm
+        from line.llm_agent.tools.utils import ParameterInfo
+
+        tool = self._make_tool("opt_tool", "Tool with optional", {
+            "name": ParameterInfo(name="name", type_annotation=str, description="Name", required=True),
+            "tag": ParameterInfo(name="tag", type_annotation=str, description="Tag",
+                                 required=False, default="default"),
+        })
+        result = function_tool_to_litellm(tool)
+        assert "strict" not in result["function"]
+
+    def test_list_param(self):
+        from line.llm_agent.schema_converter import function_tool_to_litellm
+        from line.llm_agent.tools.utils import ParameterInfo
+
+        tool = self._make_tool("batch", "Batch op", {
+            "ids": ParameterInfo(name="ids", type_annotation=List[int], description="IDs", required=True),
+        })
+        result = function_tool_to_litellm(tool)
+        prop = result["function"]["parameters"]["properties"]["ids"]
+        assert prop["type"] == "array"
+        assert prop["items"]["type"] == "integer"
+
+    def test_tools_to_litellm_converts_list(self):
+        from line.llm_agent.schema_converter import tools_to_litellm
+        from line.llm_agent.tools.utils import ParameterInfo
+
+        tools = [
+            self._make_tool("a", "Tool A", {
+                "x": ParameterInfo(name="x", type_annotation=str, description="X", required=True),
+            }),
+            self._make_tool("b", "Tool B", {
+                "y": ParameterInfo(name="y", type_annotation=int, description="Y", required=True),
+            }),
+        ]
+        result = tools_to_litellm(tools)
+        assert len(result) == 2
+        assert result[0]["function"]["name"] == "a"
+        assert result[1]["function"]["name"] == "b"
+
+    def test_bare_dict_raises_in_strict_mode(self):
+        from line.llm_agent.schema_converter import python_type_to_json_schema
+
+        try:
+            python_type_to_json_schema(dict, strict=True)
+        except ValueError as exc:
+            assert "TypedDict" in str(exc)
+        else:
+            raise AssertionError("Expected ValueError for bare dict in strict mode")
+
+    def test_bare_dict_allowed_in_non_strict_mode(self):
+        from line.llm_agent.schema_converter import python_type_to_json_schema
+
+        result = python_type_to_json_schema(dict, strict=False)
+        assert result == {"type": "object"}
+
+    def test_literal_enum_values(self):
+        from typing import Literal
+
+        from line.llm_agent.schema_converter import python_type_to_json_schema
+
+        result = python_type_to_json_schema(Literal["red", "green", "blue"])
+        assert result == {"type": "string", "enum": ["red", "green", "blue"]}
+
+    def test_typeddict_generates_object_schema(self):
+        from typing import TypedDict
+
+        from line.llm_agent.schema_converter import python_type_to_json_schema
+
+        class Item(TypedDict):
+            name: str
+            quantity: int
+
+        result = python_type_to_json_schema(Item, strict=True)
+        assert result["type"] == "object"
+        assert result["properties"]["name"]["type"] == "string"
+        assert result["properties"]["quantity"]["type"] == "integer"
+        assert result["additionalProperties"] is False
+        assert set(result["required"]) == {"name", "quantity"}
+
+    def test_function_tool_to_litellm_output_format(self):
+        """Verify the top-level shape matches what litellm expects:
+        {"type": "function", "function": {"name": ..., "parameters": ...}}"""
+        from line.llm_agent.schema_converter import function_tool_to_litellm
+        from line.llm_agent.tools.utils import ParameterInfo
+
+        tool = self._make_tool("test", "Test tool", {
+            "arg": ParameterInfo(name="arg", type_annotation=str, description="Arg", required=True),
+        })
+        result = function_tool_to_litellm(tool)
+        assert set(result.keys()) == {"type", "function"}
+        assert result["type"] == "function"
+        assert "name" in result["function"]
+        assert "description" in result["function"]
+        assert "parameters" in result["function"]
