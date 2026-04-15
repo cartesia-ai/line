@@ -191,8 +191,10 @@ is possible."""
     def __init__(
         self,
         description: Optional[str] = None,
+        interruptible: bool = True,
     ):
         self.description = description if description else self.DEFAULT_DESCRIPTION
+        self.interruptible = interruptible
         self._function_tool = self._create_function_tool()
 
     @property
@@ -207,7 +209,7 @@ is possible."""
             ctx: ToolEnv,
             reason: Annotated[str, "The reason for ending the call"],
         ):
-            yield AgentEndCall()
+            yield AgentEndCall(interruptible=self.interruptible)
 
         return construct_function_tool(
             _end_call_impl,
@@ -223,17 +225,18 @@ is possible."""
     def __call__(
         self,
         description: Optional[str] = None,
+        interruptible: bool = True,
     ) -> "EndCallTool":
         """Create a configured EndCallTool instance.
 
         Args:
             description: Description that replaces the default. Use this to customize
                 when the LLM should end the call.
-
+            interruptible: Whether the end_call tool is interruptible.
         Returns:
             A new EndCallTool instance with the specified configuration.
         """
-        return EndCallTool(description=description)
+        return EndCallTool(description=description, interruptible=interruptible)
 
 
 # Default instance - can be used directly or called to configure
@@ -241,6 +244,79 @@ is possible."""
 #   end_call                                              # Use default behavior
 #   end_call(description="Only end after explicit goodbye")  # Custom instructions
 end_call = EndCallTool()
+
+
+class TransferCallTool:
+    """
+    Configurable transfer_call tool with custom description.
+    """
+
+    def __init__(self, message: Optional[str] = None, interruptible: bool = True):
+        self.message = message
+        self.interruptible = interruptible
+        self._function_tool = self._create_function_tool()
+
+    @property
+    def name(self) -> str:
+        """Return the tool name."""
+        return "transfer_call"
+
+    def _create_function_tool(self) -> FunctionTool:
+        """Create the underlying FunctionTool with the configured description."""
+
+        async def _transfer_call_impl(
+            ctx: ToolEnv,
+            target_phone_number: Annotated[
+                str, "The destination phone number in E.164 format (e.g., +14155551234)"
+            ],
+            message: Annotated[Optional[str], "Optional message to say before transferring"] = None,
+        ):
+            """Transfer the call to another phone number."""
+            import phonenumbers
+
+            try:
+                parsed = phonenumbers.parse(target_phone_number)
+                if not phonenumbers.is_valid_number(parsed):
+                    yield AgentSendText(text="I'm sorry, that phone number appears to be invalid.")
+                    return
+            except phonenumbers.NumberParseException:
+                yield AgentSendText(text="I'm sorry, I couldn't understand that phone number format.")
+                return
+
+            # Normalize to E.164 format
+            normalized_number = phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.E164)
+
+            resolved_message = message if message is not None else self.message
+            if resolved_message:
+                yield AgentSendText(text=resolved_message, interruptible=self.interruptible)
+            yield AgentTransferCall(target_phone_number=normalized_number, interruptible=self.interruptible)
+
+        return construct_function_tool(
+            _transfer_call_impl,
+            name="transfer_call",
+            description=_transfer_call_impl.__doc__,
+            tool_type=ToolType.PASSTHROUGH,
+        )
+
+    def as_function_tool(self) -> FunctionTool:
+        """Return the underlying FunctionTool for use in tool resolution."""
+        return self._function_tool
+
+    def __call__(self, message: Optional[str] = None, interruptible: bool = True) -> "TransferCallTool":
+        """Create a configured TransferCallTool instance.
+
+        Args:
+            message: Optional default message to say before transferring.
+            interruptible: Whether the transfer_call tool is interruptible.
+        """
+        return TransferCallTool(message=message, interruptible=interruptible)
+
+
+# Default instance - can be used directly or called to configure
+# Examples:
+#   transfer_call                                              # Use default behavior
+#   transfer_call(interruptible=False)                          # Disable interruptibility
+transfer_call = TransferCallTool()
 
 
 @dataclass
@@ -440,32 +516,6 @@ async def send_dtmf(
     yield AgentSendDtmf(button=button)
 
 
-@passthrough_tool
-async def transfer_call(
-    ctx: ToolEnv,
-    target_phone_number: Annotated[str, "The destination phone number in E.164 format (e.g., +14155551234)"],
-    message: Annotated[Optional[str], "Optional message to say before transferring"] = None,
-):
-    """Transfer the call to another phone number."""
-    import phonenumbers
-
-    try:
-        parsed = phonenumbers.parse(target_phone_number)
-        if not phonenumbers.is_valid_number(parsed):
-            yield AgentSendText(text="I'm sorry, that phone number appears to be invalid.")
-            return
-    except phonenumbers.NumberParseException:
-        yield AgentSendText(text="I'm sorry, I couldn't understand that phone number format.")
-        return
-
-    # Normalize to E.164 format
-    normalized_number = phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.E164)
-
-    if message is not None:
-        yield AgentSendText(text=message)
-    yield AgentTransferCall(target_phone_number=normalized_number)
-
-
 def agent_as_handoff(
     agent: Agent,
     *,
@@ -473,6 +523,7 @@ def agent_as_handoff(
     update_call: Optional[UpdateCallConfig] = None,
     name: Optional[str] = None,
     description: Optional[str] = None,
+    interruptible: bool = True,
 ) -> FunctionTool:
     """
     Create a handoff tool from an Agent.
@@ -482,6 +533,7 @@ def agent_as_handoff(
 
     Args:
         agent: The agent to hand off to. Can be an AgentCallable or AgentClass.
+        interruptible: Whether the transfer is interruptible.
         handoff_message: Optional message to send before handoff (e.g., "Transferring you now...").
         update_call: Optional config to update call settings (voice, pronunciation) before handoff.
         name: Tool name for LLM function calling. Defaults to agent class name or "transfer_to_agent".
@@ -525,7 +577,7 @@ def agent_as_handoff(
         if isinstance(event, AgentHandedOff):
             # Send handoff message if provided
             if handoff_message:
-                yield AgentSendText(text=handoff_message)
+                yield AgentSendText(text=handoff_message, interruptible=interruptible)
 
             # Update call settings (e.g., voice) if provided
             if update_call is not None:
@@ -556,6 +608,7 @@ def agent_as_handoff(
 __all__ = [
     "DtmfButton",
     "EndCallTool",
+    "TransferCallTool",
     "UpdateCallConfig",
     "WebSearchTool",
     "web_search",
