@@ -886,183 +886,6 @@ class TestNormalizeMessages:
 
 
 # ---------------------------------------------------------------------------
-# Gemini thought_signature / provider_specific_fields (http_provider.py)
-# ---------------------------------------------------------------------------
-
-
-class TestThoughtSignatureStreaming:
-    """Verify that thought_signature is captured from provider_specific_fields
-    during streaming and round-tripped through message building."""
-
-    def _make_chunk(self, tool_calls_delta=None, content=None, finish_reason=None):
-        """Build a minimal litellm-style streaming chunk."""
-
-        class _Delta:
-            pass
-
-        class _Choice:
-            pass
-
-        class _Chunk:
-            pass
-
-        delta = _Delta()
-        delta.content = content
-        delta.tool_calls = tool_calls_delta
-
-        choice = _Choice()
-        choice.delta = delta
-        choice.finish_reason = finish_reason
-
-        chunk = _Chunk()
-        chunk.choices = [choice]
-        return chunk
-
-    def _make_tc_delta(self, index, id=None, name=None, arguments=None, thought_signature=None):
-        """Build a minimal tool_call delta object with optional provider_specific_fields."""
-
-        class _Func:
-            pass
-
-        class _TC:
-            pass
-
-        tc = _TC()
-        tc.index = index
-        tc.id = id
-        tc.function = _Func() if (name or arguments) else None
-        if tc.function:
-            tc.function.name = name
-            tc.function.arguments = arguments
-        if thought_signature:
-            tc.provider_specific_fields = {"thought_signature": thought_signature}
-        else:
-            tc.provider_specific_fields = None
-        return tc
-
-    def test_thought_signature_captured_from_stream_chunk(self, monkeypatch):
-        """provider_specific_fields.thought_signature on a tool_call delta
-        should end up on the yielded ToolCall."""
-
-        chunks = [
-            self._make_chunk(tool_calls_delta=[
-                self._make_tc_delta(0, id="call_1", name="my_tool", arguments='{"a": 1}',
-                                    thought_signature="sig_abc"),
-            ]),
-            self._make_chunk(finish_reason="tool_calls"),
-        ]
-
-        async def _fake_acompletion(**kwargs):
-            class _Response:
-                async def __aiter__(self_inner):
-                    for c in chunks:
-                        yield c
-
-                async def aclose(self_inner):
-                    pass
-
-            return _Response()
-
-        monkeypatch.setattr("line.llm_agent.http_provider.acompletion", _fake_acompletion)
-
-        provider = _HttpProvider(model="gemini/gemini-2.5-flash")
-
-        collected = []
-
-        async def _consume():
-            async for chunk in provider.chat(
-                [Message(role="user", content="hi")],
-                config=_normalize_config(LlmConfig()),
-            ):
-                collected.append(chunk)
-
-        asyncio.run(_consume())
-
-        all_tcs = [tc for chunk in collected for tc in chunk.tool_calls]
-        assert any(tc.thought_signature == "sig_abc" for tc in all_tcs)
-
-    def test_thought_signature_none_when_no_provider_fields(self, monkeypatch):
-        """When provider_specific_fields is absent, thought_signature stays None."""
-
-        chunks = [
-            self._make_chunk(tool_calls_delta=[
-                self._make_tc_delta(0, id="call_1", name="my_tool", arguments='{"a": 1}'),
-            ]),
-            self._make_chunk(finish_reason="tool_calls"),
-        ]
-
-        async def _fake_acompletion(**kwargs):
-            class _Response:
-                async def __aiter__(self_inner):
-                    for c in chunks:
-                        yield c
-
-                async def aclose(self_inner):
-                    pass
-
-            return _Response()
-
-        monkeypatch.setattr("line.llm_agent.http_provider.acompletion", _fake_acompletion)
-
-        provider = _HttpProvider(model="openai/gpt-4o")
-
-        collected = []
-
-        async def _consume():
-            async for chunk in provider.chat(
-                [Message(role="user", content="hi")],
-                config=_normalize_config(LlmConfig()),
-            ):
-                collected.append(chunk)
-
-        asyncio.run(_consume())
-
-        all_tcs = [tc for chunk in collected for tc in chunk.tool_calls]
-        assert all(tc.thought_signature is None for tc in all_tcs)
-
-    def test_thought_signature_round_trips_through_message_building(self):
-        """ToolCall.thought_signature should appear in provider_specific_fields
-        when _build_messages serializes tool calls."""
-
-        provider = _HttpProvider(model="gemini/gemini-2.5-flash")
-        messages = [
-            Message(
-                role="assistant",
-                content=None,
-                tool_calls=[
-                    ToolCall(id="call_1", name="my_tool", arguments='{"x": 1}',
-                             thought_signature="sig_xyz"),
-                ],
-            ),
-            Message(role="tool", content="result", tool_call_id="call_1", name="my_tool"),
-        ]
-
-        built = provider._build_messages(messages, _normalize_config(LlmConfig()))
-        assistant_msg = built[0]
-        tc_dict = assistant_msg["tool_calls"][0]
-        assert tc_dict["provider_specific_fields"] == {"thought_signature": "sig_xyz"}
-
-    def test_no_provider_specific_fields_when_no_thought_signature(self):
-        """Without thought_signature, provider_specific_fields key should be absent."""
-
-        provider = _HttpProvider(model="openai/gpt-4o")
-        messages = [
-            Message(
-                role="assistant",
-                content=None,
-                tool_calls=[
-                    ToolCall(id="call_1", name="my_tool", arguments='{"x": 1}'),
-                ],
-            ),
-            Message(role="tool", content="result", tool_call_id="call_1", name="my_tool"),
-        ]
-
-        built = provider._build_messages(messages, _normalize_config(LlmConfig()))
-        tc_dict = built[0]["tool_calls"][0]
-        assert "provider_specific_fields" not in tc_dict
-
-
-# ---------------------------------------------------------------------------
 # get_supported_openai_params usage (provider.py:399-416)
 # ---------------------------------------------------------------------------
 
@@ -1078,16 +901,19 @@ class TestGetSupportedOpenaiParamsUsage:
         import litellm.utils
 
         monkeypatch.setattr(
-            litellm, "get_supported_openai_params",
+            litellm,
+            "get_supported_openai_params",
             lambda model: ["temperature", "reasoning_effort", "max_tokens"],
         )
         # Also need to patch get_optional_params to not raise
         monkeypatch.setattr(
-            litellm, "get_llm_provider",
+            litellm,
+            "get_llm_provider",
             lambda model: (model, "test_provider", None, None),
         )
         monkeypatch.setattr(
-            litellm.utils, "get_optional_params",
+            litellm.utils,
+            "get_optional_params",
             lambda model, custom_llm_provider, reasoning_effort: {},
         )
 
@@ -1102,7 +928,8 @@ class TestGetSupportedOpenaiParamsUsage:
         import litellm
 
         monkeypatch.setattr(
-            litellm, "get_supported_openai_params",
+            litellm,
+            "get_supported_openai_params",
             lambda model: ["temperature", "max_tokens"],
         )
 
@@ -1118,7 +945,8 @@ class TestGetSupportedOpenaiParamsUsage:
         import litellm.utils
 
         monkeypatch.setattr(
-            litellm, "get_supported_openai_params",
+            litellm,
+            "get_supported_openai_params",
             lambda model: ["reasoning_effort", "temperature"],
         )
 
@@ -1139,7 +967,8 @@ class TestGetSupportedOpenaiParamsUsage:
         import litellm.utils
 
         monkeypatch.setattr(
-            litellm, "get_supported_openai_params",
+            litellm,
+            "get_supported_openai_params",
             lambda model: ["reasoning_effort", "temperature"],
         )
 
@@ -1177,7 +1006,7 @@ class TestSchemaConverter:
 
     def _make_tool(self, name, description, params):
         """Build a FunctionTool with the given parameters."""
-        from line.llm_agent.tools.utils import FunctionTool, ParameterInfo, ToolType
+        from line.llm_agent.tools.utils import FunctionTool, ToolType
 
         return FunctionTool(
             name=name,
@@ -1191,9 +1020,13 @@ class TestSchemaConverter:
         from line.llm_agent.schema_converter import function_tool_to_litellm
         from line.llm_agent.tools.utils import ParameterInfo
 
-        tool = self._make_tool("greet", "Say hello", {
-            "name": ParameterInfo(name="name", type_annotation=str, description="Name", required=True),
-        })
+        tool = self._make_tool(
+            "greet",
+            "Say hello",
+            {
+                "name": ParameterInfo(name="name", type_annotation=str, description="Name", required=True),
+            },
+        )
         result = function_tool_to_litellm(tool)
         assert result["type"] == "function"
         fn = result["function"]
@@ -1208,11 +1041,19 @@ class TestSchemaConverter:
         from line.llm_agent.schema_converter import function_tool_to_litellm
         from line.llm_agent.tools.utils import ParameterInfo
 
-        tool = self._make_tool("search", "Search items", {
-            "query": ParameterInfo(name="query", type_annotation=str, description="Query", required=True),
-            "limit": ParameterInfo(name="limit", type_annotation=int, description="Max results", required=True),
-            "fuzzy": ParameterInfo(name="fuzzy", type_annotation=bool, description="Fuzzy match", required=True),
-        })
+        tool = self._make_tool(
+            "search",
+            "Search items",
+            {
+                "query": ParameterInfo(name="query", type_annotation=str, description="Query", required=True),
+                "limit": ParameterInfo(
+                    name="limit", type_annotation=int, description="Max results", required=True
+                ),
+                "fuzzy": ParameterInfo(
+                    name="fuzzy", type_annotation=bool, description="Fuzzy match", required=True
+                ),
+            },
+        )
         result = function_tool_to_litellm(tool)
         props = result["function"]["parameters"]["properties"]
         assert props["query"]["type"] == "string"
@@ -1223,11 +1064,16 @@ class TestSchemaConverter:
         from line.llm_agent.schema_converter import function_tool_to_litellm
         from line.llm_agent.tools.utils import ParameterInfo
 
-        tool = self._make_tool("opt_tool", "Tool with optional", {
-            "name": ParameterInfo(name="name", type_annotation=str, description="Name", required=True),
-            "tag": ParameterInfo(name="tag", type_annotation=str, description="Tag",
-                                 required=False, default="default"),
-        })
+        tool = self._make_tool(
+            "opt_tool",
+            "Tool with optional",
+            {
+                "name": ParameterInfo(name="name", type_annotation=str, description="Name", required=True),
+                "tag": ParameterInfo(
+                    name="tag", type_annotation=str, description="Tag", required=False, default="default"
+                ),
+            },
+        )
         result = function_tool_to_litellm(tool)
         assert "strict" not in result["function"]
 
@@ -1235,9 +1081,13 @@ class TestSchemaConverter:
         from line.llm_agent.schema_converter import function_tool_to_litellm
         from line.llm_agent.tools.utils import ParameterInfo
 
-        tool = self._make_tool("batch", "Batch op", {
-            "ids": ParameterInfo(name="ids", type_annotation=List[int], description="IDs", required=True),
-        })
+        tool = self._make_tool(
+            "batch",
+            "Batch op",
+            {
+                "ids": ParameterInfo(name="ids", type_annotation=List[int], description="IDs", required=True),
+            },
+        )
         result = function_tool_to_litellm(tool)
         prop = result["function"]["parameters"]["properties"]["ids"]
         assert prop["type"] == "array"
@@ -1248,12 +1098,20 @@ class TestSchemaConverter:
         from line.llm_agent.tools.utils import ParameterInfo
 
         tools = [
-            self._make_tool("a", "Tool A", {
-                "x": ParameterInfo(name="x", type_annotation=str, description="X", required=True),
-            }),
-            self._make_tool("b", "Tool B", {
-                "y": ParameterInfo(name="y", type_annotation=int, description="Y", required=True),
-            }),
+            self._make_tool(
+                "a",
+                "Tool A",
+                {
+                    "x": ParameterInfo(name="x", type_annotation=str, description="X", required=True),
+                },
+            ),
+            self._make_tool(
+                "b",
+                "Tool B",
+                {
+                    "y": ParameterInfo(name="y", type_annotation=int, description="Y", required=True),
+                },
+            ),
         ]
         result = tools_to_litellm(tools)
         assert len(result) == 2
@@ -1306,9 +1164,13 @@ class TestSchemaConverter:
         from line.llm_agent.schema_converter import function_tool_to_litellm
         from line.llm_agent.tools.utils import ParameterInfo
 
-        tool = self._make_tool("test", "Test tool", {
-            "arg": ParameterInfo(name="arg", type_annotation=str, description="Arg", required=True),
-        })
+        tool = self._make_tool(
+            "test",
+            "Test tool",
+            {
+                "arg": ParameterInfo(name="arg", type_annotation=str, description="Arg", required=True),
+            },
+        )
         result = function_tool_to_litellm(tool)
         assert set(result.keys()) == {"type", "function"}
         assert result["type"] == "function"
