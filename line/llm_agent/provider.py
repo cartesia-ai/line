@@ -479,6 +479,8 @@ def _is_realtime_model(model: str) -> bool:
 
 
 _WEBSOCKET_MODELS = ("gpt-5.2", "gpt-5.2-pro", "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano", "gpt-5.4-pro")
+
+
 def _is_websocket_model(model: str) -> bool:
     """Check if a model should use the WebSocket (Responses API) backend.
 
@@ -492,6 +494,7 @@ def _is_websocket_model(model: str) -> bool:
         return False
     model_prefix, model_suffix = match
     return model_suffix in _WEBSOCKET_MODELS and model_prefix in ("openai", "chatgpt")
+
 
 # Backward-compat alias — emits a deprecation warning on instantiation.
 def LLMProvider(*args, **kwargs):
