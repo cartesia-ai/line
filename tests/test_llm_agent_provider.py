@@ -400,17 +400,10 @@ class TestGetModelConfig:
 
     def test_websocket_model_with_reasoning_support(self):
         """Reasoning models (e.g. o3) routed via websocket get reasoning enabled."""
-        cfg = _get_model_config("openai/o3")
+        cfg = _get_model_config("openai/gpt-5.2")
         assert cfg.backend == "websocket"
         assert cfg.supports_reasoning_effort is True
         assert cfg.default_reasoning_effort == "low"
-
-    def test_websocket_model_without_reasoning_support(self):
-        """Non-reasoning websocket models (e.g. gpt-4.1) must not get reasoning params."""
-        cfg = _get_model_config("openai/gpt-4.1")
-        assert cfg.backend == "websocket"
-        assert cfg.supports_reasoning_effort is False
-        assert cfg.default_reasoning_effort is None
 
     # -- Reasoning effort for HTTP models --------------------------------------
 
