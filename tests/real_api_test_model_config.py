@@ -20,9 +20,8 @@ they run alongside other real-API tests rather than in the fast unit-test suite.
 
 import os
 
-import pytest
-
 from litellm import get_supported_openai_params
+import pytest
 
 from line.llm_agent.provider import _get_model_config
 
