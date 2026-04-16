@@ -10,9 +10,6 @@ Coverage:
     - Reasoning-model specific checks (temperature rejection, completion
       without temperature, Anthropic extended thinking).
 
-Static registry tests (get_supported_openai_params, _get_model_config) live in
-``test_llm_agent_provider.py`` — they need no API keys.
-
 Requires both OPENAI_API_KEY and ANTHROPIC_API_KEY; the module raises at import
 if either is missing so pytest errors during collection instead of skipping tests.
 """
@@ -84,7 +81,7 @@ def _ids(pairs: list[tuple[str, str]]) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# Live vendor tests — standard models (temperature, streaming, tools)
+# Live vendor tests — standard models (temperature, tools)
 # ---------------------------------------------------------------------------
 
 
