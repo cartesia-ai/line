@@ -217,6 +217,35 @@ async def test_websocket_model_config():
     finally:
         await provider.aclose()
 
+    # -- Test 5: top_p causes WebSocket close ------------------------------------
+    print("\n" + "=" * 60)
+    print(f"Test: WebSocket rejects top_p=0.9 ({model})")
+    print("=" * 60)
+
+    config = _normalize_config(
+        LlmConfig(
+            system_prompt="You are a helpful assistant. Be brief.",
+            top_p=0.9,
+        )
+    )
+    provider = _WebSocketProvider(model=model, api_key=api_key, default_reasoning_effort=None)
+    try:
+        messages = [Message(role="user", content="Say 'hello' and nothing else.")]
+        text = ""
+        async for chunk in provider.chat(messages, config=config):
+            if chunk.text:
+                text += chunk.text
+        if text.strip():
+            print(f"INFO: top_p=0.9 was accepted, got response: {text.strip()!r}")
+            print("NOTE: WebSocket accepts top_p — update routing if this is unexpected")
+        else:
+            print("FAIL: empty response with top_p=0.9")
+            failures.append("top_p=0.9")
+    except (RuntimeError, Exception) as e:
+        print(f"PASS: top_p=0.9 correctly rejected: {type(e).__name__}: {e}")
+    finally:
+        await provider.aclose()
+
     # -- Summary ---------------------------------------------------------------
     print("\n" + "=" * 60)
     if failures:
