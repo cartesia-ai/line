@@ -453,11 +453,11 @@ async def test_conversation_reset(model: str, api_key: str):
     """Test resetting a conversation to an earlier point.
 
     Exercises the WebSocket provider's divergence detection by:
-    1. Running a 2-turn conversation (user sets a secret word, assistant acks).
-    2. Asking the model to recall the secret word (turn 3).
-    3. Resetting: re-sending turns 1-2 with a *different* secret word,
+    1. Running a 2-turn conversation (user sets a codeword, assistant acks).
+    2. Asking the model to recall the codeword (turn 3).
+    3. Resetting: re-sending turns 1-2 with a *different* codeword,
        then asking the model to recall it again (turn 3').
-    4. Verifying the model answers with the *new* secret word, confirming
+    4. Verifying the model answers with the *new* codeword, confirming
        the provider rolled back correctly.
     """
     print("\n" + "=" * 60)
@@ -474,40 +474,58 @@ async def test_conversation_reset(model: str, api_key: str):
         return "".join(parts)
 
     # Turn 1: shared greeting — captures the real assistant response.
-    history = [Message(role="user", content="Hi, I'm testing multi-turn. Just say OK.")]
+    history = [Message(role="user", content="Hi, I'm testing multi-turn memory. Just say OK.")]
     print("--- Turn 1: greeting ---")
     turn1_reply = await collect_text(provider.chat(history))
     print(f"Model says: {turn1_reply.strip()}")
     history.append(Message(role="assistant", content=turn1_reply))
 
-    # Turn 2 (branch A): set secret word = banana.
-    history.append(Message(role="user", content="The secret word is 'banana'. Just say OK."))
-    print("--- Turn 2a: secret word = banana ---")
+    # Turn 2 (branch A): set codeword = banana.
+    history.append(
+        Message(
+            role="user",
+            content=(
+                "For this test, the codeword is 'banana'. Please acknowledge by repeating the codeword back."
+            ),
+        )
+    )
+    print("--- Turn 2a: codeword = banana ---")
     turn2a_reply = await collect_text(provider.chat(history))
     print(f"Model says: {turn2a_reply.strip()}")
     history.append(Message(role="assistant", content=turn2a_reply))
 
-    # Turn 3 (branch A): ask for the secret word.
+    # Turn 3 (branch A): ask for the codeword.
     history.append(
-        Message(role="user", content="What is the secret word? Reply with ONLY the word, nothing else.")
+        Message(
+            role="user", content="What was the codeword I gave you? Reply with ONLY the word, nothing else."
+        )
     )
     print("--- Turn 3a: recall ---")
     response_a = await collect_text(provider.chat(history))
     print(f"Model says: {response_a.strip()}")
 
-    # Branch B: rewind to after turn 1, set a different secret word.
+    # Branch B: rewind to after turn 1, set a different codeword.
     # Keeps the first two messages (user + real assistant reply) intact,
     # so divergence happens at message index 2.
     history_b = history[:2]  # user greeting + real assistant reply
-    history_b.append(Message(role="user", content="The secret word is 'giraffe'. Just say OK."))
-    print("--- Turn 2b (reset at message 2): secret word = giraffe ---")
+    history_b.append(
+        Message(
+            role="user",
+            content=(
+                "For this test, the codeword is 'giraffe'. Please acknowledge by repeating the codeword back."
+            ),
+        )
+    )
+    print("--- Turn 2b (reset at message 2): codeword = giraffe ---")
     turn2b_reply = await collect_text(provider.chat(history_b))
     print(f"Model says: {turn2b_reply.strip()}")
     history_b.append(Message(role="assistant", content=turn2b_reply))
 
-    # Turn 3 (branch B): ask for the secret word again.
+    # Turn 3 (branch B): ask for the codeword again.
     history_b.append(
-        Message(role="user", content="What is the secret word? Reply with ONLY the word, nothing else.")
+        Message(
+            role="user", content="What was the codeword I gave you? Reply with ONLY the word, nothing else."
+        )
     )
     print("--- Turn 3b: recall after reset ---")
     response_b = await collect_text(provider.chat(history_b))
