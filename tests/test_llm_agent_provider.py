@@ -188,6 +188,7 @@ def test_llm_provider_routes_websocket_models_with_unsupported_config_to_http_ba
     provider = LlmProvider(
         model="openai/gpt-5.2",
         api_key="test-key",
+        backend="websocket",
     )
     websocket_backend = _DummyBackend()
     http_backend = _DummyBackend()
@@ -210,6 +211,7 @@ def test_llm_provider_routes_temperature_to_http_backend():
     provider = LlmProvider(
         model="openai/gpt-5.2",
         api_key="test-key",
+        backend="websocket",
     )
     websocket_backend = _DummyBackend()
     http_backend = _DummyBackend()
@@ -229,6 +231,7 @@ def test_llm_provider_warmup_routes_unsupported_websocket_config_to_http_backend
     provider = LlmProvider(
         model="openai/gpt-5.2",
         api_key="test-key",
+        backend="websocket",
     )
     websocket_backend = _DummyBackend()
     http_backend = _DummyBackend()
@@ -310,7 +313,7 @@ def test_is_supported_model_accepts_direct_openai_websocket_model(monkeypatch):
     import litellm
 
     monkeypatch.setattr(litellm, "get_supported_openai_params", lambda model: None)
-    assert _get_model_config(parse_model_id("openai/gpt-5.2")) is not None
+    assert _get_model_config(parse_model_id("openai/gpt-5.2"), backend="websocket") is not None
 
 
 def test_backend_override_http_for_websocket_model():
@@ -365,7 +368,7 @@ class TestGetModelConfig:
 
     def test_websocket_model_selects_websocket_backend(self):
         cfg = _get_model_config(parse_model_id("openai/gpt-5.2"))
-        assert cfg.backend == "websocket"
+        assert cfg.backend == "http"
 
     def test_websocket_model_with_http_override_selects_http(self):
         cfg = _get_model_config(parse_model_id("openai/gpt-5.2"), backend="http")
@@ -428,7 +431,7 @@ class TestGetModelConfig:
 
     def test_websocket_model_with_reasoning_support(self):
         """Reasoning models (e.g. o3) routed via websocket get reasoning enabled."""
-        cfg = _get_model_config(parse_model_id("openai/gpt-5.2"))
+        cfg = _get_model_config(parse_model_id("openai/gpt-5.2"), backend="websocket")
         assert cfg.backend == "websocket"
         assert cfg.supports_reasoning_effort is True
         assert cfg.default_reasoning_effort == "low"

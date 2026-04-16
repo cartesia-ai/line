@@ -190,7 +190,7 @@ def turn_env():
 # =============================================================================
 
 
-def _unsupported_model_config(model_id):
+def _unsupported_model_config(model_id, *, backend=None):
     return None
 
 
@@ -207,7 +207,7 @@ async def test_init_rejects_unsupported_model(monkeypatch, anyio_backend):
 async def test_init_accepts_direct_openai_websocket_model(monkeypatch, anyio_backend):
     """Direct OpenAI WebSocket models stay accepted even if LiteLLM doesn't know them yet."""
 
-    def _ws_or_unsupported(model_id):
+    def _ws_or_unsupported(model_id, *, backend=None):
         if model_id.model == "gpt-5-mini":
             return _ModelConfig(
                 backend="websocket",
@@ -226,7 +226,7 @@ async def test_init_rejects_unsupported_reasoning_effort(monkeypatch, anyio_back
     """Test that reasoning_effort is rejected for models that do not support it."""
     monkeypatch.setattr(
         "line.llm_agent.llm_agent._get_model_config",
-        lambda model_id: _ModelConfig(
+        lambda model_id, *, backend=None: _ModelConfig(
             backend="http",
             supports_reasoning_effort=False,
             default_reasoning_effort=None,

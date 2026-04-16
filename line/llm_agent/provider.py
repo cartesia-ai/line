@@ -441,16 +441,15 @@ def _get_model_config(model_id: ParsedModelId, *, backend: Optional[str] = None)
             default_reasoning_effort=None,
         )
 
-    # WebSocket models — auto-select websocket, but allow http override.
+    # WebSocket models — opt-in via backend="websocket"; default is HTTP.
     from litellm import get_supported_openai_params
 
     litellm_model = str(model_id)
-
     if backend == "websocket" and not _is_websocket_model(model_id):
         raise ValueError(
             f"Backend 'websocket' requires a websocket-compatible model (e.g. gpt-5.2), got {str(model_id)!r}"
         )
-    if _is_websocket_model(model_id) and backend in (None, "websocket"):
+    if _is_websocket_model(model_id) and backend == "websocket":
         ws_supported = get_supported_openai_params(model=litellm_model) or []
         ws_supports_reasoning = "reasoning_effort" in ws_supported
         return _ModelConfig(
