@@ -463,11 +463,10 @@ def _get_model_info(model: str) -> dict:
     """
     import litellm
 
-    lower = model.lower()
-    if lower.startswith("openai/"):
-        lookup = lower[len("openai/") :]
+    if model.startswith("openai/"):
+        lookup = model[len("openai/") :]
     else:
-        lookup = lower
+        lookup = model
     return litellm.model_cost.get(lookup, {})
 
 
@@ -479,15 +478,14 @@ def _is_openai_model(model: str) -> bool:
         # "openai" for direct API, "chatgpt" for ChatGPT API - both use OpenAI endpoints
         return provider in ("openai", "chatgpt")
     # Fallback to pattern matching for models not yet in LiteLLM registry
-    lower = model.lower()
-    if lower.startswith("openai/"):
-        lower = lower[len("openai/") :]
-    return lower.startswith(("gpt-", "o1", "o3", "o4", "chatgpt/", "codex"))
+    if model.startswith("openai/"):
+        model = model[len("openai/") :]
+    return model.startswith(("gpt-", "o1", "o3", "o4", "chatgpt/", "codex"))
 
 
 def _is_realtime_model(model: str) -> bool:
     """Check if a model name indicates a direct OpenAI Realtime model."""
-    return _is_openai_model(model) and "realtime" in model.lower().split("/", 1)[-1]
+    return _is_openai_model(model) and "realtime" in model.split("/", 1)[-1]
 
 
 _WEBSOCKET_MODELS = ("gpt-5.2", "gpt-5.2-pro", "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano", "gpt-5.4-pro")
@@ -501,7 +499,7 @@ def _is_websocket_model(model: str) -> bool:
     """
     if model in _WEBSOCKET_MODELS:
         return True
-    match = model.lower().split("/", 1)
+    match = model.split("/", 1)
     if len(match) == 1:
         return False
     model_prefix, model_suffix = match
