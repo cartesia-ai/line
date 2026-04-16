@@ -429,7 +429,8 @@ def _get_model_config(model_id: ParsedModelId, *, backend: Optional[str] = None)
     # Realtime models — dedicated realtime backend, no override allowed.
     if backend == "realtime" and not _is_realtime_model(model_id):
         raise ValueError(
-            f"Backend 'realtime' requires a realtime model (e.g. gpt-4o-realtime-preview), got {str(model_id)!r}"
+            "Backend 'realtime' requires a realtime model"
+            + f"(e.g. gpt-4o-realtime-preview), got {str(model_id)!r}"
         )
     if backend is not None and backend != "realtime" and _is_realtime_model(model_id):
         raise ValueError(f"Realtime model {str(model_id)!r} is incompatible with backend {backend!r}")

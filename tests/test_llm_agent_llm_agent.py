@@ -1191,9 +1191,7 @@ async def test_mixed_decorated_and_plain_functions(turn_env):
         return "plain"
 
     # Resolve tools - plain functions get wrapped here
-    resolved_tools, _ = _normalize_tools(
-        [decorated_tool, plain_tool], model_id=parse_model_id("gpt-4o")
-    )
+    resolved_tools, _ = _normalize_tools([decorated_tool, plain_tool], model_id=parse_model_id("gpt-4o"))
 
     assert len(resolved_tools) == 2
 

@@ -277,9 +277,7 @@ def test_build_openai_tool_defs_strips_strict_flag_when_requested():
 
     # With include_strict_flag=False the flag is stripped, but the schema still
     # reflects strict construction (additionalProperties: false, required list).
-    without_flag = build_openai_tool_defs(
-        [simple_tool], responses_api=True, include_strict_flag=False
-    )
+    without_flag = build_openai_tool_defs([simple_tool], responses_api=True, include_strict_flag=False)
     assert without_flag is not None
     assert "strict" not in without_flag[0]
     assert without_flag[0]["parameters"]["additionalProperties"] is False
@@ -500,9 +498,7 @@ class TestParseModelId:
         )
 
     def test_gemini_prefix_preserved(self):
-        assert parse_model_id("gemini/gemini-2.5-flash") == ParsedModelId(
-            "gemini", "gemini-2.5-flash"
-        )
+        assert parse_model_id("gemini/gemini-2.5-flash") == ParsedModelId("gemini", "gemini-2.5-flash")
 
     def test_provider_lowercased(self):
         assert parse_model_id("OpenAI/gpt-4o") == ParsedModelId("openai", "gpt-4o")

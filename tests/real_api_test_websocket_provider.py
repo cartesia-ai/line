@@ -247,9 +247,7 @@ async def test_response_not_found_retry(api_key: str, model_id: ParsedModelId):
     """Force a ``previous_response_not_found`` by corrupting history; verify retry recovers."""
     print_header(f"Response Not Found Retry Test ({model_id.model})")
 
-    provider = _WebSocketProvider(
-        model_id=model_id, api_key=api_key, default_reasoning_effort=None
-    )
+    provider = _WebSocketProvider(model_id=model_id, api_key=api_key, default_reasoning_effort=None)
     config = LlmConfig(system_prompt="You are a helpful assistant. Be brief.")
 
     try:
@@ -260,8 +258,7 @@ async def test_response_not_found_retry(api_key: str, model_id: ParsedModelId):
         print(f"Response IDs in history: {[rid for _, rid in provider._history if rid]}")
 
         provider._history = [
-            (identity, "resp_FAKE_000" if rid else None)
-            for identity, rid in provider._history
+            (identity, "resp_FAKE_000" if rid else None) for identity, rid in provider._history
         ]
         print("\nCorrupted history — all response_ids replaced with 'resp_FAKE_000'")
 
