@@ -13,7 +13,8 @@ Coverage:
 Static registry tests (get_supported_openai_params, _get_model_config) live in
 ``test_llm_agent_provider.py`` — they need no API keys.
 
-Requires API keys in the environment (OPENAI_API_KEY, ANTHROPIC_API_KEY).
+Requires both OPENAI_API_KEY and ANTHROPIC_API_KEY; the module raises at import
+if either is missing so pytest errors during collection instead of skipping tests.
 """
 
 import os
@@ -25,17 +26,15 @@ import pytest
 litellm.suppress_debug_info = True
 
 # ---------------------------------------------------------------------------
-# Skip helpers
+# API keys — required at import so collection fails before any test runs
 # ---------------------------------------------------------------------------
 
-_has_openai_key = pytest.mark.skipif(
-    not os.getenv("OPENAI_API_KEY"),
-    reason="OPENAI_API_KEY not set",
-)
-_has_anthropic_key = pytest.mark.skipif(
-    not os.getenv("ANTHROPIC_API_KEY"),
-    reason="ANTHROPIC_API_KEY not set",
-)
+_missing_api_keys = [name for name in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY") if not os.getenv(name)]
+if _missing_api_keys:
+    raise RuntimeError(
+        "tests/real_api_test_model_config.py requires OPENAI_API_KEY and ANTHROPIC_API_KEY "
+        f"in the environment; missing: {', '.join(_missing_api_keys)}"
+    )
 
 # ---------------------------------------------------------------------------
 # Shared fixtures
@@ -76,7 +75,6 @@ _REASONING_HTTP_IDS = ["o3-mini"]
 class TestLiveStandardCompletion:
     """Verify standard models accept a basic completion with temperature."""
 
-    @_has_openai_key
     @pytest.mark.parametrize("model", _STANDARD_MODELS_OPENAI, ids=_STANDARD_MODELS_OPENAI_IDS)
     async def test_openai(self, model: str):
         r = await litellm.acompletion(
@@ -87,7 +85,6 @@ class TestLiveStandardCompletion:
         )
         assert r.choices[0].message is not None
 
-    @_has_anthropic_key
     @pytest.mark.parametrize("model", _STANDARD_MODELS_ANTHROPIC, ids=_STANDARD_MODELS_ANTHROPIC_IDS)
     async def test_anthropic(self, model: str):
         r = await litellm.acompletion(
@@ -102,7 +99,6 @@ class TestLiveStandardCompletion:
 class TestLiveStandardStreaming:
     """Verify standard models produce streaming output."""
 
-    @_has_openai_key
     @pytest.mark.parametrize("model", _STANDARD_MODELS_OPENAI, ids=_STANDARD_MODELS_OPENAI_IDS)
     async def test_openai(self, model: str):
         stream = await litellm.acompletion(
@@ -119,7 +115,6 @@ class TestLiveStandardStreaming:
                 break
         assert saw_text, f"{model}: streaming returned no assistant text"
 
-    @_has_anthropic_key
     @pytest.mark.parametrize("model", _STANDARD_MODELS_ANTHROPIC, ids=_STANDARD_MODELS_ANTHROPIC_IDS)
     async def test_anthropic(self, model: str):
         stream = await litellm.acompletion(
@@ -144,7 +139,6 @@ class TestLiveStandardToolAcceptance:
     (``auto`` may legitimately respond with text instead).
     """
 
-    @_has_openai_key
     @pytest.mark.parametrize("model", _STANDARD_MODELS_OPENAI, ids=_STANDARD_MODELS_OPENAI_IDS)
     async def test_openai(self, model: str):
         r = await litellm.acompletion(
@@ -158,7 +152,6 @@ class TestLiveStandardToolAcceptance:
         tc = getattr(r.choices[0].message, "tool_calls", None)
         assert tc, f"{model}: expected a forced tool call, got {r.choices[0].message!r}"
 
-    @_has_anthropic_key
     @pytest.mark.parametrize("model", _STANDARD_MODELS_ANTHROPIC, ids=_STANDARD_MODELS_ANTHROPIC_IDS)
     async def test_anthropic(self, model: str):
         r = await litellm.acompletion(
@@ -181,7 +174,6 @@ class TestLiveStandardToolAcceptance:
 class TestLiveReasoningHttp:
     """Reasoning HTTP models (e.g. o3-mini) that reject arbitrary temperature."""
 
-    @_has_openai_key
     @pytest.mark.parametrize("model", _REASONING_HTTP_MODELS, ids=_REASONING_HTTP_IDS)
     async def test_rejects_arbitrary_temperature(self, model: str):
         """Non-default temperature should be rejected by litellm or the vendor."""
@@ -199,7 +191,6 @@ class TestLiveReasoningHttp:
             "if the API now accepts arbitrary temperature, update this test."
         )
 
-    @_has_openai_key
     @pytest.mark.parametrize("model", _REASONING_HTTP_MODELS, ids=_REASONING_HTTP_IDS)
     async def test_completion_without_temperature(self, model: str):
         """Minimal completion without temperature — validates the model works.
@@ -223,7 +214,6 @@ class TestLiveReasoningHttp:
 class TestLiveAnthropicExtendedThinking:
     """Verify Anthropic extended-thinking models work with and without thinking."""
 
-    @_has_anthropic_key
     @pytest.mark.parametrize(
         "model",
         ["anthropic/claude-sonnet-4-20250514"],
@@ -239,7 +229,6 @@ class TestLiveAnthropicExtendedThinking:
         )
         assert (r.choices[0].message.content or "").strip(), f"{model}: empty completion body"
 
-    @_has_anthropic_key
     @pytest.mark.parametrize(
         "model",
         ["anthropic/claude-sonnet-4-20250514"],
