@@ -342,7 +342,7 @@ async def test_function_tools_with_web_search(model: str, api_key: str):
 
 def _local_mcp_server_command() -> str:
     """Return the command to launch the local test MCP server."""
-    server_path = pathlib.Path(__file__).parent / "test_mcp_server.py"
+    server_path = pathlib.Path(__file__).parent / "real_api_test_mcp_server.py"
     return f"{sys.executable} {server_path}"
 
 

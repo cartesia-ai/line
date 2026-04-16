@@ -259,6 +259,33 @@ def test_build_openai_tool_defs_adds_native_web_search():
     ) == [{"type": "web_search", "search_context_size": "high"}]
 
 
+def test_build_openai_tool_defs_strips_strict_flag_when_requested():
+    """Realtime API rejects ``"strict": true`` on tool defs; the flag must be
+    suppressible without disabling strict schema construction."""
+    from line.llm_agent.tools.decorators import loopback_tool
+    from line.llm_agent.tools.utils import ToolEnv
+
+    @loopback_tool
+    async def simple_tool(ctx: ToolEnv, query: Annotated[str, "query"]):
+        """A simple tool."""
+        return "ok"
+
+    # Default: strict flag is emitted.
+    with_flag = build_openai_tool_defs([simple_tool], responses_api=True)
+    assert with_flag is not None
+    assert with_flag[0]["strict"] is True
+
+    # With include_strict_flag=False the flag is stripped, but the schema still
+    # reflects strict construction (additionalProperties: false, required list).
+    without_flag = build_openai_tool_defs(
+        [simple_tool], responses_api=True, include_strict_flag=False
+    )
+    assert without_flag is not None
+    assert "strict" not in without_flag[0]
+    assert without_flag[0]["parameters"]["additionalProperties"] is False
+    assert without_flag[0]["parameters"]["required"] == ["query"]
+
+
 def test_llm_provider_requires_api_key():
     try:
         LlmProvider(model="gpt-4o", api_key="")

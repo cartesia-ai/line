@@ -101,6 +101,37 @@ def test_plan_chat_includes_native_web_search_tool():
     assert event["session"]["tools"] == [{"type": "web_search", "search_context_size": "high"}]
 
 
+def test_plan_chat_strips_strict_flag_from_function_tools():
+    """Realtime API rejects ``session.tools[*].strict`` — the plan must omit
+    the flag even though the schema is built in strict mode."""
+    from typing import Annotated
+
+    from line.llm_agent.tools.decorators import loopback_tool
+    from line.llm_agent.tools.utils import ToolEnv
+
+    @loopback_tool
+    async def echo(ctx: ToolEnv, text: Annotated[str, "text to echo"]):
+        """Echo the text."""
+        return text
+
+    diff = _plan_chat(
+        history=[],
+        messages=[Message(role="user", content="hi")],
+        tools=[echo],
+        config=_cfg(),
+    )
+
+    event, _ = diff.steps[0]
+    assert event["type"] == "session.update"
+    tool_defs = event["session"]["tools"]
+    assert len(tool_defs) == 1
+    assert tool_defs[0]["type"] == "function"
+    assert tool_defs[0]["name"] == "echo"
+    assert "strict" not in tool_defs[0]
+    # Strict schema construction is preserved.
+    assert tool_defs[0]["parameters"]["additionalProperties"] is False
+
+
 def test_plan_chat_append_only():
     """Common case: history has context + user msg, new user msg appended."""
     ctx_id = _ctx_id("hi")

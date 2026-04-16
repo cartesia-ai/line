@@ -115,6 +115,7 @@ class _RealtimeProvider:
                 web_search_options=web_search_options,
                 strict=config.strict_tool_schemas,
                 responses_api=True,
+                include_strict_flag=False,
             )
             desired_context = _context_identity(
                 instructions,
@@ -292,6 +293,7 @@ def _plan_chat(
         web_search_options=web_search_options,
         strict=config.strict_tool_schemas,
         responses_api=True,
+        include_strict_flag=False,
     )
     desired_context = _context_identity(
         desired_instructions,
