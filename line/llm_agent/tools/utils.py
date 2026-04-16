@@ -367,6 +367,9 @@ def _check_web_search_support(model_id: ParsedModelId) -> bool:
 
     Returns True if the model supports web_search_options, False otherwise.
     """
+    if model_id.provider == "openai" and model_id.model == "gpt-4.1":
+        # LiteLLM thinks 4.1 supports this, but it doesn't
+        return False
     try:
         import litellm
 
