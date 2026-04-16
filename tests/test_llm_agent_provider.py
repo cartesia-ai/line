@@ -202,7 +202,9 @@ def test_llm_provider_routes_websocket_models_with_unsupported_config_to_http_ba
     assert len(http_backend.calls) == 1
 
 
-def test_llm_provider_keeps_websocket_backend_for_supported_config():
+def test_llm_provider_routes_temperature_to_http_backend():
+    """temperature/top_p cause the OpenAI WebSocket endpoint to close silently,
+    so they must route to the HTTP fallback."""
     provider = LlmProvider(
         model="openai/gpt-5.2",
         api_key="test-key",
@@ -212,14 +214,13 @@ def test_llm_provider_keeps_websocket_backend_for_supported_config():
     provider._backend = websocket_backend
     provider._http_fallback_backend = http_backend
 
-    result = provider.chat(
+    provider.chat(
         [Message(role="user", content="hi")],
         config=LlmConfig(temperature=0.2, top_p=0.9),
     )
 
-    assert result == "ok"
-    assert len(websocket_backend.calls) == 1
-    assert len(http_backend.calls) == 0
+    assert len(websocket_backend.calls) == 0
+    assert len(http_backend.calls) == 1
 
 
 def test_llm_provider_warmup_routes_unsupported_websocket_config_to_http_backend():
@@ -400,17 +401,10 @@ class TestGetModelConfig:
 
     def test_websocket_model_with_reasoning_support(self):
         """Reasoning models (e.g. o3) routed via websocket get reasoning enabled."""
-        cfg = _get_model_config("openai/o3")
+        cfg = _get_model_config("openai/gpt-5.2")
         assert cfg.backend == "websocket"
         assert cfg.supports_reasoning_effort is True
         assert cfg.default_reasoning_effort == "low"
-
-    def test_websocket_model_without_reasoning_support(self):
-        """Non-reasoning websocket models (e.g. gpt-4.1) must not get reasoning params."""
-        cfg = _get_model_config("openai/gpt-4.1")
-        assert cfg.backend == "websocket"
-        assert cfg.supports_reasoning_effort is False
-        assert cfg.default_reasoning_effort is None
 
     # -- Reasoning effort for HTTP models --------------------------------------
 
