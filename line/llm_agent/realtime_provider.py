@@ -19,7 +19,7 @@ import websockets
 from websockets.legacy.client import WebSocketClientProtocol
 
 from line.llm_agent.config import LlmConfig
-from line.llm_agent.provider import Message, _extract_instructions_and_messages
+from line.llm_agent.provider import Message, ParsedModelId, _extract_instructions_and_messages
 from line.llm_agent.schema_converter import build_openai_tool_defs
 from line.llm_agent.stream import (
     ConversationEntry,
@@ -29,7 +29,6 @@ from line.llm_agent.stream import (
     _compute_divergence,
     _context_identity,
     _expand_messages,
-    _normalize_openai_model_name,
     _ws_connect,
     _ws_is_closed,
     _WsEventStream,
@@ -60,12 +59,12 @@ class _RealtimeProvider:
 
     def __init__(
         self,
-        model: str,
+        model_id: ParsedModelId,
         api_key: Optional[str] = None,
     ):
-        self._model = model
+        self._model_id = model_id
         self._api_key = api_key or ""
-        self._ws_url = f"{WS_URL}?model={_normalize_openai_model_name(model)}"
+        self._ws_url = f"{WS_URL}?model={model_id.model}"
         self._ws: Optional[WebSocketClientProtocol] = None
         self._history: List[ConversationEntry] = []
         # Lazy-init: asyncio.Lock() requires a running event loop on Python 3.9.

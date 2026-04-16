@@ -41,7 +41,7 @@ from line.events import (
     UserTextSent,
 )
 from line.llm_agent import LlmAgent, LlmConfig, loopback_tool
-from line.llm_agent.provider import LlmProvider, Message
+from line.llm_agent.provider import LlmProvider, Message, parse_model_id
 from line.llm_agent.realtime_provider import _RealtimeProvider
 
 # =============================================================================
@@ -115,7 +115,7 @@ async def test_streaming(api_key: str, model: str):
     """Basic text streaming over Realtime WS."""
     print_header(f"Streaming Test ({model})")
 
-    provider = _RealtimeProvider(model=model, api_key=api_key)
+    provider = _RealtimeProvider(model_id=parse_model_id(model), api_key=api_key)
     messages = [Message(role="user", content="Say 'Hello, World!' and nothing else.")]
 
     try:
@@ -182,7 +182,7 @@ async def test_multi_turn(api_key: str, model: str):
     """Multi-turn conversation — WS benefits from persistent connection."""
     print_header(f"Multi-Turn Test ({model})")
 
-    provider = _RealtimeProvider(model=model, api_key=api_key)
+    provider = _RealtimeProvider(model_id=parse_model_id(model), api_key=api_key)
     config = LlmConfig(system_prompt="You are a helpful assistant. Be brief.")
 
     turns = [
@@ -209,7 +209,7 @@ async def test_diff_sync(api_key: str, model: str):
     """Simulate history divergence (interrupted text) and verify diff-sync."""
     print_header(f"Diff-Sync Test ({model})")
 
-    provider = _RealtimeProvider(model=model, api_key=api_key)
+    provider = _RealtimeProvider(model_id=parse_model_id(model), api_key=api_key)
     config = LlmConfig(system_prompt="You are a helpful assistant. Be brief.")
 
     try:

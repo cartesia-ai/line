@@ -27,7 +27,7 @@ from loguru import logger
 from websockets.legacy.client import WebSocketClientProtocol
 
 from line.llm_agent.config import LlmConfig
-from line.llm_agent.provider import Message, _extract_instructions_and_messages
+from line.llm_agent.provider import Message, ParsedModelId, _extract_instructions_and_messages
 from line.llm_agent.schema_converter import build_openai_tool_defs
 from line.llm_agent.stream import (
     ConversationEntry,
@@ -37,7 +37,6 @@ from line.llm_agent.stream import (
     _compute_divergence,
     _context_identity,
     _expand_messages,
-    _normalize_openai_model_name,
     _ws_connect,
     _ws_is_closed,
     _WsEventStream,
@@ -81,11 +80,11 @@ class _WebSocketProvider:
 
     def __init__(
         self,
-        model: str,
+        model_id: ParsedModelId,
         api_key: Optional[str] = None,
         default_reasoning_effort: Optional[str] = "none",
     ):
-        self._model = model
+        self._model_id = model_id
         self._default_reasoning_effort = default_reasoning_effort
         self._api_key = api_key or ""
         self._ws: Optional[WebSocketClientProtocol] = None
@@ -169,7 +168,7 @@ class _WebSocketProvider:
                 return
 
             request = _build_request(
-                model=self._model,
+                model_id=self._model_id,
                 default_reasoning_effort=self._default_reasoning_effort,
                 instructions=instructions,
                 tool_defs=tool_defs,
@@ -215,7 +214,7 @@ class _WebSocketProvider:
 
             request, update_history = _plan_chat(
                 history=self._history,
-                model=self._model,
+                model_id=self._model_id,
                 default_reasoning_effort=self._default_reasoning_effort,
                 messages=messages,
                 tools=tools,
@@ -244,7 +243,7 @@ class _WebSocketProvider:
 def _plan_chat(
     *,
     history: List[ConversationEntry],
-    model: str,
+    model_id: ParsedModelId,
     default_reasoning_effort: Optional[str],
     messages: List[Message],
     tools: Optional[List[FunctionTool]],
@@ -299,7 +298,7 @@ def _plan_chat(
 
     input_pairs = desired_pairs[max(0, continuation_idx - 1) :]
     request = _build_request(
-        model=model,
+        model_id=model_id,
         default_reasoning_effort=default_reasoning_effort,
         instructions=instructions,
         tool_defs=tool_defs,
@@ -323,7 +322,7 @@ def _plan_chat(
 
 def _build_request(
     *,
-    model: str,
+    model_id: ParsedModelId,
     default_reasoning_effort: Optional[str],
     instructions: Optional[str],
     tool_defs: Optional[List[Dict[str, Any]]],
@@ -335,7 +334,7 @@ def _build_request(
     """Build a ``response.create`` request dict."""
     request: Dict[str, Any] = {
         "type": "response.create",
-        "model": _normalize_openai_model_name(model),
+        "model": model_id.model,
         "store": True,
     }
     if input is not None:

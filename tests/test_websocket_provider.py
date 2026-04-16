@@ -4,7 +4,7 @@ import asyncio
 from typing import List
 
 from line.llm_agent.config import LlmConfig, _normalize_config
-from line.llm_agent.provider import Message, StreamChunk, ToolCall
+from line.llm_agent.provider import Message, StreamChunk, ToolCall, parse_model_id
 from line.llm_agent.schema_converter import build_openai_tool_defs
 from line.llm_agent.stream import _compute_divergence, _context_identity, _expand_messages
 from line.llm_agent.websocket_provider import (
@@ -26,7 +26,7 @@ def test_plan_chat_update_preserves_text_then_tool_call_outputs():
 
     _, update = _plan_chat(
         history=history,
-        model="openai/gpt-5.2",
+        model_id=parse_model_id("openai/gpt-5.2"),
         default_reasoning_effort="none",
         messages=[Message(role="user", content="Weather?")],
         tools=None,
@@ -74,7 +74,7 @@ def test_plan_chat_continuation_from_checkpoint():
 
     request, _ = _plan_chat(
         history=history,
-        model="openai/gpt-5.2",
+        model_id=parse_model_id("openai/gpt-5.2"),
         default_reasoning_effort="none",
         messages=[
             Message(role="user", content="hello"),
@@ -104,7 +104,7 @@ def test_plan_chat_divergence_rolls_back_to_checkpoint():
 
     request, _ = _plan_chat(
         history=history,
-        model="openai/gpt-5.2",
+        model_id=parse_model_id("openai/gpt-5.2"),
         default_reasoning_effort="none",
         messages=[
             Message(role="user", content="hello"),
@@ -127,7 +127,7 @@ def test_plan_chat_update_builds_correct_history():
 
     _, update = _plan_chat(
         history=[],
-        model="openai/gpt-5.2",
+        model_id=parse_model_id("openai/gpt-5.2"),
         default_reasoning_effort="none",
         messages=[Message(role="user", content="hi")],
         tools=None,
@@ -155,9 +155,9 @@ def test_plan_chat_update_builds_correct_history():
 # ---------------------------------------------------------------------------
 
 
-def test_build_request_strips_openai_prefix():
+def test_build_request_uses_bare_model_name():
     request = _build_request(
-        model="openai/gpt-5.2",
+        model_id=parse_model_id("openai/gpt-5.2"),
         default_reasoning_effort="none",
         instructions=None,
         tool_defs=None,
@@ -193,7 +193,7 @@ def test_extract_model_output_identities_reads_output_text():
 
 
 def test_chat_retries_previous_response_not_found(monkeypatch):
-    provider = _WebSocketProvider(model="openai/gpt-5.2")
+    provider = _WebSocketProvider(model_id=parse_model_id("openai/gpt-5.2"))
     attempts = 0
 
     class _FakeStream:
