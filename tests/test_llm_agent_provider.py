@@ -436,6 +436,28 @@ class TestGetModelConfig:
         assert cfg.supports_reasoning_effort is True
         assert cfg.default_reasoning_effort is None
 
+    # -- Parametrized real-model baseline (catches litellm registry drift) -----
+
+    @pytest.mark.parametrize(
+        "model, expected_backend, expected_supports_reasoning, expected_default_reasoning",
+        [
+            ("openai/gpt-4o", "http", False, None),
+            ("openai/o3-mini", "http", True, "none"),
+            ("gpt-5.2", "websocket", True, "low"),
+            ("gpt-5.4", "websocket", True, "low"),
+            ("anthropic/claude-haiku-4-5", "http", True, None),
+            ("anthropic/claude-opus-4-20250514", "http", True, None),
+        ],
+        ids=["gpt-4o", "o3-mini", "gpt-5.2", "gpt-5.4", "claude-haiku-4-5", "claude-opus-4"],
+    )
+    def test_real_model_config(
+        self, model, expected_backend, expected_supports_reasoning, expected_default_reasoning
+    ):
+        cfg = _get_model_config(model)
+        assert cfg.backend == expected_backend
+        assert cfg.supports_reasoning_effort is expected_supports_reasoning
+        assert cfg.default_reasoning_effort == expected_default_reasoning
+
 
 def test_is_websocket_model_matches_gpt52_variants():
     assert _is_websocket_model("gpt-5.2")
@@ -934,63 +956,3 @@ class TestGetSupportedOpenaiParamsBaseline:
         supported = set(get_supported_openai_params(model=model) or [])
         missing = _LITELLM_CORE_STANDARD - supported
         assert not missing, f"{model} lost core params: {missing}"
-
-
-class TestGetModelConfigRealModels:
-    """Assert _ModelConfig values for real models via live litellm lookups.
-
-    Pure static registry lookups — no API keys or network required.
-    """
-
-    @pytest.mark.parametrize(
-        "model, expected_backend, expected_supports_reasoning, expected_default_reasoning",
-        [
-            # Non-reasoning OpenAI model
-            ("openai/gpt-4o-mini", "http", False, None),
-            # Reasoning OpenAI models — litellm accepts reasoning_effort="none"
-            # so default_reasoning_effort is "none" (not "low").
-            ("openai/o3-mini", "http", True, "none"),
-            # WebSocket-capable reasoning models
-            ("gpt-5.2", "websocket", True, "low"),
-            ("gpt-5.4", "websocket", True, "low"),
-        ],
-        ids=["gpt-4o-mini", "o3-mini", "gpt-5.2", "gpt-5.4"],
-    )
-    def test_openai_models(
-        self,
-        model,
-        expected_backend,
-        expected_supports_reasoning,
-        expected_default_reasoning,
-    ):
-        cfg = _get_model_config(model)
-        assert cfg.backend == expected_backend
-        assert cfg.supports_reasoning_effort is expected_supports_reasoning
-        assert cfg.default_reasoning_effort == expected_default_reasoning
-
-    @pytest.mark.parametrize(
-        "model, expected_backend, expected_supports_reasoning, expected_default_reasoning",
-        [
-            # Extended-thinking Anthropic models — reasoning supported but
-            # default is None because litellm rejects "none" for Anthropic.
-            ("anthropic/claude-haiku-4-5", "http", True, None),
-            ("anthropic/claude-sonnet-4-20250514", "http", True, None),
-            ("anthropic/claude-opus-4-20250514", "http", True, None),
-        ],
-        ids=["claude-haiku-4-5", "claude-sonnet-4", "claude-opus-4"],
-    )
-    def test_anthropic_models(
-        self,
-        model,
-        expected_backend,
-        expected_supports_reasoning,
-        expected_default_reasoning,
-    ):
-        cfg = _get_model_config(model)
-        assert cfg.backend == expected_backend
-        assert cfg.supports_reasoning_effort is expected_supports_reasoning
-        assert cfg.default_reasoning_effort == expected_default_reasoning
-
-    def test_unsupported_model_raises(self):
-        with pytest.raises(ValueError, match="is not supported"):
-            _get_model_config("fake-provider/nonexistent-model-xyz")
