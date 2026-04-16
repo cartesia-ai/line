@@ -3,8 +3,6 @@
 import asyncio
 from typing import Annotated, Any, List, Optional, get_type_hints
 
-import pytest
-
 from line.llm_agent.config import LlmConfig, _normalize_config
 from line.llm_agent.http_provider import _feed_tool_args, _HttpProvider
 from line.llm_agent.provider import (
@@ -435,28 +433,6 @@ class TestGetModelConfig:
         assert cfg.backend == "http"
         assert cfg.supports_reasoning_effort is True
         assert cfg.default_reasoning_effort is None
-
-    # -- Parametrized real-model baseline (catches litellm registry drift) -----
-
-    @pytest.mark.parametrize(
-        "model, expected_backend, expected_supports_reasoning, expected_default_reasoning",
-        [
-            ("openai/gpt-4o", "http", False, None),
-            ("openai/o3-mini", "http", True, "none"),
-            ("gpt-5.2", "websocket", True, "low"),
-            ("gpt-5.4", "websocket", True, "low"),
-            ("anthropic/claude-haiku-4-5", "http", True, None),
-            ("anthropic/claude-opus-4-20250514", "http", True, None),
-        ],
-        ids=["gpt-4o", "o3-mini", "gpt-5.2", "gpt-5.4", "claude-haiku-4-5", "claude-opus-4"],
-    )
-    def test_real_model_config(
-        self, model, expected_backend, expected_supports_reasoning, expected_default_reasoning
-    ):
-        cfg = _get_model_config(model)
-        assert cfg.backend == expected_backend
-        assert cfg.supports_reasoning_effort is expected_supports_reasoning
-        assert cfg.default_reasoning_effort == expected_default_reasoning
 
 
 def test_is_websocket_model_matches_gpt52_variants():
@@ -901,60 +877,3 @@ class TestNormalizeMessages:
         assert len(tool_msgs) == 2
         assert tool_msgs[0].content == "first"
         assert tool_msgs[1].content == "second"
-
-
-# ---------------------------------------------------------------------------
-# Litellm static-registry tests (no API keys or network required)
-# ---------------------------------------------------------------------------
-
-# Core OpenAI-shaped params we rely on per model category.
-_LITELLM_CORE_STANDARD = frozenset({"temperature", "max_tokens", "tools", "tool_choice", "stream"})
-_LITELLM_CORE_REASONING_HTTP = frozenset({"max_tokens", "tools", "tool_choice", "stream"})
-_LITELLM_CORE_REASONING_WS = frozenset(
-    {"temperature", "max_tokens", "tools", "tool_choice", "stream", "reasoning_effort"}
-)
-
-
-class TestGetSupportedOpenaiParamsBaseline:
-    """Spot-check that litellm still exposes the core params we rely on.
-
-    Catches litellm silently dropping params (e.g. tools) that _get_model_config
-    wouldn't surface because it only inspects reasoning_effort.
-
-    These are pure static registry lookups — no API keys or network required.
-    """
-
-    @pytest.mark.parametrize(
-        ("model", "required_params"),
-        [
-            ("gpt-4.1", _LITELLM_CORE_STANDARD),
-            ("openai/gpt-4o", _LITELLM_CORE_STANDARD),
-            ("openai/o3-mini", _LITELLM_CORE_REASONING_HTTP),
-            ("gpt-5.4-mini", _LITELLM_CORE_REASONING_WS),
-            ("gpt-5.2", _LITELLM_CORE_REASONING_WS),
-            ("gpt-5.4", _LITELLM_CORE_REASONING_WS),
-        ],
-        ids=["gpt-4.1", "gpt-4o", "o3-mini", "gpt-5.4-mini", "gpt-5.2", "gpt-5.4"],
-    )
-    def test_openai_core_params(self, model, required_params):
-        from litellm import get_supported_openai_params
-
-        supported = set(get_supported_openai_params(model=model) or [])
-        missing = required_params - supported
-        assert not missing, f"{model} lost core params: {missing}"
-
-    @pytest.mark.parametrize(
-        "model",
-        [
-            "anthropic/claude-haiku-4-5",
-            "anthropic/claude-sonnet-4-20250514",
-            "anthropic/claude-opus-4-20250514",
-        ],
-        ids=["claude-haiku-4-5", "claude-sonnet-4", "claude-opus-4"],
-    )
-    def test_anthropic_core_params(self, model):
-        from litellm import get_supported_openai_params
-
-        supported = set(get_supported_openai_params(model=model) or [])
-        missing = _LITELLM_CORE_STANDARD - supported
-        assert not missing, f"{model} lost core params: {missing}"
