@@ -927,12 +927,14 @@ class TestGetSupportedOpenaiParamsBaseline:
     @pytest.mark.parametrize(
         ("model", "required_params"),
         [
-            ("openai/gpt-4o-mini", _LITELLM_CORE_STANDARD),
+            ("gpt-4.1", _LITELLM_CORE_STANDARD),
+            ("openai/gpt-4o", _LITELLM_CORE_STANDARD),
             ("openai/o3-mini", _LITELLM_CORE_REASONING_HTTP),
+            ("gpt-5.4-mini", _LITELLM_CORE_REASONING_WS),
             ("gpt-5.2", _LITELLM_CORE_REASONING_WS),
             ("gpt-5.4", _LITELLM_CORE_REASONING_WS),
         ],
-        ids=["gpt-4o-mini", "o3-mini", "gpt-5.2", "gpt-5.4"],
+        ids=["gpt-4.1", "gpt-4o", "o3-mini", "gpt-5.4-mini", "gpt-5.2", "gpt-5.4"],
     )
     def test_openai_core_params(self, model, required_params):
         from litellm import get_supported_openai_params
