@@ -12,7 +12,17 @@ Model naming:
 
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Any, AsyncIterable, AsyncIterator, Dict, List, Optional, Protocol, Tuple, runtime_checkable
+from typing import (
+    Any,
+    AsyncIterable,
+    AsyncIterator,
+    Dict,
+    List,
+    Optional,
+    Protocol,
+    Tuple,
+    runtime_checkable,
+)
 
 from loguru import logger
 
@@ -338,7 +348,9 @@ class LlmProvider:
             return self._backend
 
         if (
-            config.stop is not None
+            config.temperature is not None
+            or config.top_p is not None
+            or config.stop is not None
             or config.seed is not None
             or config.presence_penalty is not None
             or config.frequency_penalty is not None
@@ -382,9 +394,13 @@ def _get_model_config(model: str, *, backend: Optional[str] = None) -> _ModelCon
         raise ValueError(f"Invalid backend {backend!r}. Must be one of: {', '.join(sorted(_VALID_BACKENDS))}")
 
     # Realtime models — dedicated realtime backend, no override allowed.
+    if backend == "realtime" and not _is_realtime_model(model):
+        raise ValueError(
+            f"Backend 'realtime' requires a realtime model (e.g. gpt-4o-realtime-preview), got {model!r}"
+        )
+    if backend is not None and backend != "realtime" and _is_realtime_model(model):
+        raise ValueError(f"Realtime model {model!r} is incompatible with backend {backend!r}")
     if _is_realtime_model(model):
-        if backend is not None and backend != "realtime":
-            raise ValueError(f"Realtime model {model!r} is incompatible with backend {backend!r}")
         return _ModelConfig(
             backend="realtime",
             supports_reasoning_effort=False,
@@ -392,39 +408,30 @@ def _get_model_config(model: str, *, backend: Optional[str] = None) -> _ModelCon
         )
 
     # WebSocket models — auto-select websocket, but allow http override.
-    if _is_websocket_model(model):
-        effective = backend or "websocket"
-        if effective == "realtime":
-            raise ValueError(
-                f"Backend 'realtime' requires a realtime model (e.g. gpt-4o-realtime-preview), got {model!r}"
-            )
-        return _ModelConfig(
-            backend=effective,
-            supports_reasoning_effort=True,
-            default_reasoning_effort="low",
-        )
+    from litellm import get_supported_openai_params
 
-    # WebSocket/realtime backends require specific OpenAI models.
-    if backend == "websocket":
+    if backend == "websocket" and not _is_websocket_model(model):
         raise ValueError(
             f"Backend 'websocket' requires a websocket-compatible model (e.g. gpt-5.2), got {model!r}"
         )
-    if backend == "realtime":
-        raise ValueError(
-            f"Backend 'realtime' requires a realtime model (e.g. gpt-4o-realtime-preview), got {model!r}"
+    if _is_websocket_model(model) and backend in (None, "websocket"):
+        ws_supported = get_supported_openai_params(model=model) or []
+        ws_supports_reasoning = "reasoning_effort" in ws_supported
+        return _ModelConfig(
+            backend="websocket",
+            supports_reasoning_effort=ws_supports_reasoning,
+            default_reasoning_effort="low" if ws_supports_reasoning else None,
         )
 
     # Everything else — HTTP via LiteLLM.
-    from litellm import get_supported_openai_params
 
     supported = get_supported_openai_params(model=model)
     if supported is None:
         raise ValueError(
             f"Model {model} is not supported. See https://models.litellm.ai/ for supported models."
         )
-
     supports = "reasoning_effort" in supported
-    default: Optional[str] = "low"
+    default: Optional[str] = "low" if supports else None
     if supports:
         from litellm import get_llm_provider
         from litellm.utils import get_optional_params
@@ -483,17 +490,22 @@ def _is_realtime_model(model: str) -> bool:
     return _is_openai_model(model) and "realtime" in model.lower().split("/", 1)[-1]
 
 
+_WEBSOCKET_MODELS = ("gpt-5.2", "gpt-5.2-pro", "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano", "gpt-5.4-pro")
+
+
 def _is_websocket_model(model: str) -> bool:
     """Check if a model should use the WebSocket (Responses API) backend.
 
     Returns True for OpenAI models that support the /v1/responses endpoint,
     as detected via LiteLLM's model_cost registry.
     """
-    info = _get_model_info(model)
-    if info.get("litellm_provider") not in ("openai", "chatgpt"):
+    if model in _WEBSOCKET_MODELS:
+        return True
+    match = model.lower().split("/", 1)
+    if len(match) == 1:
         return False
-    endpoints = info.get("supported_endpoints", [])
-    return "/v1/responses" in endpoints
+    model_prefix, model_suffix = match
+    return model_suffix in _WEBSOCKET_MODELS and model_prefix in ("openai", "chatgpt")
 
 
 # Backward-compat alias — emits a deprecation warning on instantiation.
