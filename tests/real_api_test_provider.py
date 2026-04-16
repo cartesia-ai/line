@@ -342,7 +342,7 @@ async def test_function_tools_with_web_search(model: str, api_key: str):
 
 def _local_mcp_server_command() -> str:
     """Return the command to launch the local test MCP server."""
-    server_path = pathlib.Path(__file__).parent / "test_mcp_server.py"
+    server_path = pathlib.Path(__file__).parent / "real_api_test_mcp_server.py"
     return f"{sys.executable} {server_path}"
 
 
@@ -453,11 +453,11 @@ async def test_conversation_reset(model: str, api_key: str):
     """Test resetting a conversation to an earlier point.
 
     Exercises the WebSocket provider's divergence detection by:
-    1. Running a 2-turn conversation (user sets a secret word, assistant acks).
-    2. Asking the model to recall the secret word (turn 3).
-    3. Resetting: re-sending turns 1-2 with a *different* secret word,
+    1. Running a 2-turn conversation (user sets a key word, assistant acks).
+    2. Asking the model to recall the key word (turn 3).
+    3. Resetting: re-sending turns 1-2 with a *different* key word,
        then asking the model to recall it again (turn 3').
-    4. Verifying the model answers with the *new* secret word, confirming
+    4. Verifying the model answers with the *new* key word, confirming
        the provider rolled back correctly.
     """
     print("\n" + "=" * 60)
@@ -480,34 +480,34 @@ async def test_conversation_reset(model: str, api_key: str):
     print(f"Model says: {turn1_reply.strip()}")
     history.append(Message(role="assistant", content=turn1_reply))
 
-    # Turn 2 (branch A): set secret word = banana.
-    history.append(Message(role="user", content="The secret word is 'banana'. Just say OK."))
-    print("--- Turn 2a: secret word = banana ---")
+    # Turn 2 (branch A): set key word = banana.
+    history.append(Message(role="user", content="The key word is 'banana'. Just say OK."))
+    print("--- Turn 2a: key word = banana ---")
     turn2a_reply = await collect_text(provider.chat(history))
     print(f"Model says: {turn2a_reply.strip()}")
     history.append(Message(role="assistant", content=turn2a_reply))
 
-    # Turn 3 (branch A): ask for the secret word.
+    # Turn 3 (branch A): ask for the key word.
     history.append(
-        Message(role="user", content="What is the secret word? Reply with ONLY the word, nothing else.")
+        Message(role="user", content="What is the key word? Reply with ONLY the word, nothing else.")
     )
     print("--- Turn 3a: recall ---")
     response_a = await collect_text(provider.chat(history))
     print(f"Model says: {response_a.strip()}")
 
-    # Branch B: rewind to after turn 1, set a different secret word.
+    # Branch B: rewind to after turn 1, set a different key word.
     # Keeps the first two messages (user + real assistant reply) intact,
     # so divergence happens at message index 2.
     history_b = history[:2]  # user greeting + real assistant reply
-    history_b.append(Message(role="user", content="The secret word is 'giraffe'. Just say OK."))
-    print("--- Turn 2b (reset at message 2): secret word = giraffe ---")
+    history_b.append(Message(role="user", content="The key word is 'giraffe'. Just say OK."))
+    print("--- Turn 2b (reset at message 2): key word = giraffe ---")
     turn2b_reply = await collect_text(provider.chat(history_b))
     print(f"Model says: {turn2b_reply.strip()}")
     history_b.append(Message(role="assistant", content=turn2b_reply))
 
-    # Turn 3 (branch B): ask for the secret word again.
+    # Turn 3 (branch B): ask for the key word again.
     history_b.append(
-        Message(role="user", content="What is the secret word? Reply with ONLY the word, nothing else.")
+        Message(role="user", content="What is the key word? Reply with ONLY the word, nothing else.")
     )
     print("--- Turn 3b: recall after reset ---")
     response_b = await collect_text(provider.chat(history_b))

@@ -18,6 +18,7 @@ from typing import (
     AsyncIterator,
     Dict,
     List,
+    NamedTuple,
     Optional,
     Protocol,
     Tuple,
@@ -28,6 +29,37 @@ from loguru import logger
 
 from line.llm_agent.config import LlmConfig, _merge_configs, _normalize_config
 from line.llm_agent.tools.utils import FunctionTool, _merge_tools, _normalize_tools
+
+
+class ParsedModelId(NamedTuple):
+    """Parsed model identifier in ``(provider, model)`` form."""
+
+    provider: str
+    model: str
+
+    def __str__(self) -> str:
+        return f"{self.provider}/{self.model}"
+
+
+def parse_model_id(model: str) -> ParsedModelId:
+    """Parse a model string into a canonical ``(provider, model)`` pair.
+
+    ``"gpt-4o"``                      → ``("openai", "gpt-4o")``
+    ``"openai/gpt-4o"``               → ``("openai", "gpt-4o")``
+    ``"chatgpt/gpt-5.4-pro"``         → ``("openai", "gpt-5.4-pro")``
+    ``"anthropic/claude-sonnet-4-5"`` → ``("anthropic", "claude-sonnet-4-5")``
+
+    Bare strings (no ``/``) default to the ``openai`` provider. The
+    ``chatgpt/`` prefix is a historical alias for the OpenAI endpoint and is
+    normalized to ``openai`` so downstream code has a single canonical form.
+    """
+    if "/" in model:
+        provider, name = model.split("/", 1)
+        provider = provider.lower()
+        if provider == "chatgpt":
+            provider = "openai"
+        return ParsedModelId(provider, name)
+    return ParsedModelId("openai", model)
 
 
 @dataclass
@@ -245,9 +277,10 @@ class LlmProvider:
     ):
         if not api_key:
             raise ValueError("Missing API key in LlmProvider initialization")
-        mcfg = _get_model_config(model, backend=backend)
+        model_id = parse_model_id(model)
+        mcfg = _get_model_config(model_id, backend=backend)
 
-        self._model = model
+        self._model_id = model_id
         self._tools = list(tools or [])
         normalized_config = _normalize_config(config or LlmConfig())
         self._config = normalized_config
@@ -256,25 +289,25 @@ class LlmProvider:
         if mcfg.backend == "realtime":
             from line.llm_agent.realtime_provider import _RealtimeProvider
 
-            logger.info(f"Realtime provider selected for model: {model}")
+            logger.info(f"Realtime provider selected for model: {model_id}")
 
             self._backend: ProviderProtocol = _RealtimeProvider(
-                model=model,
+                model_id=model_id,
                 api_key=api_key,
             )
         elif mcfg.backend == "websocket":
             from line.llm_agent.http_provider import _HttpProvider
             from line.llm_agent.websocket_provider import _WebSocketProvider
 
-            logger.info(f"WebSocket provider selected for model: {model}")
+            logger.info(f"WebSocket provider selected for model: {model_id}")
 
             self._backend = _WebSocketProvider(
-                model=model,
+                model_id=model_id,
                 api_key=api_key,
                 default_reasoning_effort=mcfg.default_reasoning_effort,
             )
             self._http_fallback_backend = _HttpProvider(
-                model=model,
+                model_id=model_id,
                 api_key=api_key,
                 supports_reasoning_effort=mcfg.supports_reasoning_effort,
                 default_reasoning_effort=mcfg.default_reasoning_effort,
@@ -282,9 +315,9 @@ class LlmProvider:
         else:
             from line.llm_agent.http_provider import _HttpProvider
 
-            logger.info(f"HTTP provider selected for model: {model}")
+            logger.info(f"HTTP provider selected for model: {model_id}")
             self._backend = _HttpProvider(
-                model=model,
+                model_id=model_id,
                 api_key=api_key,
                 supports_reasoning_effort=mcfg.supports_reasoning_effort,
                 default_reasoning_effort=mcfg.default_reasoning_effort,
@@ -303,7 +336,7 @@ class LlmProvider:
 
         effective_config = _merge_configs(self._config, config) if config else self._config
         effective_tools, web_search_options = _normalize_tools(
-            _merge_tools(self._tools, tools), model=self._model
+            _merge_tools(self._tools, tools), model_id=self._model_id
         )
         backend = self._select_backend(effective_config)
 
@@ -323,7 +356,7 @@ class LlmProvider:
     ) -> None:
         effective_config = _merge_configs(self._config, config) if config else self._config
         effective_tools, web_search_options = _normalize_tools(
-            _merge_tools(self._tools, tools), model=self._model
+            _merge_tools(self._tools, tools), model_id=self._model_id
         )
         backend = self._select_backend(effective_config)
         await backend.warmup(
@@ -379,14 +412,14 @@ class _ModelConfig:
 _VALID_BACKENDS = frozenset({"http", "realtime", "websocket"})
 
 
-def _get_model_config(model: str, *, backend: Optional[str] = None) -> _ModelConfig:
-    """Return the unified configuration for *model*.
+def _get_model_config(model_id: ParsedModelId, *, backend: Optional[str] = None) -> _ModelConfig:
+    """Return the unified configuration for *model_id*.
 
     This is the **single source of truth** for backend routing, reasoning-effort
     support, and supported OpenAI parameter lists.
 
     Args:
-        model: Model name.
+        model_id: Parsed model identifier.
         backend: Force a specific backend.  Raises ``ValueError`` if
             incompatible with the model or if the model is unsupported.
     """
@@ -394,13 +427,14 @@ def _get_model_config(model: str, *, backend: Optional[str] = None) -> _ModelCon
         raise ValueError(f"Invalid backend {backend!r}. Must be one of: {', '.join(sorted(_VALID_BACKENDS))}")
 
     # Realtime models — dedicated realtime backend, no override allowed.
-    if backend == "realtime" and not _is_realtime_model(model):
+    if backend == "realtime" and not _is_realtime_model(model_id):
         raise ValueError(
-            f"Backend 'realtime' requires a realtime model (e.g. gpt-4o-realtime-preview), got {model!r}"
+            "Backend 'realtime' requires a realtime model"
+            + f"(e.g. gpt-4o-realtime-preview), got {str(model_id)!r}"
         )
-    if backend is not None and backend != "realtime" and _is_realtime_model(model):
-        raise ValueError(f"Realtime model {model!r} is incompatible with backend {backend!r}")
-    if _is_realtime_model(model):
+    if backend is not None and backend != "realtime" and _is_realtime_model(model_id):
+        raise ValueError(f"Realtime model {str(model_id)!r} is incompatible with backend {backend!r}")
+    if _is_realtime_model(model_id):
         return _ModelConfig(
             backend="realtime",
             supports_reasoning_effort=False,
@@ -410,12 +444,14 @@ def _get_model_config(model: str, *, backend: Optional[str] = None) -> _ModelCon
     # WebSocket models — auto-select websocket, but allow http override.
     from litellm import get_supported_openai_params
 
-    if backend == "websocket" and not _is_websocket_model(model):
+    litellm_model = str(model_id)
+
+    if backend == "websocket" and not _is_websocket_model(model_id):
         raise ValueError(
-            f"Backend 'websocket' requires a websocket-compatible model (e.g. gpt-5.2), got {model!r}"
+            f"Backend 'websocket' requires a websocket-compatible model (e.g. gpt-5.2), got {str(model_id)!r}"
         )
-    if _is_websocket_model(model) and backend in (None, "websocket"):
-        ws_supported = get_supported_openai_params(model=model) or []
+    if _is_websocket_model(model_id) and backend in (None, "websocket"):
+        ws_supported = get_supported_openai_params(model=litellm_model) or []
         ws_supports_reasoning = "reasoning_effort" in ws_supported
         return _ModelConfig(
             backend="websocket",
@@ -425,10 +461,10 @@ def _get_model_config(model: str, *, backend: Optional[str] = None) -> _ModelCon
 
     # Everything else — HTTP via LiteLLM.
 
-    supported = get_supported_openai_params(model=model)
+    supported = get_supported_openai_params(model=litellm_model)
     if supported is None:
         raise ValueError(
-            f"Model {model} is not supported. See https://models.litellm.ai/ for supported models."
+            f"Model {str(model_id)} is not supported. See https://models.litellm.ai/ for supported models."
         )
     supports = "reasoning_effort" in supported
     default: Optional[str] = "low" if supports else None
@@ -437,15 +473,15 @@ def _get_model_config(model: str, *, backend: Optional[str] = None) -> _ModelCon
         from litellm.utils import get_optional_params
 
         try:
-            _, provider, _, _ = get_llm_provider(model=model)
-            get_optional_params(model=model, custom_llm_provider=provider, reasoning_effort="none")
+            _, provider, _, _ = get_llm_provider(model=litellm_model)
+            get_optional_params(model=litellm_model, custom_llm_provider=provider, reasoning_effort="none")
             default = "none"
         except Exception:
             # HACK: Anthropic's LiteLLM mapping annoyingly doesn't support `"none"` (the string) as a
             # value for reasoning_effort, so None (omitting the param) is the correct way
             # to skip the thinking block entirely; "low" would still enable a 1024-token
             # thinking budget.
-            if "anthropic" in model.lower():
+            if model_id.provider == "anthropic":
                 default = None
 
     return _ModelConfig(
@@ -455,55 +491,24 @@ def _get_model_config(model: str, *, backend: Optional[str] = None) -> _ModelCon
     )
 
 
-def _get_model_info(model: str) -> dict:
-    """Get model info from LiteLLM's model_cost registry.
-
-    Strips the ``openai/`` prefix for lookup since LiteLLM keys OpenAI models
-    without it (e.g., ``gpt-5.4`` not ``openai/gpt-5.4``).
-    """
-    import litellm
-
-    if model.startswith("openai/"):
-        lookup = model[len("openai/") :]
-    else:
-        lookup = model
-    return litellm.model_cost.get(lookup, {})
+def _is_openai_model(model_id: ParsedModelId) -> bool:
+    """Return True for OpenAI models."""
+    return model_id.provider == "openai"
 
 
-def _is_openai_model(model: str) -> bool:
-    """Return True for OpenAI models via LiteLLM's model_cost registry."""
-    info = _get_model_info(model)
-    provider = info.get("litellm_provider")
-    if provider:
-        # "openai" for direct API, "chatgpt" for ChatGPT API - both use OpenAI endpoints
-        return provider in ("openai", "chatgpt")
-    # Fallback to pattern matching for models not yet in LiteLLM registry
-    if model.startswith("openai/"):
-        model = model[len("openai/") :]
-    return model.startswith(("gpt-", "o1", "o3", "o4", "chatgpt/", "codex"))
-
-
-def _is_realtime_model(model: str) -> bool:
+def _is_realtime_model(model_id: ParsedModelId) -> bool:
     """Check if a model name indicates a direct OpenAI Realtime model."""
-    return _is_openai_model(model) and "realtime" in model.split("/", 1)[-1]
+    return _is_openai_model(model_id) and "realtime" in model_id.model.lower()
 
 
-_WEBSOCKET_MODELS = ("gpt-5.2", "gpt-5.2-pro", "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano", "gpt-5.4-pro")
+_WEBSOCKET_MODELS = frozenset(
+    {"gpt-5.2", "gpt-5.2-pro", "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano", "gpt-5.4-pro"}
+)
 
 
-def _is_websocket_model(model: str) -> bool:
-    """Check if a model should use the WebSocket (Responses API) backend.
-
-    Returns True for OpenAI models that support the /v1/responses endpoint,
-    as detected via LiteLLM's model_cost registry.
-    """
-    if model in _WEBSOCKET_MODELS:
-        return True
-    match = model.split("/", 1)
-    if len(match) == 1:
-        return False
-    model_prefix, model_suffix = match
-    return model_suffix in _WEBSOCKET_MODELS and model_prefix in ("openai", "chatgpt")
+def _is_websocket_model(model_id: ParsedModelId) -> bool:
+    """Check if a model should use the WebSocket (Responses API) backend."""
+    return _is_openai_model(model_id) and model_id.model in _WEBSOCKET_MODELS
 
 
 # Backward-compat alias — emits a deprecation warning on instantiation.

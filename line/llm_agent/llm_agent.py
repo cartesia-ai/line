@@ -44,7 +44,13 @@ from line.events import (
 from line.llm_agent.background_queue import BackgroundQueue
 from line.llm_agent.config import LlmConfig, _merge_configs, _normalize_config
 from line.llm_agent.history import _HISTORY_EVENT_TYPES, History
-from line.llm_agent.provider import LlmProvider, Message, ToolCall, _get_model_config
+from line.llm_agent.provider import (
+    LlmProvider,
+    Message,
+    ToolCall,
+    _get_model_config,
+    parse_model_id,
+)
 from line.llm_agent.tools.system import EndCallTool, WebSearchTool
 from line.llm_agent.tools.utils import (
     FunctionTool,
@@ -82,26 +88,27 @@ class LlmAgent:
         if not api_key:
             raise ValueError("Missing API key in LLmAgent initialization")
 
-        model_config = _get_model_config(model)
+        model_id = parse_model_id(model)
+        model_config = _get_model_config(model_id)
 
         # Resolve the base config to insert default values for any _UNSET sentinels.
         effective_config = _normalize_config(config or LlmConfig())
         if effective_config.reasoning_effort is not None and not model_config.supports_reasoning_effort:
             raise ValueError(
-                f"Model {model} does not support reasoning_effort. "
+                f"Model {str(model_id)} does not support reasoning_effort. "
                 "Remove reasoning_effort from your LlmConfig or use a model that supports it."
             )
 
-        self._model = model
+        self._model_id = model_id
         self._api_key = api_key
         self._config = effective_config
         self._max_tool_iterations = max_tool_iterations
 
         self._tools: List[ToolSpec] = list(tools or [])
-        effective_tools, web_search_options = _normalize_tools(self._tools, model=model)
+        effective_tools, web_search_options = _normalize_tools(self._tools, model_id=model_id)
 
         self._llm = LlmProvider(
-            model=model,
+            model=str(model_id),
             api_key=api_key,
             config=effective_config,
             tools=self._tools,
@@ -120,7 +127,7 @@ class LlmAgent:
         self._tool_signatures: Dict[str, str] = {}
 
         tool_names = [t.name for t in effective_tools] + (["web_search"] if web_search_options else [])
-        logger.info(f"LlmAgent initialized with model={self._model}, tools={tool_names}")
+        logger.info(f"LlmAgent initialized with model={self._model_id}, tools={tool_names}")
 
     def _get_background_event_queue(
         self,
@@ -260,7 +267,7 @@ class LlmAgent:
             context: Extra context to append to history for the current #process invocation only.
             history: Override history for the current #process invocation only.
         """
-        tools, web_search_options = _normalize_tools(tool_specs, model=self._model)
+        tools, web_search_options = _normalize_tools(tool_specs, model_id=self._model_id)
         tool_map: Dict[str, FunctionTool] = {t.name: t for t in tools}
 
         is_first_iteration = True
