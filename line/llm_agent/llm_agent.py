@@ -45,7 +45,7 @@ from line.llm_agent.background_queue import BackgroundQueue
 from line.llm_agent.config import LlmConfig, _merge_configs, _normalize_config
 from line.llm_agent.history import _HISTORY_EVENT_TYPES, History
 from line.llm_agent.provider import LlmProvider, Message, ToolCall, _get_model_config
-from line.llm_agent.tools.system import EndCallTool, WebSearchTool
+from line.llm_agent.tools.system import EndCallTool, TransferCallTool, WebSearchTool
 from line.llm_agent.tools.utils import (
     FunctionTool,
     ToolEnv,
@@ -58,7 +58,7 @@ T = TypeVar("T")
 
 # Type alias for tools that can be passed to LlmAgent
 # Plain callables are automatically wrapped as loopback tools
-ToolSpec = Union[FunctionTool, WebSearchTool, EndCallTool, Callable]
+ToolSpec = Union[FunctionTool, WebSearchTool, EndCallTool, TransferCallTool, Callable]
 
 
 class LlmAgent:
@@ -703,10 +703,13 @@ class LlmAgent:
             if not isinstance(tools, list):
                 raise TypeError(f"tools must be a list, got {type(tools).__name__}")
             for i, tool in enumerate(tools):
-                if not (isinstance(tool, (FunctionTool, WebSearchTool, EndCallTool)) or callable(tool)):
+                if not (
+                    isinstance(tool, (FunctionTool, WebSearchTool, EndCallTool, TransferCallTool))
+                    or callable(tool)
+                ):
                     raise TypeError(
                         f"tools[{i}] must be a FunctionTool, WebSearchTool, EndCallTool, "
-                        f"or callable, got {type(tool).__name__}"
+                        f"TransferCallTool, or callable, got {type(tool).__name__}"
                     )
 
     @staticmethod
