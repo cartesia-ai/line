@@ -12,7 +12,17 @@ Model naming:
 
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Any, AsyncIterable, AsyncIterator, Dict, List, Optional, Protocol, Tuple, runtime_checkable
+from typing import (
+    Any,
+    AsyncIterable,
+    AsyncIterator,
+    Dict,
+    List,
+    Optional,
+    Protocol,
+    Tuple,
+    runtime_checkable,
+)
 
 from loguru import logger
 
@@ -338,7 +348,9 @@ class LlmProvider:
             return self._backend
 
         if (
-            config.stop is not None
+            config.temperature is not None
+            or config.top_p is not None
+            or config.stop is not None
             or config.seed is not None
             or config.presence_penalty is not None
             or config.frequency_penalty is not None

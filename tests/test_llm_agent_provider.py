@@ -202,7 +202,9 @@ def test_llm_provider_routes_websocket_models_with_unsupported_config_to_http_ba
     assert len(http_backend.calls) == 1
 
 
-def test_llm_provider_keeps_websocket_backend_for_supported_config():
+def test_llm_provider_routes_temperature_to_http_backend():
+    """temperature/top_p cause the OpenAI WebSocket endpoint to close silently,
+    so they must route to the HTTP fallback."""
     provider = LlmProvider(
         model="openai/gpt-5.2",
         api_key="test-key",
@@ -212,14 +214,13 @@ def test_llm_provider_keeps_websocket_backend_for_supported_config():
     provider._backend = websocket_backend
     provider._http_fallback_backend = http_backend
 
-    result = provider.chat(
+    provider.chat(
         [Message(role="user", content="hi")],
         config=LlmConfig(temperature=0.2, top_p=0.9),
     )
 
-    assert result == "ok"
-    assert len(websocket_backend.calls) == 1
-    assert len(http_backend.calls) == 0
+    assert len(websocket_backend.calls) == 0
+    assert len(http_backend.calls) == 1
 
 
 def test_llm_provider_warmup_routes_unsupported_websocket_config_to_http_backend():
