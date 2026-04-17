@@ -54,7 +54,7 @@ from line.events import InputEvent, OutputEvent
 
 if TYPE_CHECKING:
     from line.llm_agent.provider import ParsedModelId
-    from line.llm_agent.tools.system import EndCallTool, WebSearchTool
+    from line.llm_agent.tools.system import EndCallTool, TransferCallTool, WebSearchTool
 
 # -------------------------
 # Tool Type Enum
@@ -142,7 +142,7 @@ class FunctionTool:
 # Type alias for tools that can be passed to LlmAgent/LlmProvider.
 # Plain callables are automatically wrapped as loopback tools.
 # Uses string literal because WebSearchTool/EndCallTool are TYPE_CHECKING-only imports.
-ToolSpec = Union[FunctionTool, "WebSearchTool", "EndCallTool", Callable]
+ToolSpec = Union[FunctionTool, "WebSearchTool", "EndCallTool", "TransferCallTool", Callable]
 
 
 @dataclass
@@ -332,7 +332,7 @@ def _normalize_tools(
         FunctionTool in the first list.
     """
     from line.llm_agent.tools.decorators import loopback_tool
-    from line.llm_agent.tools.system import EndCallTool, WebSearchTool
+    from line.llm_agent.tools.system import EndCallTool, TransferCallTool, WebSearchTool
 
     function_tools: List[FunctionTool] = []
     web_search_tool: Optional[Any] = None
@@ -340,7 +340,7 @@ def _normalize_tools(
     for tool in tool_specs:
         if isinstance(tool, FunctionTool):
             function_tools.append(tool)
-        elif isinstance(tool, EndCallTool):
+        elif isinstance(tool, (EndCallTool, TransferCallTool)):
             function_tools.append(tool.as_function_tool())
         elif isinstance(tool, WebSearchTool):
             web_search_tool = tool
@@ -349,7 +349,7 @@ def _normalize_tools(
         else:
             raise TypeError(
                 f"Unsupported tool type: {type(tool).__name__}. "
-                f"Expected FunctionTool, EndCallTool, WebSearchTool, or callable."
+                f"Expected FunctionTool, EndCallTool, TransferCallTool, WebSearchTool, or callable."
             )
 
     web_search_options: Optional[Dict[str, Any]] = None

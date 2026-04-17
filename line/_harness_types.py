@@ -103,11 +103,13 @@ class TransferOutput(BaseModel):
     type: Literal["transfer"] = "transfer"
     target_phone_number: str
     responding_to: Optional[str] = None
+    interruptible: bool = True
 
 
 class EndCallOutput(BaseModel):
     type: Literal["end_call"] = "end_call"
     responding_to: Optional[str] = None
+    interruptible: bool = True
 
 
 class LogEventOutput(BaseModel):

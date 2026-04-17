@@ -647,12 +647,16 @@ class ConversationRunner:
             logger.info(f"<- 🤖🔔 Agent DTMF sent: {event.button}")
             return DTMFOutput(button=event.button, responding_to=event.responding_to)
         if isinstance(event, AgentEndCall):
-            logger.info("<- 📞 End call")
-            return EndCallOutput(responding_to=event.responding_to)
+            logger.info(f"<- 📞 End call (interruptible={event.interruptible})")
+            return EndCallOutput(responding_to=event.responding_to, interruptible=event.interruptible)
         if isinstance(event, AgentTransferCall):
-            logger.info(f"<- 📱 Transfer to: {event.target_phone_number}")
+            logger.info(
+                f"<- 📱 Transfer to: {event.target_phone_number} (interruptible={event.interruptible})"
+            )
             return TransferOutput(
-                target_phone_number=event.target_phone_number, responding_to=event.responding_to
+                target_phone_number=event.target_phone_number,
+                responding_to=event.responding_to,
+                interruptible=event.interruptible,
             )
         if isinstance(event, LogMetric):
             logger.debug(f"<- 📈 Log metric: {event.name}={event.value}")
