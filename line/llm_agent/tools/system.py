@@ -269,9 +269,11 @@ class TransferCallTool:
             target_phone_number: Annotated[
                 str, "The destination phone number in E.164 format (e.g., +14155551234)"
             ],
-            message: Annotated[Optional[str], "Optional message to say before transferring"] = None,
         ):
-            """Transfer the call to another phone number."""
+            """Transfer the call to another phone number. 
+            Do NOT say anything before calling this tool 
+            — the message parameter will be spoken automatically.
+            """
             import phonenumbers
 
             try:
@@ -286,9 +288,8 @@ class TransferCallTool:
             # Normalize to E.164 format
             normalized_number = phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.E164)
 
-            resolved_message = message if message is not None else self.message
-            if resolved_message:
-                yield AgentSendText(text=resolved_message, interruptible=self.interruptible)
+            if self.message:
+                yield AgentSendText(text=self.message, interruptible=self.interruptible)
             yield AgentTransferCall(target_phone_number=normalized_number, interruptible=self.interruptible)
 
         return construct_function_tool(
