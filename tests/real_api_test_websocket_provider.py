@@ -150,18 +150,6 @@ async def _run_expect_success(name, api_key, config, *, model_id, **kwargs):
         await provider.aclose()
 
 
-# ---------------------------------------------------------------------------
-# Test: previous_response_not_found recovery
-# ---------------------------------------------------------------------------
-
-
-async def test_response_not_found_recovery():
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        print("ERROR: OPENAI_API_KEY not set")
-        return 1
-
-
 @loopback_tool
 async def get_weather(ctx, city: Annotated[str, "City name"]) -> str:
     """Get the current weather for a city."""
@@ -604,6 +592,11 @@ async def test_websocket_model_config(api_key: str, model_id: ParsedModelId):
         failures.append(label)
     else:
         print("PASS: tool call received via WebSocket")
+
+    if failures:
+        raise RuntimeError(
+            "websocket_model_config had failing sub-tests:\n" + "\n".join(f"  - {f}" for f in failures)
+        )
 
 
 async def main(args):
