@@ -10,6 +10,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from line.events import AgentEndCall, AgentSendDtmf, AgentSendText, AgentTransferCall
+from line.llm_agent.provider import parse_model_id
 from line.llm_agent.tools.system import EndCallTool, TransferCallTool, end_call, send_dtmf, transfer_call
 from line.llm_agent.tools.utils import ToolType
 
@@ -375,7 +376,7 @@ async def test_normalize_tools_handles_transfer_call_tool(anyio_backend):
     """Test that _normalize_tools correctly handles TransferCallTool instances."""
     from line.llm_agent.tools.utils import FunctionTool, _normalize_tools
 
-    tools, _ = _normalize_tools([TransferCallTool()], model="gpt-4o")
+    tools, _ = _normalize_tools([TransferCallTool()], model_id=parse_model_id("gpt-4o"))
     assert len(tools) == 1
     assert isinstance(tools[0], FunctionTool)
     assert tools[0].name == "transfer_call"
@@ -385,7 +386,7 @@ async def test_normalize_tools_handles_end_call_tool(anyio_backend):
     """Test that _normalize_tools correctly handles EndCallTool instances."""
     from line.llm_agent.tools.utils import FunctionTool, _normalize_tools
 
-    tools, _ = _normalize_tools([EndCallTool()], model="gpt-4o")
+    tools, _ = _normalize_tools([EndCallTool()], model_id=parse_model_id("gpt-4o"))
     assert len(tools) == 1
     assert isinstance(tools[0], FunctionTool)
     assert tools[0].name == "end_call"
