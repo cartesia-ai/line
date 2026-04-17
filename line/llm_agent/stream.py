@@ -28,14 +28,6 @@ ConversationEntry = Tuple[tuple, Optional[str]]  # (identity, opaque_id | None)
 HistoryUpdate = Callable[[List[ConversationEntry], Dict[str, Any]], List[ConversationEntry]]
 
 
-def _normalize_openai_model_name(model: str) -> str:
-    """Strip LiteLLM-style ``openai/`` or ``chatgpt/`` prefixes for direct OpenAI API calls."""
-    lower = model.lower()
-    if lower.startswith("openai/") or lower.startswith("chatgpt/"):
-        return model.split("/", 1)[1]
-    return model
-
-
 def _context_identity(
     instructions: Optional[str],
     tool_defs: Optional[List[Dict[str, Any]]],

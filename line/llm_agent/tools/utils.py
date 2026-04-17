@@ -53,6 +53,7 @@ from line.agent import TurnEnv
 from line.events import InputEvent, OutputEvent
 
 if TYPE_CHECKING:
+    from line.llm_agent.provider import ParsedModelId
     from line.llm_agent.tools.system import EndCallTool, WebSearchTool
 
 # -------------------------
@@ -307,7 +308,7 @@ def construct_function_tool(func, name, description, tool_type, is_background=Fa
 
 def _normalize_tools(
     tool_specs: List[ToolSpec],
-    model: str,
+    model_id: ParsedModelId,
 ) -> Tuple[List[FunctionTool], Optional[Dict[str, Any]]]:
     """Resolve tool specs into FunctionTools and optional web_search_options.
 
@@ -322,7 +323,7 @@ def _normalize_tools(
 
     Args:
         tool_specs: List of tools (FunctionTool, EndCallTool, WebSearchTool, or callable).
-        model: Model name, used for native web search support detection.
+        model_id: Parsed model identifier, used for native web search support detection.
 
     Returns:
         (function_tools, web_search_options) — web_search_options is set only
@@ -353,7 +354,7 @@ def _normalize_tools(
 
     web_search_options: Optional[Dict[str, Any]] = None
     if web_search_tool is not None:
-        if _check_web_search_support(model) and not function_tools:
+        if _check_web_search_support(model_id) and not function_tools:
             web_search_options = web_search_tool.get_web_search_options()
         else:
             function_tools.append(_web_search_tool_to_function_tool(web_search_tool))
@@ -361,15 +362,18 @@ def _normalize_tools(
     return function_tools, web_search_options
 
 
-def _check_web_search_support(model: str) -> bool:
+def _check_web_search_support(model_id: ParsedModelId) -> bool:
     """Check if a model supports native web search via litellm.
 
     Returns True if the model supports web_search_options, False otherwise.
     """
+    if model_id.provider == "openai" and model_id.model == "gpt-4.1":
+        # LiteLLM thinks 4.1 supports this, but it doesn't
+        return False
     try:
         import litellm
 
-        return litellm.supports_web_search(model=model)
+        return litellm.supports_web_search(model=str(model_id))
     except (ImportError, AttributeError, Exception):
         # If litellm doesn't have supports_web_search or any error occurs,
         # fall back to the tool-based approach
