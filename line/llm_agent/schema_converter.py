@@ -338,13 +338,22 @@ def build_openai_tool_defs(
     web_search_options: Optional[dict[str, Any]] = None,
     strict: bool = True,
     responses_api: bool = False,
+    include_strict_flag: bool = True,
 ) -> Optional[list[dict[str, Any]]]:
     """Build OpenAI/Realtimes tool definitions including native web search.
 
     WebSocket-mode backends do not use LiteLLM's ``web_search_options`` knob, so
     native web search must be expressed as an OpenAI tool definition instead.
+
+    ``include_strict_flag`` controls whether the ``"strict": true`` marker is
+    emitted on function tool defs. The OpenAI Responses API accepts it, but the
+    Realtime API rejects it with ``Unknown parameter: 'session.tools[N].strict'``.
+    Schema-level strictness (all-required, ``additionalProperties: false``) is
+    still governed by the ``strict`` argument and is preserved regardless.
     """
     tool_defs = function_tools_to_openai(tools, strict=strict, responses_api=responses_api) if tools else []
+    if not include_strict_flag:
+        tool_defs = [{k: v for k, v in t.items() if k != "strict"} for t in tool_defs]
     if web_search_options is not None:
         tool_defs.append({"type": "web_search", **web_search_options})
     return tool_defs or None
