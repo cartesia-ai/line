@@ -5,7 +5,7 @@ Test script for the _RealtimeProvider — OpenAI Realtime WebSocket (text-only).
 Compares latency against the conventional HTTP LlmProvider approach.
 
 Usage:
-    uv run python line/llm_agent/scripts/test_realtime.py [OPTIONS]
+    uv run python tests/real_api_test_realtime_provider.py [OPTIONS]
 
 Options:
     --tests TESTS           Comma-separated tests (default: all)
