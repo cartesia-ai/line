@@ -5,7 +5,7 @@ A simple local MCP server for testing MCP tool integration.
 Exposes a dice-rolling tool via stdio transport.
 
 Usage:
-    python line/llm_agent/scripts/test_mcp_server.py
+    python tests/real_api_test_mcp_server.py
 """
 
 import asyncio

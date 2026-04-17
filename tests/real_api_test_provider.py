@@ -3,7 +3,7 @@
 Test script for LlmProvider integration with real API keys.
 
 Usage:
-    uv run python line/llm_agent/scripts/test_provider.py [OPTIONS]
+    uv run python line/tests/real_api_test_provider.py [OPTIONS]
 
 Options:
     --tests TESTS       Comma-separated list of tests to run. Available tests:
@@ -14,13 +14,13 @@ Options:
 
 Examples:
     # Run all tests
-    uv run python line/llm_agent/scripts/test_provider.py
+    uv run python tests/real_api_test_provider.py
 
     # Run only end_call evaluation tests
-    uv run python line/llm_agent/scripts/test_provider.py --tests end_call,end_call_eval,form_eval
+    uv run python tests/real_api_test_provider.py --tests end_call,end_call_eval,form_eval
 
     # Run form evaluation with more iterations
-    uv run python line/llm_agent/scripts/test_provider.py --tests form_eval --runs 5
+    uv run python tests/real_api_test_provider.py --tests form_eval --runs 5
 
 Environment variables:
     OPENAI_API_KEY      - For OpenAI models (gpt-4o, gpt-4o-mini)
