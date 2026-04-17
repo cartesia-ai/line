@@ -6,7 +6,7 @@ Compares latency against the conventional HTTP LlmProvider approach and
 validates divergence handling (simulated TTS interruption / truncation).
 
 Usage:
-    uv run python line/llm_agent/scripts/real_api_test_websocket_provider.py [OPTIONS]
+    uv run python tests/real_api_test_websocket_provider.py [OPTIONS]
 
 Options:
     --tests TESTS           Comma-separated tests (default: all)
@@ -101,12 +101,12 @@ async def _collect_tool_calls(provider, messages, *, config, tools):
     return False
 
 
-async def _run_expect_rejection(name, api_key, config, *, model):
+async def _run_expect_rejection(name, api_key, config, *, model_id):
     """Run a chat that should be rejected by the WebSocket API.
 
     Returns None on expected rejection, or an error string on failure.
     """
-    provider = _WebSocketProvider(model=model, api_key=api_key, default_reasoning_effort=None)
+    provider = _WebSocketProvider(model_id=model_id, api_key=api_key, default_reasoning_effort=None)
     try:
         text = await _collect_text(provider, _MIN_MESSAGE, config=config)
         if text:
@@ -123,10 +123,10 @@ async def _run_expect_rejection(name, api_key, config, *, model):
         await provider.aclose()
 
 
-async def _run_expect_success(name, api_key, config, *, model, **kwargs):
+async def _run_expect_success(name, api_key, config, *, model_id, **kwargs):
     """Run a chat that should succeed. Returns None on success, or an error string."""
     provider = _WebSocketProvider(
-        model=model,
+        model_id=model_id,
         api_key=api_key,
         default_reasoning_effort=kwargs.get("default_reasoning_effort"),
     )
@@ -557,7 +557,7 @@ async def test_websocket_model_config(api_key: str, model_id: ParsedModelId):
         print(f"\n{'=' * 60}")
         print(f"Test: WebSocket rejects {name} ({model})")
         print("=" * 60)
-        err = await _run_expect_rejection(name, api_key, _normalize_config(llm_config), model=model)
+        err = await _run_expect_rejection(name, api_key, _normalize_config(llm_config), model_id=model_id)
         if err:
             print(f"FAIL: {err}")
             failures.append(label)
@@ -573,7 +573,7 @@ async def test_websocket_model_config(api_key: str, model_id: ParsedModelId):
         "reasoning_effort=low",
         api_key,
         _normalize_config(LlmConfig(system_prompt="Be brief.", reasoning_effort="low")),
-        model=model,
+        model_id=model_id,
         default_reasoning_effort="low",
     )
     if err:
@@ -594,7 +594,7 @@ async def test_websocket_model_config(api_key: str, model_id: ParsedModelId):
                 system_prompt="Use the get_weather tool when asked about weather.",
             )
         ),
-        model=model,
+        model_id=model_id,
         messages=[Message(role="user", content="What's the weather in Tokyo?")],
         tools=[get_weather],
         expect_tool_call=True,
