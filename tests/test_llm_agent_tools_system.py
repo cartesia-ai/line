@@ -1,7 +1,7 @@
 """
 Tests for built-in tools.
 
-uv run pytest tests/test_tools.py -v
+uv run pytest tests/test_llm_agent_tools_system.py -v
 """
 
 from typing import List
@@ -46,16 +46,17 @@ async def test_transfer_call_valid_number(mock_ctx, anyio_backend):
 
 
 async def test_transfer_call_valid_number_with_message(mock_ctx, anyio_backend):
-    """Test that a valid number with message sends message then transfers."""
-    events = await collect_events(
-        transfer_call.as_function_tool().func(mock_ctx, "+14155551234", message="Transferring you now")
-    )
+    """Test that a tool configured with message= sends it before transfer."""
+    tool = transfer_call(message="Transferring you now")
+    events = await collect_events(tool.as_function_tool().func(mock_ctx, "+14155551234"))
 
     assert len(events) == 2
     assert isinstance(events[0], AgentSendText)
     assert events[0].text == "Transferring you now"
+    assert events[0].interruptible is True
     assert isinstance(events[1], AgentTransferCall)
     assert events[1].target_phone_number == "+14155551234"
+    assert events[1].interruptible is True
 
 
 async def test_transfer_call_invalid_number(mock_ctx, anyio_backend):
@@ -304,9 +305,9 @@ async def test_transfer_call_default_interruptible(mock_ctx, anyio_backend):
 
 
 async def test_transfer_call_interruptible_false(mock_ctx, anyio_backend):
-    """Test that TransferCallTool(interruptible=False) propagates to events."""
-    tool = TransferCallTool(interruptible=False)
-    events = await collect_events(tool.as_function_tool().func(mock_ctx, "+14155551234", message="Hold on"))
+    """Configured message + interruptible=False propagate to AgentSendText and AgentTransferCall."""
+    tool = TransferCallTool(message="Hold on", interruptible=False)
+    events = await collect_events(tool.as_function_tool().func(mock_ctx, "+14155551234"))
 
     assert len(events) == 2
     assert isinstance(events[0], AgentSendText)
@@ -326,26 +327,16 @@ async def test_transfer_call_callable_interruptible_false(mock_ctx, anyio_backen
 
 
 async def test_transfer_call_with_default_message(mock_ctx, anyio_backend):
-    """Test that TransferCallTool(message=...) uses default message when LLM doesn't provide one."""
+    """Test that TransferCallTool(message=...) speaks that message before transfer."""
     tool = TransferCallTool(message="Please hold")
     events = await collect_events(tool.as_function_tool().func(mock_ctx, "+14155551234"))
 
     assert len(events) == 2
     assert isinstance(events[0], AgentSendText)
     assert events[0].text == "Please hold"
+    assert events[0].interruptible is True
     assert isinstance(events[1], AgentTransferCall)
-
-
-async def test_transfer_call_llm_message_overrides_default(mock_ctx, anyio_backend):
-    """Test that LLM-provided message overrides the default message."""
-    tool = TransferCallTool(message="Default msg")
-    events = await collect_events(
-        tool.as_function_tool().func(mock_ctx, "+14155551234", message="LLM override")
-    )
-
-    assert len(events) == 2
-    assert isinstance(events[0], AgentSendText)
-    assert events[0].text == "LLM override"
+    assert events[1].interruptible is True
 
 
 async def test_transfer_call_callable_with_message_and_interruptible(mock_ctx, anyio_backend):
@@ -370,6 +361,9 @@ async def test_transfer_call_has_function_tool_attributes(mock_ctx, anyio_backen
     assert isinstance(func_tool, FunctionTool)
     assert func_tool.name == "transfer_call"
     assert func_tool.tool_type == ToolType.PASSTHROUGH
+    assert set(func_tool.parameters.keys()) == {"target_phone_number"}
+    assert "message" not in func_tool.parameters
+    assert func_tool.parameters["target_phone_number"].required is True
 
 
 # =============================================================================

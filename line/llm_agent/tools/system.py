@@ -248,7 +248,8 @@ end_call = EndCallTool()
 
 class TransferCallTool:
     """
-    Configurable transfer_call tool with custom description.
+    transfer_call tool: optional fixed message and interruptibility are set at construction
+    (``TransferCallTool(...)`` / ``transfer_call(...)``), not by the LLM at tool-call time.
     """
 
     def __init__(self, message: Optional[str] = None, interruptible: bool = True):
@@ -262,7 +263,7 @@ class TransferCallTool:
         return "transfer_call"
 
     def _create_function_tool(self) -> FunctionTool:
-        """Create the underlying FunctionTool with the configured description."""
+        """Create the underlying FunctionTool with the configured message and interruptibility."""
 
         async def _transfer_call_impl(
             ctx: ToolEnv,
@@ -270,9 +271,10 @@ class TransferCallTool:
                 str, "The destination phone number in E.164 format (e.g., +14155551234)"
             ],
         ):
-            """Transfer the call to another phone number. 
-            Do NOT say anything before calling this tool 
-            — the message parameter will be spoken automatically.
+            """Transfer the call to another phone number (E.164).
+            Do not speak a separate line before calling this tool.
+            If the tool was configured with a fixed message at construction,
+            that message is spoken before the transfer.
             """
             import phonenumbers
 
@@ -307,7 +309,7 @@ class TransferCallTool:
         """Create a configured TransferCallTool instance.
 
         Args:
-            message: Optional default message to say before transferring.
+            message: Optional message spoken before transfer.
             interruptible: Whether the transfer_call tool is interruptible.
         """
         return TransferCallTool(message=message, interruptible=interruptible)

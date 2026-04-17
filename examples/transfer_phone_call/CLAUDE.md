@@ -39,7 +39,7 @@ Transfers the call to an external phone number.
 **Requirements:**
 - Phone number must be in E.164 format (e.g., `+14155551234`)
 - Built-in validation using `phonenumbers` library
-- Optional message parameter for pre-transfer announcement
+- Optional fixed message is configured on the tool at construction (`transfer_call(message=...)`), not by the LLM at call time
 
 **Yields:** `AgentTransferCall` event
 
