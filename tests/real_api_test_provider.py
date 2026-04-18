@@ -41,7 +41,7 @@ import logging
 import os
 import pathlib
 import sys
-from typing import Annotated, TypedDict
+from typing import Annotated, Optional, TypedDict
 import warnings
 
 import litellm
@@ -135,13 +135,13 @@ async def add_to_order_broken(
 # =============================================================================
 
 
-async def test_api_key(model: str, api_key: str) -> bool:
+async def test_api_key(model: str, api_key: str, backend: Optional[str] = None) -> bool:
     """Test that API key is valid and has permissions."""
     print("\n" + "=" * 60)
-    print(f"Testing API key for {model}")
+    print(f"Testing API key for {model} (backend={backend})")
     print("=" * 60)
 
-    provider = LlmProvider(model=model, api_key=api_key)
+    provider = LlmProvider(model=model, api_key=api_key, backend=backend)
 
     messages = [Message(role="user", content="Say 'ok'")]
 
@@ -157,13 +157,13 @@ async def test_api_key(model: str, api_key: str) -> bool:
         return False
 
 
-async def test_streaming_text(model: str, api_key: str):
+async def test_streaming_text(model: str, api_key: str, backend: Optional[str] = None):
     """Test basic streaming text response."""
     print("\n" + "=" * 60)
-    print(f"Testing streaming text with {model}")
+    print(f"Testing streaming text with {model} (backend={backend})")
     print("=" * 60)
 
-    provider = LlmProvider(model=model, api_key=api_key)
+    provider = LlmProvider(model=model, api_key=api_key, backend=backend)
 
     messages = [Message(role="user", content="Say 'Hello, World!' and nothing else.")]
 
@@ -174,10 +174,10 @@ async def test_streaming_text(model: str, api_key: str):
     print("\n✓ Streaming text test passed")
 
 
-async def test_tool_calling(model: str, api_key: str):
+async def test_tool_calling(model: str, api_key: str, backend: Optional[str] = None):
     """Test tool calling with LlmAgent."""
     print("\n" + "=" * 60)
-    print(f"Testing tool calling with {model}")
+    print(f"Testing tool calling with {model} (backend={backend})")
     print("=" * 60)
 
     agent = LlmAgent(
@@ -187,6 +187,7 @@ async def test_tool_calling(model: str, api_key: str):
         config=LlmConfig(
             system_prompt="You are a helpful assistant. Use tools when needed.",
         ),
+        backend=backend,
     )
 
     env = TurnEnv()
@@ -217,10 +218,10 @@ async def test_tool_calling(model: str, api_key: str):
         print("⚠ No tools were called (model may have answered directly)")
 
 
-async def test_introduction(model: str, api_key: str):
+async def test_introduction(model: str, api_key: str, backend: Optional[str] = None):
     """Test introduction message on CallStarted."""
     print("\n" + "=" * 60)
-    print(f"Testing introduction with {model}")
+    print(f"Testing introduction with {model} (backend={backend})")
     print("=" * 60)
 
     agent = LlmAgent(
@@ -229,6 +230,7 @@ async def test_introduction(model: str, api_key: str):
         config=LlmConfig(
             introduction="Hello! I'm your AI assistant. How can I help you today?",
         ),
+        backend=backend,
     )
 
     env = TurnEnv()
@@ -244,13 +246,18 @@ async def test_introduction(model: str, api_key: str):
     print("✓ Introduction test passed")
 
 
-async def test_web_search(model: str, api_key: str, search_context_size: str = "medium"):
+async def test_web_search(
+    model: str,
+    api_key: str,
+    backend: Optional[str] = None,
+    search_context_size: str = "medium",
+):
     """Test web search tool integration."""
     print("\n" + "=" * 60)
     if search_context_size != "medium":
-        print(f"Testing web search with {model} (context_size={search_context_size}")
+        print(f"Testing web search with {model} (backend={backend}, context_size={search_context_size})")
     else:
-        print(f"Testing web search with {model}")
+        print(f"Testing web search with {model} (backend={backend})")
     print("=" * 60)
 
     agent = LlmAgent(
@@ -261,6 +268,7 @@ async def test_web_search(model: str, api_key: str, search_context_size: str = "
             system_prompt="You are a helpful assistant with web search capabilities."
             + " Use web search to find current information.",
         ),
+        backend=backend,
     )
 
     env = TurnEnv()
@@ -295,7 +303,7 @@ async def test_web_search(model: str, api_key: str, search_context_size: str = "
     print("✓ Web search test completed")
 
 
-async def test_function_tools_with_web_search(model: str, api_key: str):
+async def test_function_tools_with_web_search(model: str, api_key: str, backend: Optional[str] = None):
     """Test combining function calling tools with web search.
 
     This reproduces the scenario from examples/basic_chat/main.py where
@@ -304,7 +312,7 @@ async def test_function_tools_with_web_search(model: str, api_key: str):
     with function calling tools in the same request.
     """
     print("\n" + "=" * 60)
-    print(f"Testing function tools + web search with {model}")
+    print(f"Testing function tools + web search with {model} (backend={backend})")
     print("=" * 60)
 
     agent = LlmAgent(
@@ -315,6 +323,7 @@ async def test_function_tools_with_web_search(model: str, api_key: str):
             system_prompt="You are a helpful assistant. Use web search when needed. "
             "Use end_call when the user says goodbye.",
         ),
+        backend=backend,
     )
 
     env = TurnEnv()
@@ -346,10 +355,10 @@ def _local_mcp_server_command() -> str:
     return f"{sys.executable} {server_path}"
 
 
-async def test_mcp_list_tools(model: str, api_key: str):
+async def test_mcp_list_tools(model: str, api_key: str, backend: Optional[str] = None):
     """Test MCP tool listing with the local test MCP server."""
     print(f"\n{'=' * 60}")
-    print(f"Testing MCP tool listing with {model}")
+    print(f"Testing MCP tool listing with {model} (backend={backend})")
     print("=" * 60)
 
     agent = LlmAgent(
@@ -365,6 +374,7 @@ async def test_mcp_list_tools(model: str, api_key: str):
             system_prompt="You are a helpful assistant with access to an MCP server. "
             "Use the available tools when asked.",
         ),
+        backend=backend,
     )
 
     env = TurnEnv()
@@ -397,10 +407,10 @@ async def test_mcp_list_tools(model: str, api_key: str):
         print("⚠ MCP tool was not called (model may have answered directly)")
 
 
-async def test_mcp_tool_execution(model: str, api_key: str):
+async def test_mcp_tool_execution(model: str, api_key: str, backend: Optional[str] = None):
     """Test MCP tool execution with the local test MCP server."""
     print(f"\n{'=' * 60}")
-    print(f"Testing MCP tool execution with {model}")
+    print(f"Testing MCP tool execution with {model} (backend={backend})")
     print("=" * 60)
 
     agent = LlmAgent(
@@ -416,6 +426,7 @@ async def test_mcp_tool_execution(model: str, api_key: str):
             system_prompt="You are a helpful assistant with access to an MCP server. "
             "First list available tools, then use them as requested.",
         ),
+        backend=backend,
     )
 
     env = TurnEnv()
@@ -449,7 +460,7 @@ async def test_mcp_tool_execution(model: str, api_key: str):
     print("✓ MCP tool execution test completed")
 
 
-async def test_conversation_reset(model: str, api_key: str):
+async def test_conversation_reset(model: str, api_key: str, backend: Optional[str] = None):
     """Test resetting a conversation to an earlier point.
 
     Exercises the WebSocket provider's divergence detection by:
@@ -461,10 +472,10 @@ async def test_conversation_reset(model: str, api_key: str):
        the provider rolled back correctly.
     """
     print("\n" + "=" * 60)
-    print(f"Testing conversation reset with {model}")
+    print(f"Testing conversation reset with {model} (backend={backend})")
     print("=" * 60)
 
-    provider = LlmProvider(model=model, api_key=api_key)
+    provider = LlmProvider(model=model, api_key=api_key, backend=backend)
 
     async def collect_text(stream) -> str:
         parts = []
@@ -524,7 +535,7 @@ async def test_conversation_reset(model: str, api_key: str):
         raise AssertionError(f"Branch B failed — expected 'giraffe', got: {response_b.strip()!r}")
 
 
-async def test_nested_objects(model: str, api_key: str):
+async def test_nested_objects(model: str, api_key: str, backend: Optional[str] = None):
     """Test tool calling with nested objects using TypedDict.
 
     This test validates that:
@@ -536,7 +547,7 @@ async def test_nested_objects(model: str, api_key: str):
     shapes fail at conversion before any API call.
     """
     print("\n" + "=" * 60)
-    print(f"Testing nested objects (TypedDict) with {model}")
+    print(f"Testing nested objects (TypedDict) with {model} (backend={backend})")
     print("=" * 60)
 
     agent = LlmAgent(
@@ -554,6 +565,7 @@ Available menu items:
 
 Always include menu_item_id, quantity, and modifiers (can be empty list).""",
         ),
+        backend=backend,
     )
 
     env = TurnEnv()
@@ -617,14 +629,14 @@ Always include menu_item_id, quantity, and modifiers (can be empty list).""",
             return False
 
 
-async def test_nested_objects_without_typeddict(model: str, api_key: str):
+async def test_nested_objects_without_typeddict(model: str, api_key: str, backend: Optional[str] = None):
     """list[dict] under default strict schemas raises at conversion; opt-out path still works.
 
     First asserts ``function_tool_to_litellm(..., strict=True)`` raises. Then runs the agent
     with ``LlmConfig(strict_tool_schemas=False)`` so non-strict tool definitions are allowed.
     """
     print("\n" + "=" * 60)
-    print(f"Testing nested objects WITHOUT TypedDict (list[dict]) with {model}")
+    print(f"Testing nested objects WITHOUT TypedDict (list[dict]) with {model} (backend={backend})")
     print("=" * 60)
 
     with warnings.catch_warnings():
@@ -663,6 +675,7 @@ Available menu items:
 
 Always include menu_item_id and quantity.""",
             ),
+            backend=backend,
         )
 
     env = TurnEnv()
@@ -717,16 +730,20 @@ Always include menu_item_id and quantity.""",
 # Main
 # =============================================================================
 
-MODELS = [
-    ("OPENAI_API_KEY", "openai/gpt-5.2"),
-    ("OPENAI_API_KEY", "openai/gpt-5.4"),
-    ("OPENAI_API_KEY", "openai/gpt-5.4-mini"),
-    ("OPENAI_API_KEY", "openai/gpt-5.4-nano"),
-    ("OPENAI_API_KEY", "openai/gpt-realtime"),
-    ("ANTHROPIC_API_KEY", "anthropic/claude-haiku-4-5"),
-    ("GEMINI_API_KEY", "gemini/gemini-2.5-flash"),
-    ("GEMINI_API_KEY", "gemini/gemini-3-flash-preview"),
-    ("OPENAI_API_KEY", "openai/gpt-4.1"),
+MODELS: list[tuple[str, str, Optional[str]]] = [
+    ("OPENAI_API_KEY", "openai/gpt-5.2", "http"),
+    ("OPENAI_API_KEY", "openai/gpt-5.2", "websocket"),
+    ("OPENAI_API_KEY", "openai/gpt-5.4", "http"),
+    ("OPENAI_API_KEY", "openai/gpt-5.4", "websocket"),
+    ("OPENAI_API_KEY", "openai/gpt-5.4-mini", "http"),
+    ("OPENAI_API_KEY", "openai/gpt-5.4-mini", "websocket"),
+    ("OPENAI_API_KEY", "openai/gpt-5.4-nano", "http"),
+    ("OPENAI_API_KEY", "openai/gpt-5.4-nano", "websocket"),
+    ("OPENAI_API_KEY", "openai/gpt-realtime", "realtime"),
+    ("ANTHROPIC_API_KEY", "anthropic/claude-haiku-4-5", "http"),
+    ("GEMINI_API_KEY", "gemini/gemini-2.5-flash", "http"),
+    ("GEMINI_API_KEY", "gemini/gemini-3-flash-preview", "http"),
+    ("OPENAI_API_KEY", "openai/gpt-4.1", "http"),
 ]
 
 # Available test names
@@ -794,36 +811,36 @@ async def main(args):
     print(f"Eval iterations: {args.runs}")
 
     # Find available models
-    available = []
-    for env_var, model in MODELS:
+    available: list[tuple[str, str, Optional[str]]] = []
+    for env_var, model, backend in MODELS:
         if args.model and model != args.model:
             continue
         if os.getenv(env_var):
-            available.append((env_var, model))
-            print(f"✓ {env_var} found - will test {model}")
+            available.append((env_var, model, backend))
+            print(f"✓ {env_var} found - will test {model} (backend={backend})")
         else:
-            print(f"✗ {env_var} not set - skipping {model}")
+            print(f"✗ {env_var} not set - skipping {model} (backend={backend})")
 
     if not available:
         print("\n⚠ No API keys found. Set at least one of:")
-        for env_var, _model in MODELS:
+        for env_var, _model, _backend in MODELS:
             print(f"  export {env_var}=your-key-here")
         return 1
 
-    failures: list[tuple[str, str, str]] = []  # (model, test_name, error)
+    failures: list[tuple[str, Optional[str], str, str]] = []  # (model, backend, test_name, error)
 
     # First, validate all API keys
     print("\n" + "=" * 60)
     print("PHASE 1: Validating API Keys")
     print("=" * 60)
 
-    valid_models = []
-    for env_var, model in available:
+    valid_models: list[tuple[str, str, Optional[str]]] = []
+    for env_var, model, backend in available:
         api_key = os.environ[env_var]
-        if await test_api_key(model, api_key):
-            valid_models.append((env_var, model))
+        if await test_api_key(model, api_key, backend):
+            valid_models.append((env_var, model, backend))
         else:
-            failures.append((model, "api_key", "API key validation failed"))
+            failures.append((model, backend, "api_key", "API key validation failed"))
 
     if not valid_models:
         print("\n⚠ No valid API keys. Check your keys and permissions.")
@@ -834,47 +851,49 @@ async def main(args):
         print("PHASE 2: Running Full Tests")
         print("=" * 60)
 
-    for env_var, model in valid_models:
+    for env_var, model, backend in valid_models:
         api_key = os.environ[env_var]
 
         test_plan: list[tuple[str, ...]] = []
         if "streaming" in tests_to_run:
-            test_plan.append(("streaming", test_streaming_text, model, api_key))
+            test_plan.append(("streaming", test_streaming_text, model, api_key, backend))
         if "introduction" in tests_to_run:
-            test_plan.append(("introduction", test_introduction, model, api_key))
+            test_plan.append(("introduction", test_introduction, model, api_key, backend))
         if "tools" in tests_to_run:
-            test_plan.append(("tools", test_tool_calling, model, api_key))
+            test_plan.append(("tools", test_tool_calling, model, api_key, backend))
         if "nested_objects" in tests_to_run:
-            test_plan.append(("nested_objects", test_nested_objects, model, api_key))
+            test_plan.append(("nested_objects", test_nested_objects, model, api_key, backend))
         if "nested_objects_fail" in tests_to_run:
-            test_plan.append(("nested_objects_fail", test_nested_objects_without_typeddict, model, api_key))
+            test_plan.append(
+                ("nested_objects_fail", test_nested_objects_without_typeddict, model, api_key, backend)
+            )
         if "web_search" in tests_to_run:
-            test_plan.append(("web_search", test_web_search, model, api_key))
-            test_plan.append(("web_search (high)", test_web_search, model, api_key, "high"))
+            test_plan.append(("web_search", test_web_search, model, api_key, backend))
+            test_plan.append(("web_search (high)", test_web_search, model, api_key, backend, "high"))
         if "web_search_fn" in tests_to_run:
-            test_plan.append(("web_search_fn", test_function_tools_with_web_search, model, api_key))
+            test_plan.append(("web_search_fn", test_function_tools_with_web_search, model, api_key, backend))
         if "mcp" in tests_to_run:
-            test_plan.append(("mcp_list_tools", test_mcp_list_tools, model, api_key))
-            test_plan.append(("mcp_tool_execution", test_mcp_tool_execution, model, api_key))
+            test_plan.append(("mcp_list_tools", test_mcp_list_tools, model, api_key, backend))
+            test_plan.append(("mcp_tool_execution", test_mcp_tool_execution, model, api_key, backend))
         if "reset" in tests_to_run:
-            test_plan.append(("reset", test_conversation_reset, model, api_key))
+            test_plan.append(("reset", test_conversation_reset, model, api_key, backend))
 
         for test_entry in test_plan:
             test_name, test_fn, *test_args = test_entry
             try:
                 await test_fn(*test_args)
             except Exception as e:
-                print(f"\n✗ Error in {test_name} for {model}: {e}")
+                print(f"\n✗ Error in {test_name} for {model} (backend={backend}): {e}")
                 import traceback
 
                 traceback.print_exc()
-                failures.append((model, test_name, str(e)))
+                failures.append((model, backend, test_name, str(e)))
 
     print("\n" + "=" * 60)
     if failures:
         print(f"DONE — {len(failures)} failure(s):")
-        for model, test_name, error in failures:
-            print(f"  ✗ {model} / {test_name}: {error}")
+        for model, backend, test_name, error in failures:
+            print(f"  ✗ {model} [backend={backend}] / {test_name}: {error}")
     else:
         print("All tests passed!")
     print("=" * 60)
