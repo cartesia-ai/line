@@ -184,64 +184,85 @@ def test_llm_provider_warmup_preserves_native_web_search_defaults(monkeypatch):
     assert backend.warmup_calls[0]["kwargs"]["web_search_options"] == {"search_context_size": "high"}
 
 
-def test_llm_provider_routes_websocket_models_with_unsupported_config_to_http_backend():
+def test_llm_provider_rejects_websocket_incompatible_config_at_chat():
     provider = LlmProvider(
         model="openai/gpt-5.2",
         api_key="test-key",
         backend="websocket",
     )
     websocket_backend = _DummyBackend()
-    http_backend = _DummyBackend()
     provider._backend = websocket_backend
-    provider._http_fallback_backend = http_backend
 
-    result = provider.chat(
-        [Message(role="user", content="hi")],
-        config=LlmConfig(stop=["DONE"]),
-    )
+    try:
+        provider.chat(
+            [Message(role="user", content="hi")],
+            config=LlmConfig(stop=["DONE"]),
+        )
+    except ValueError as exc:
+        assert "websocket" in str(exc).lower()
+        assert "stop" in str(exc)
+    else:
+        raise AssertionError("Expected ValueError for websocket-incompatible config")
 
-    assert result == "ok"
     assert len(websocket_backend.calls) == 0
-    assert len(http_backend.calls) == 1
 
 
-def test_llm_provider_routes_temperature_to_http_backend():
+def test_llm_provider_rejects_temperature_on_websocket_backend():
     """temperature/top_p cause the OpenAI WebSocket endpoint to close silently,
-    so they must route to the HTTP fallback."""
+    so they must be rejected up-front."""
     provider = LlmProvider(
         model="openai/gpt-5.2",
         api_key="test-key",
         backend="websocket",
     )
     websocket_backend = _DummyBackend()
-    http_backend = _DummyBackend()
     provider._backend = websocket_backend
-    provider._http_fallback_backend = http_backend
 
-    provider.chat(
-        [Message(role="user", content="hi")],
-        config=LlmConfig(temperature=0.2, top_p=0.9),
-    )
+    try:
+        provider.chat(
+            [Message(role="user", content="hi")],
+            config=LlmConfig(temperature=0.2, top_p=0.9),
+        )
+    except ValueError as exc:
+        assert "temperature" in str(exc)
+        assert "top_p" in str(exc)
+    else:
+        raise AssertionError("Expected ValueError for websocket-incompatible config")
 
     assert len(websocket_backend.calls) == 0
-    assert len(http_backend.calls) == 1
 
 
-def test_llm_provider_warmup_routes_unsupported_websocket_config_to_http_backend():
+def test_llm_provider_warmup_rejects_websocket_incompatible_config():
     provider = LlmProvider(
         model="openai/gpt-5.2",
         api_key="test-key",
         backend="websocket",
     )
     websocket_backend = _DummyBackend()
-    http_backend = _DummyBackend()
     provider._backend = websocket_backend
-    provider._http_fallback_backend = http_backend
 
-    asyncio.run(provider.warmup(config=LlmConfig(extra={"service_tier": "flex"})))
+    try:
+        asyncio.run(provider.warmup(config=LlmConfig(extra={"service_tier": "flex"})))
+    except ValueError as exc:
+        assert "extra" in str(exc)
+    else:
+        raise AssertionError("Expected ValueError for websocket-incompatible config")
 
     assert len(websocket_backend.warmup_calls) == 0
-    assert len(http_backend.warmup_calls) == 1
+
+
+def test_llm_provider_rejects_websocket_incompatible_base_config_at_init():
+    try:
+        LlmProvider(
+            model="openai/gpt-5.2",
+            api_key="test-key",
+            backend="websocket",
+            config=LlmConfig(temperature=0.2),
+        )
+    except ValueError as exc:
+        assert "temperature" in str(exc)
+    else:
+        raise AssertionError("Expected ValueError for websocket-incompatible base config")
 
 
 def test_extract_instructions_includes_config_system_prompt():
