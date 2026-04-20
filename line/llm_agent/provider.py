@@ -278,13 +278,13 @@ class LlmProvider:
         if not api_key:
             raise ValueError("Missing API key in LlmProvider initialization")
         model_id = parse_model_id(model)
-        mcfg = _get_model_config(model_id, backend=backend)
 
         self._model_id = model_id
         self._tools = list(tools or [])
         normalized_config = _normalize_config(config or LlmConfig())
         self._config = normalized_config
-        self._http_fallback_backend: Optional[ProviderProtocol] = None
+        self._backend_override = backend
+        mcfg = _get_model_config(model_id, backend=backend, config=normalized_config)
 
         if mcfg.backend == "realtime":
             from line.llm_agent.realtime_provider import _RealtimeProvider
@@ -296,7 +296,6 @@ class LlmProvider:
                 api_key=api_key,
             )
         elif mcfg.backend == "websocket":
-            from line.llm_agent.http_provider import _HttpProvider
             from line.llm_agent.websocket_provider import _WebSocketProvider
 
             logger.info(f"WebSocket provider selected for model: {model_id}")
@@ -304,12 +303,6 @@ class LlmProvider:
             self._backend = _WebSocketProvider(
                 model_id=model_id,
                 api_key=api_key,
-                default_reasoning_effort=mcfg.default_reasoning_effort,
-            )
-            self._http_fallback_backend = _HttpProvider(
-                model_id=model_id,
-                api_key=api_key,
-                supports_reasoning_effort=mcfg.supports_reasoning_effort,
                 default_reasoning_effort=mcfg.default_reasoning_effort,
             )
         else:
@@ -338,12 +331,12 @@ class LlmProvider:
         effective_tools, web_search_options = _normalize_tools(
             _merge_tools(self._tools, tools), model_id=self._model_id
         )
-        backend = self._select_backend(effective_config)
+        _get_model_config(self._model_id, backend=self._backend_override, config=effective_config)
 
         if web_search_options is not None:
             kwargs = {**kwargs, "web_search_options": web_search_options}
 
-        return backend.chat(normalized, effective_tools, config=effective_config, **kwargs)
+        return self._backend.chat(normalized, effective_tools, config=effective_config, **kwargs)
 
     def _set_tools(self, tools: Optional[List[Any]]) -> None:
         """Replace the provider's default tool specs."""
@@ -358,8 +351,8 @@ class LlmProvider:
         effective_tools, web_search_options = _normalize_tools(
             _merge_tools(self._tools, tools), model_id=self._model_id
         )
-        backend = self._select_backend(effective_config)
-        await backend.warmup(
+        _get_model_config(self._model_id, backend=self._backend_override, config=effective_config)
+        await self._backend.warmup(
             config=effective_config,
             tools=effective_tools,
             web_search_options=web_search_options,
@@ -367,33 +360,6 @@ class LlmProvider:
 
     async def aclose(self) -> None:
         await self._backend.aclose()
-        if self._http_fallback_backend is not None:
-            await self._http_fallback_backend.aclose()
-
-    def _select_backend(self, config: LlmConfig) -> ProviderProtocol:
-        """Use HTTP for websocket-incompatible config fields.
-
-        WebSocket mode is lower latency, but it cannot preserve every field on
-        ``LlmConfig``. Fall back to the HTTP backend when callers rely on
-        request options that only the LiteLLM/HTTP path currently supports.
-        """
-        if self._http_fallback_backend is None:
-            return self._backend
-
-        if (
-            config.temperature is not None
-            or config.top_p is not None
-            or config.stop is not None
-            or config.seed is not None
-            or config.presence_penalty is not None
-            or config.frequency_penalty is not None
-            or config.fallbacks
-            or config.timeout is not None
-            or config.extra
-        ):
-            return self._http_fallback_backend
-
-        return self._backend
 
 
 @dataclass
@@ -412,83 +378,133 @@ class _ModelConfig:
 _VALID_BACKENDS = frozenset({"http", "realtime", "websocket"})
 
 
-def _get_model_config(model_id: ParsedModelId, *, backend: Optional[str] = None) -> _ModelConfig:
+def _get_model_config(
+    model_id: ParsedModelId,
+    *,
+    backend: Optional[str] = None,
+    config: Optional[LlmConfig] = None,
+) -> _ModelConfig:
     """Return the unified configuration for *model_id*.
 
     This is the **single source of truth** for backend routing, reasoning-effort
-    support, and supported OpenAI parameter lists.
+    support, supported OpenAI parameter lists, and config applicability.
 
     Args:
         model_id: Parsed model identifier.
         backend: Force a specific backend.  Raises ``ValueError`` if
             incompatible with the model or if the model is unsupported.
+        config: When provided, validate that every field is compatible with the
+            selected backend. Raises ``ValueError`` otherwise.
     """
+    # WebSocket models — opt-in via backend="websocket"; default is HTTP.
+    from litellm import get_supported_openai_params
+
+    litellm_model = str(model_id)
+    litellm_support = get_supported_openai_params(model=litellm_model)
+
     if backend is not None and backend not in _VALID_BACKENDS:
         raise ValueError(f"Invalid backend {backend!r}. Must be one of: {', '.join(sorted(_VALID_BACKENDS))}")
 
     # Realtime models — dedicated realtime backend, no override allowed.
-    if backend == "realtime" and not _is_realtime_model(model_id):
+    elif backend == "realtime" and not _is_realtime_model(model_id):
         raise ValueError(
             "Backend 'realtime' requires a realtime model"
             + f"(e.g. gpt-4o-realtime-preview), got {str(model_id)!r}"
         )
-    if backend is not None and backend != "realtime" and _is_realtime_model(model_id):
+    elif backend is not None and backend != "realtime" and _is_realtime_model(model_id):
         raise ValueError(f"Realtime model {str(model_id)!r} is incompatible with backend {backend!r}")
-    if _is_realtime_model(model_id):
-        return _ModelConfig(
+    elif _is_realtime_model(model_id):
+        mcfg = _ModelConfig(
             backend="realtime",
             supports_reasoning_effort=False,
             default_reasoning_effort=None,
         )
 
-    # WebSocket models — auto-select websocket, but allow http override.
-    from litellm import get_supported_openai_params
-
-    litellm_model = str(model_id)
-
-    if backend == "websocket" and not _is_websocket_model(model_id):
+    elif backend == "websocket" and not _is_websocket_model(model_id):
         raise ValueError(
             f"Backend 'websocket' requires a websocket-compatible model (e.g. gpt-5.2), got {str(model_id)!r}"
         )
-    if _is_websocket_model(model_id) and backend in (None, "websocket"):
+    elif _is_websocket_model(model_id) and backend == "websocket":
         ws_supported = get_supported_openai_params(model=litellm_model) or []
         ws_supports_reasoning = "reasoning_effort" in ws_supported
-        return _ModelConfig(
+        mcfg = _ModelConfig(
             backend="websocket",
             supports_reasoning_effort=ws_supports_reasoning,
             default_reasoning_effort="low" if ws_supports_reasoning else None,
         )
 
-    # Everything else — HTTP via LiteLLM.
+    elif litellm_support:
+        supports = "reasoning_effort" in litellm_support
+        default: Optional[str] = "low" if supports else None
+        if supports:
+            from litellm import get_llm_provider
+            from litellm.utils import get_optional_params
 
-    supported = get_supported_openai_params(model=litellm_model)
-    if supported is None:
+            try:
+                _, provider, _, _ = get_llm_provider(model=litellm_model)
+                get_optional_params(
+                    model=litellm_model, custom_llm_provider=provider, reasoning_effort="none"
+                )
+                default = "none"
+            except Exception:
+                # HACK: Anthropic's LiteLLM mapping annoyingly doesn't support `"none"` (the string) as a
+                # value for reasoning_effort, so None (omitting the param) is the correct way
+                # to skip the thinking block entirely; "low" would still enable a 1024-token
+                # thinking budget.
+                if model_id.provider == "anthropic":
+                    default = None
+
+        mcfg = _ModelConfig(
+            backend="http",
+            supports_reasoning_effort=supports,
+            default_reasoning_effort=default,
+        )
+
+    else:
         raise ValueError(
             f"Model {str(model_id)} is not supported. See https://models.litellm.ai/ for supported models."
         )
-    supports = "reasoning_effort" in supported
-    default: Optional[str] = "low" if supports else None
-    if supports:
-        from litellm import get_llm_provider
-        from litellm.utils import get_optional_params
 
-        try:
-            _, provider, _, _ = get_llm_provider(model=litellm_model)
-            get_optional_params(model=litellm_model, custom_llm_provider=provider, reasoning_effort="none")
-            default = "none"
-        except Exception:
-            # HACK: Anthropic's LiteLLM mapping annoyingly doesn't support `"none"` (the string) as a
-            # value for reasoning_effort, so None (omitting the param) is the correct way
-            # to skip the thinking block entirely; "low" would still enable a 1024-token
-            # thinking budget.
-            if model_id.provider == "anthropic":
-                default = None
+    _check_config_applicability(mcfg.backend, config)
+    return mcfg
 
-    return _ModelConfig(
-        backend="http",
-        supports_reasoning_effort=supports,
-        default_reasoning_effort=default,
-    )
+
+# LlmConfig fields the WebSocket (Responses API) backend cannot honor. Setting
+# temperature or top_p on the Responses endpoint causes it to close the
+# connection silently, and the rest have no equivalent in the Responses request
+# schema. Callers that need these must use the HTTP backend.
+_WEBSOCKET_INCOMPATIBLE_FIELDS = (
+    "temperature",
+    "top_p",
+    "stop",
+    "seed",
+    "presence_penalty",
+    "frequency_penalty",
+    "fallbacks",
+    "timeout",
+    "extra",
+)
+
+
+def _check_config_applicability(backend: str, config: Optional[LlmConfig]) -> None:
+    """Raise ``ValueError`` if *config* sets fields *backend* cannot honor."""
+    if config is None:
+        return
+    elif backend != "websocket":
+        return
+    violations: List[str] = []
+    for name in _WEBSOCKET_INCOMPATIBLE_FIELDS:
+        value = getattr(config, name)
+        if name in ("fallbacks", "extra"):
+            if value:
+                violations.append(name)
+        elif value is not None:
+            violations.append(name)
+    if violations:
+        raise ValueError(
+            f"The 'websocket' backend does not support LlmConfig field(s): {', '.join(violations)}. "
+            "Use backend='http' (the default) to send these to LiteLLM."
+        )
 
 
 def _is_openai_model(model_id: ParsedModelId) -> bool:
