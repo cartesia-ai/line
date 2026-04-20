@@ -16,13 +16,15 @@ from unittest.mock import AsyncMock, MagicMock
 from fastapi import WebSocket, WebSocketDisconnect
 import pytest
 
-from line._harness_types import MessageOutput
+from line._harness_types import EndCallOutput, MessageOutput, TransferOutput
 from line.agent import TurnEnv
 from line.events import (
+    AgentEndCall,
     AgentSendText,
     AgentTextSent,
     AgentToolCalled,
     AgentToolReturned,
+    AgentTransferCall,
     AgentUpdateCall,
     CallEnded,
     CallStarted,
@@ -1134,6 +1136,45 @@ class TestConsumeExpectedAckBackAdversarial:
         assert consumed == 0
         assert remaining_c == "abcXYZ"
         assert remaining_p == "abcDEF"
+
+
+# ============================================================
+# AgentEndCall / AgentTransferCall -> OutputMessage mapping tests
+# ============================================================
+
+
+class TestEndCallAndTransferCallMapping:
+    """Tests for _map_output_event forwarding interruptible on end_call and transfer_call."""
+
+    def _map(self, event):
+        ws = create_mock_websocket()
+        runner = ConversationRunner(ws, noop_agent, env)
+        return runner._map_output_event(event)
+
+    def test_end_call_interruptible_false(self):
+        """AgentEndCall(interruptible=False) maps to EndCallOutput(interruptible=False)."""
+        result = self._map(AgentEndCall(interruptible=False))
+        assert isinstance(result, EndCallOutput)
+        assert result.interruptible is False
+
+    def test_end_call_interruptible_true_by_default(self):
+        """AgentEndCall() defaults to interruptible=True."""
+        result = self._map(AgentEndCall())
+        assert isinstance(result, EndCallOutput)
+        assert result.interruptible is True
+
+    def test_transfer_call_interruptible_false(self):
+        """AgentTransferCall(interruptible=False) maps to TransferOutput(interruptible=False)."""
+        result = self._map(AgentTransferCall(target_phone_number="+14155551234", interruptible=False))
+        assert isinstance(result, TransferOutput)
+        assert result.target_phone_number == "+14155551234"
+        assert result.interruptible is False
+
+    def test_transfer_call_interruptible_true_by_default(self):
+        """AgentTransferCall() defaults to interruptible=True."""
+        result = self._map(AgentTransferCall(target_phone_number="+14155551234"))
+        assert isinstance(result, TransferOutput)
+        assert result.interruptible is True
 
 
 # ============================================================

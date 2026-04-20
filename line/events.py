@@ -45,12 +45,14 @@ class AgentToolReturned(BaseModel):
 class AgentEndCall(BaseModel):
     type: Literal["end_call"] = "end_call"
     responding_to: Optional[str] = None
+    interruptible: bool = True
 
 
 class AgentTransferCall(BaseModel):
     type: Literal["agent_transfer_call"] = "agent_transfer_call"
     target_phone_number: str
     responding_to: Optional[str] = None
+    interruptible: bool = True
 
 
 class AgentSendDtmf(BaseModel):
