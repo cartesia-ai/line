@@ -22,6 +22,7 @@ class AgentSendText(BaseModel):
     type: Literal["agent_send_text"] = "agent_send_text"
     text: str
     interruptible: bool = True
+    responding_to: Optional[str] = None
 
 
 class AgentToolCalled(BaseModel):
@@ -29,6 +30,7 @@ class AgentToolCalled(BaseModel):
     tool_call_id: str
     tool_name: str
     tool_args: Dict[str, Any] = Field(default_factory=dict)
+    responding_to: Optional[str] = None
 
 
 class AgentToolReturned(BaseModel):
@@ -37,26 +39,33 @@ class AgentToolReturned(BaseModel):
     tool_name: str
     tool_args: Dict[str, Any] = Field(default_factory=dict)
     result: Any = None
+    responding_to: Optional[str] = None
 
 
 class AgentEndCall(BaseModel):
     type: Literal["end_call"] = "end_call"
+    responding_to: Optional[str] = None
+    interruptible: bool = True
 
 
 class AgentTransferCall(BaseModel):
     type: Literal["agent_transfer_call"] = "agent_transfer_call"
     target_phone_number: str
+    responding_to: Optional[str] = None
+    interruptible: bool = True
 
 
 class AgentSendDtmf(BaseModel):
     type: Literal["agent_send_dtmf"] = "agent_send_dtmf"
     button: str
+    responding_to: Optional[str] = None
 
 
 class LogMetric(BaseModel):
     type: Literal["log_metric"] = "log_metric"
     name: str
     value: Any
+    responding_to: Optional[str] = None
 
 
 class LogMessage(BaseModel):
@@ -65,6 +74,7 @@ class LogMessage(BaseModel):
     level: Literal["info", "error"]
     message: str
     metadata: Optional[Dict[str, Any]] = None
+    responding_to: Optional[str] = None
 
 
 class AgentUpdateCall(BaseModel):
@@ -72,11 +82,13 @@ class AgentUpdateCall(BaseModel):
     voice_id: Optional[str] = None
     pronunciation_dict_id: Optional[str] = None
     language: Optional[str] = None
+    responding_to: Optional[str] = None
 
 
 class AgentSendCustom(BaseModel):
     type: Literal["agent_send_custom"] = "agent_send_custom"
     metadata: Dict[str, Any]
+    responding_to: Optional[str] = None
 
 
 OutputEvent = Union[

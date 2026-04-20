@@ -44,8 +44,14 @@ from line.events import (
 from line.llm_agent.background_queue import BackgroundQueue
 from line.llm_agent.config import LlmConfig, _merge_configs, _normalize_config
 from line.llm_agent.history import _HISTORY_EVENT_TYPES, History
-from line.llm_agent.provider import LlmProvider, Message, ToolCall, _get_model_config
-from line.llm_agent.tools.system import EndCallTool, WebSearchTool
+from line.llm_agent.provider import (
+    LlmProvider,
+    Message,
+    ToolCall,
+    _get_model_config,
+    parse_model_id,
+)
+from line.llm_agent.tools.system import EndCallTool, TransferCallTool, WebSearchTool
 from line.llm_agent.tools.utils import (
     FunctionTool,
     ToolEnv,
@@ -58,7 +64,7 @@ T = TypeVar("T")
 
 # Type alias for tools that can be passed to LlmAgent
 # Plain callables are automatically wrapped as loopback tools
-ToolSpec = Union[FunctionTool, WebSearchTool, EndCallTool, Callable]
+ToolSpec = Union[FunctionTool, WebSearchTool, EndCallTool, TransferCallTool, Callable]
 
 
 class LlmAgent:
@@ -78,33 +84,36 @@ class LlmAgent:
         tools: Optional[List[ToolSpec]] = None,
         config: Optional[LlmConfig] = None,
         max_tool_iterations: int = 10,
+        backend: Optional[str] = None,
     ):
         if not api_key:
             raise ValueError("Missing API key in LLmAgent initialization")
 
-        model_config = _get_model_config(model)
+        model_id = parse_model_id(model)
+        model_config = _get_model_config(model_id, backend=backend)
 
         # Resolve the base config to insert default values for any _UNSET sentinels.
         effective_config = _normalize_config(config or LlmConfig())
         if effective_config.reasoning_effort is not None and not model_config.supports_reasoning_effort:
             raise ValueError(
-                f"Model {model} does not support reasoning_effort. "
+                f"Model {str(model_id)} does not support reasoning_effort. "
                 "Remove reasoning_effort from your LlmConfig or use a model that supports it."
             )
 
-        self._model = model
+        self._model_id = model_id
         self._api_key = api_key
         self._config = effective_config
         self._max_tool_iterations = max_tool_iterations
 
         self._tools: List[ToolSpec] = list(tools or [])
-        effective_tools, web_search_options = _normalize_tools(self._tools, model=model)
+        effective_tools, web_search_options = _normalize_tools(self._tools, model_id=model_id)
 
         self._llm = LlmProvider(
-            model=model,
+            model=str(model_id),
             api_key=api_key,
             config=effective_config,
             tools=self._tools,
+            backend=backend,
         )
 
         self._introduction_sent = False
@@ -120,7 +129,7 @@ class LlmAgent:
         self._tool_signatures: Dict[str, str] = {}
 
         tool_names = [t.name for t in effective_tools] + (["web_search"] if web_search_options else [])
-        logger.info(f"LlmAgent initialized with model={self._model}, tools={tool_names}")
+        logger.info(f"LlmAgent initialized with model={self._model_id}, tools={tool_names}")
 
     def _get_background_event_queue(
         self,
@@ -166,6 +175,23 @@ class LlmAgent:
         Raises:
             TypeError: If config, tools, context, or history have invalid types.
         """
+        async for output in self._process_impl(
+            env, event, config=config, tools=tools, context=context, history=history
+        ):
+            yield _set_responding_to(output, event.event_id)
+
+    async def _process_impl(
+        self,
+        env: TurnEnv,
+        event: InputEvent,
+        *,
+        config: Optional[LlmConfig] = None,
+        tools: Optional[List[ToolSpec]] = None,
+        context: Union[str, List[HistoryEvent], None] = None,
+        history: Optional[List[HistoryEvent]] = None,
+    ) -> AsyncIterable[OutputEvent]:
+        """Internal implementation of process(). All yielded events are stamped
+        with responding_to by the process() wrapper."""
         turn_start_time = time.perf_counter()
 
         self._validate_config(config)
@@ -243,7 +269,7 @@ class LlmAgent:
             context: Extra context to append to history for the current #process invocation only.
             history: Override history for the current #process invocation only.
         """
-        tools, web_search_options = _normalize_tools(tool_specs, model=self._model)
+        tools, web_search_options = _normalize_tools(tool_specs, model_id=self._model_id)
         tool_map: Dict[str, FunctionTool] = {t.name: t for t in tools}
 
         is_first_iteration = True
@@ -333,6 +359,10 @@ class LlmAgent:
                     self._tool_signatures[tc.id] = tc.thought_signature
 
             ctx = ToolEnv(turn_env=env)
+
+            # Track before tool calls are processed so backgrounded tools can reference the triggering event
+            triggering_event_id = event.event_id
+
             for tc in tool_calls_dict.values():
                 if not tc.is_complete:
                     continue
@@ -351,7 +381,9 @@ class LlmAgent:
                 if tool.tool_type == ToolType.LOOPBACK and tool.is_background:
                     # Backgroundable tool: run in a shielded task that survives cancellation
                     # Each yielded value triggers a loopback with AgentToolCalled/AgentToolReturned pair
-                    self._execute_backgroundable_tool(normalized_func, ctx, tool_args, tc.id, tc.name)
+                    self._execute_backgroundable_tool(
+                        normalized_func, ctx, tool_args, tc.id, tc.name, triggering_event_id
+                    )
                     continue
 
                 if tool.tool_type == ToolType.LOOPBACK:
@@ -610,6 +642,7 @@ class LlmAgent:
         tool_args: Dict[str, Any],
         tc_id: str,
         tc_name: str,
+        triggering_event_id: str,
     ) -> None:
         """Execute a backgroundable tool via the background queue.
 
@@ -621,6 +654,10 @@ class LlmAgent:
         from cancellation. Events are tagged with the CURRENT event_id at
         yield time so background tool results appear at the end of history
         when yielded after a new process() call has started.
+
+        responding_to is set to the triggering_event_id (captured at subscription
+        time) so background results reference the event that originally triggered
+        the tool, not whatever event happens to be processing when results are drained.
         """
 
         async def generate_events() -> AsyncIterable[Tuple[AgentToolCalled, AgentToolReturned]]:
@@ -629,6 +666,8 @@ class LlmAgent:
                 async for value in normalized_func(ctx, **tool_args):
                     call_id = f"{tc_id}-{n}"
                     called, returned = _construct_tool_events(call_id, tc_name, tool_args, value)
+                    called.responding_to = triggering_event_id
+                    returned.responding_to = triggering_event_id
                     self.history._append_local(called)
                     self.history._append_local(returned)
                     yield (called, returned)
@@ -636,6 +675,8 @@ class LlmAgent:
             except Exception as e:
                 logger.error(f"Error in Tool Call {tc_name}: {e}\n{traceback.format_exc(limit=-10)}")
                 called, returned = _construct_tool_events(f"{tc_id}-{n}", tc_name, tool_args, f"error: {e}")
+                called.responding_to = triggering_event_id
+                returned.responding_to = triggering_event_id
                 self.history._append_local(called)
                 self.history._append_local(returned)
                 yield (called, returned)
@@ -671,10 +712,13 @@ class LlmAgent:
             if not isinstance(tools, list):
                 raise TypeError(f"tools must be a list, got {type(tools).__name__}")
             for i, tool in enumerate(tools):
-                if not (isinstance(tool, (FunctionTool, WebSearchTool, EndCallTool)) or callable(tool)):
+                if not (
+                    isinstance(tool, (FunctionTool, WebSearchTool, EndCallTool, TransferCallTool))
+                    or callable(tool)
+                ):
                     raise TypeError(
                         f"tools[{i}] must be a FunctionTool, WebSearchTool, EndCallTool, "
-                        f"or callable, got {type(tool).__name__}"
+                        f"TransferCallTool, or callable, got {type(tool).__name__}"
                     )
 
     @staticmethod
@@ -765,3 +809,16 @@ def _construct_tool_events(
         result=result,
     )
     return called, returned
+
+
+def _set_responding_to(event: OutputEvent, event_id: str) -> OutputEvent:
+    """Set responding_to on harness-facing events if not already set.
+
+    Called at the process() yield boundary so the harness knows which input event
+    triggered each output event. When event_id is empty string (e.g., no history available),
+    responding_to is left unset. Skips events that already have responding_to set
+    (e.g., from a custom agent or handed-off agent that set it explicitly).
+    """
+    if event_id and event.responding_to is None:
+        event.responding_to = event_id
+    return event

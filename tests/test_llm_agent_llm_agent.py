@@ -26,7 +26,7 @@ from line.events import (
 )
 from line.llm_agent.config import LlmConfig
 from line.llm_agent.llm_agent import LlmAgent
-from line.llm_agent.provider import Message, StreamChunk, ToolCall, _ModelConfig
+from line.llm_agent.provider import Message, StreamChunk, ToolCall, _ModelConfig, parse_model_id
 from line.llm_agent.tools.decorators import handoff_tool, loopback_tool, passthrough_tool
 from line.llm_agent.tools.system import web_search
 from line.llm_agent.tools.utils import FunctionTool
@@ -190,41 +190,43 @@ def turn_env():
 # =============================================================================
 
 
-def _unsupported_model_config(model):
+def _unsupported_model_config(model_id, *, backend=None):
     return None
 
 
 async def test_init_rejects_unsupported_model(monkeypatch, anyio_backend):
     """Test that invalid models are rejected at construction time."""
-    monkeypatch.setattr("line.llm_agent.llm_agent._get_model_config", _unsupported_model_config)
+    import litellm
+
+    monkeypatch.setattr(litellm, "get_supported_openai_params", lambda model: None)
 
     with pytest.raises(ValueError, match="is not supported"):
-        LlmAgent(model="definitely-not-a-real-model", api_key="test-key")
+        LlmAgent(model="fake-provider/definitely-not-a-real-model", api_key="test-key")
 
 
 async def test_init_accepts_direct_openai_websocket_model(monkeypatch, anyio_backend):
     """Direct OpenAI WebSocket models stay accepted even if LiteLLM doesn't know them yet."""
 
-    def _ws_or_unsupported(model):
-        if model == "gpt-5-mini":
+    def _ws_or_unsupported(model_id, *, backend=None):
+        if model_id.model == "gpt-5-mini":
             return _ModelConfig(
                 backend="websocket",
                 supports_reasoning_effort=True,
                 default_reasoning_effort="low",
             )
-        return _unsupported_model_config(model)
+        return _unsupported_model_config(model_id)
 
     monkeypatch.setattr("line.llm_agent.llm_agent._get_model_config", _ws_or_unsupported)
 
     agent = LlmAgent(model="gpt-5-mini", api_key="test-key")
-    assert agent._model == "gpt-5-mini"
+    assert str(agent._model_id) == "openai/gpt-5-mini"
 
 
 async def test_init_rejects_unsupported_reasoning_effort(monkeypatch, anyio_backend):
     """Test that reasoning_effort is rejected for models that do not support it."""
     monkeypatch.setattr(
         "line.llm_agent.llm_agent._get_model_config",
-        lambda model: _ModelConfig(
+        lambda model_id, *, backend=None: _ModelConfig(
             backend="http",
             supports_reasoning_effort=False,
             default_reasoning_effort=None,
@@ -1095,7 +1097,7 @@ async def test_plain_function_wrapped_as_loopback_tool():
         return f"Results for: {query}"
 
     # Resolve tools - this is where wrapping happens
-    resolved_tools, _ = _normalize_tools([my_tool], model="gpt-4o")
+    resolved_tools, _ = _normalize_tools([my_tool], model_id=parse_model_id("gpt-4o"))
 
     # Verify the tool was wrapped
     assert len(resolved_tools) == 1
@@ -1189,7 +1191,7 @@ async def test_mixed_decorated_and_plain_functions(turn_env):
         return "plain"
 
     # Resolve tools - plain functions get wrapped here
-    resolved_tools, _ = _normalize_tools([decorated_tool, plain_tool], model="gpt-4o")
+    resolved_tools, _ = _normalize_tools([decorated_tool, plain_tool], model_id=parse_model_id("gpt-4o"))
 
     assert len(resolved_tools) == 2
 
@@ -2066,3 +2068,138 @@ async def test_background_tool_event_not_lost_on_cancellation(turn_env):
         f"Expected to find 'success' tool result in second process(), "
         f"but only found: {[e.result for e in tool_returned_events]}"
     )
+
+
+# =============================================================================
+# Background tool responding_to
+# =============================================================================
+
+
+async def test_background_tool_responding_to_references_triggering_event(turn_env):
+    """Background tool events should have responding_to set to the event that
+    triggered the tool, not the event being processed when results are drained.
+
+    Scenario:
+    1. Event "evt-A" triggers a background tool
+    2. Tool yields "pending", agent responds
+    3. User speaks again (event "evt-B"), cancelling current process()
+    4. Tool completes and yields "success"
+    5. New process() for "evt-B" drains the success result
+    6. The success AgentToolCalled/AgentToolReturned should have responding_to="evt-A"
+    """
+    import asyncio
+
+    tool_started = asyncio.Event()
+    tool_can_complete = asyncio.Event()
+
+    @loopback_tool(is_background=True)
+    async def bg_tool(ctx, value: Annotated[str, "A value"]):
+        """Background tool that yields pending, waits, then yields success."""
+        yield {"status": "pending", "value": value}
+        tool_started.set()
+        await tool_can_complete.wait()
+        yield {"status": "success", "value": value}
+
+    responses = [
+        # Response 1: LLM calls the tool
+        [
+            StreamChunk(text="Working on it..."),
+            StreamChunk(
+                tool_calls=[
+                    ToolCall(id="tc1", name="bg_tool", arguments='{"value":"test"}', is_complete=True)
+                ]
+            ),
+            StreamChunk(is_final=True),
+        ],
+        # Response 2: LLM responds to pending status
+        [
+            StreamChunk(text="Please wait..."),
+            StreamChunk(is_final=True),
+        ],
+        # Response 3: LLM responds to second user message + success status
+        [
+            StreamChunk(text="Done!"),
+            StreamChunk(is_final=True),
+        ],
+        # Response 4: LLM responds to success result
+        [
+            StreamChunk(text="All complete!"),
+            StreamChunk(is_final=True),
+        ],
+    ]
+
+    agent, mock_llm = create_agent_with_mock(responses, tools=[bg_tool])
+
+    # First process() - event "evt-A" triggers the background tool
+    first_event = UserTextSent(
+        content="Do the thing",
+        event_id="evt-A",
+        history=[UserTextSent(content="Do the thing", event_id="evt-A")],
+    )
+
+    async def run_first_process():
+        outputs = []
+        async for output in agent.process(turn_env, first_event):
+            if not isinstance(output, LogMetric):
+                outputs.append(output)
+        return outputs
+
+    first_task = asyncio.create_task(run_first_process())
+
+    # Wait for tool to start and yield pending
+    await asyncio.wait_for(tool_started.wait(), timeout=5.0)
+
+    # Wait for agent to process the pending status
+    for _ in range(100):
+        if mock_llm._call_count >= 2:
+            break
+        await asyncio.sleep(0)
+
+    # Cancel first process (simulating user speaking)
+    first_task.cancel()
+    try:
+        await first_task
+    except asyncio.CancelledError:
+        pass
+
+    # Allow tool to complete
+    tool_can_complete.set()
+    await asyncio.wait_for(agent._get_background_event_queue().wait(), timeout=5.0)
+
+    # Second process() - event "evt-B" drains the background tool results
+    second_event = UserTextSent(
+        content="Status?",
+        event_id="evt-B",
+        history=[
+            UserTextSent(content="Do the thing", event_id="evt-A"),
+            AgentTextSent(content="Working on it..."),
+            AgentTextSent(content="Please wait..."),
+            UserTextSent(content="Status?", event_id="evt-B"),
+        ],
+    )
+
+    second_outputs = await collect_outputs(agent, turn_env, second_event)
+
+    # Find background tool events (success result drained during second process)
+    bg_tool_called = [
+        o for o in second_outputs if isinstance(o, AgentToolCalled) and "tc1-" in o.tool_call_id
+    ]
+    bg_tool_returned = [
+        o for o in second_outputs if isinstance(o, AgentToolReturned) and "tc1-" in o.tool_call_id
+    ]
+    success_returned = [e for e in bg_tool_returned if e.result.get("status") == "success"]
+
+    assert len(success_returned) >= 1, (
+        f"Expected background tool success result, got: {[e.result for e in bg_tool_returned]}"
+    )
+
+    # The key assertion: background tool events should reference "evt-A" (the triggering event),
+    # not "evt-B" (the event being processed when results were drained)
+    for evt in bg_tool_called:
+        assert evt.responding_to == "evt-A", (
+            f"AgentToolCalled responding_to should be 'evt-A', got '{evt.responding_to}'"
+        )
+    for evt in bg_tool_returned:
+        assert evt.responding_to == "evt-A", (
+            f"AgentToolReturned responding_to should be 'evt-A', got '{evt.responding_to}'"
+        )

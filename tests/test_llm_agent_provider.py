@@ -9,12 +9,14 @@ from line.llm_agent.provider import (
     ChatStream,
     LlmProvider,
     Message,
+    ParsedModelId,
     ToolCall,
     _extract_instructions_and_messages,
     _get_model_config,
     _is_realtime_model,
     _is_websocket_model,
     _normalize_messages,
+    parse_model_id,
 )
 from line.llm_agent.schema_converter import build_openai_tool_defs
 from line.llm_agent.tools.system import web_search
@@ -182,60 +184,85 @@ def test_llm_provider_warmup_preserves_native_web_search_defaults(monkeypatch):
     assert backend.warmup_calls[0]["kwargs"]["web_search_options"] == {"search_context_size": "high"}
 
 
-def test_llm_provider_routes_websocket_models_with_unsupported_config_to_http_backend():
+def test_llm_provider_rejects_websocket_incompatible_config_at_chat():
     provider = LlmProvider(
         model="openai/gpt-5.2",
         api_key="test-key",
+        backend="websocket",
     )
     websocket_backend = _DummyBackend()
-    http_backend = _DummyBackend()
     provider._backend = websocket_backend
-    provider._http_fallback_backend = http_backend
 
-    result = provider.chat(
-        [Message(role="user", content="hi")],
-        config=LlmConfig(stop=["DONE"]),
-    )
+    try:
+        provider.chat(
+            [Message(role="user", content="hi")],
+            config=LlmConfig(stop=["DONE"]),
+        )
+    except ValueError as exc:
+        assert "websocket" in str(exc).lower()
+        assert "stop" in str(exc)
+    else:
+        raise AssertionError("Expected ValueError for websocket-incompatible config")
 
-    assert result == "ok"
     assert len(websocket_backend.calls) == 0
-    assert len(http_backend.calls) == 1
 
 
-def test_llm_provider_keeps_websocket_backend_for_supported_config():
+def test_llm_provider_rejects_temperature_on_websocket_backend():
+    """temperature/top_p cause the OpenAI WebSocket endpoint to close silently,
+    so they must be rejected up-front."""
     provider = LlmProvider(
         model="openai/gpt-5.2",
         api_key="test-key",
+        backend="websocket",
     )
     websocket_backend = _DummyBackend()
-    http_backend = _DummyBackend()
     provider._backend = websocket_backend
-    provider._http_fallback_backend = http_backend
 
-    result = provider.chat(
-        [Message(role="user", content="hi")],
-        config=LlmConfig(temperature=0.2, top_p=0.9),
-    )
+    try:
+        provider.chat(
+            [Message(role="user", content="hi")],
+            config=LlmConfig(temperature=0.2, top_p=0.9),
+        )
+    except ValueError as exc:
+        assert "temperature" in str(exc)
+        assert "top_p" in str(exc)
+    else:
+        raise AssertionError("Expected ValueError for websocket-incompatible config")
 
-    assert result == "ok"
-    assert len(websocket_backend.calls) == 1
-    assert len(http_backend.calls) == 0
+    assert len(websocket_backend.calls) == 0
 
 
-def test_llm_provider_warmup_routes_unsupported_websocket_config_to_http_backend():
+def test_llm_provider_warmup_rejects_websocket_incompatible_config():
     provider = LlmProvider(
         model="openai/gpt-5.2",
         api_key="test-key",
+        backend="websocket",
     )
     websocket_backend = _DummyBackend()
-    http_backend = _DummyBackend()
     provider._backend = websocket_backend
-    provider._http_fallback_backend = http_backend
 
-    asyncio.run(provider.warmup(config=LlmConfig(extra={"service_tier": "flex"})))
+    try:
+        asyncio.run(provider.warmup(config=LlmConfig(extra={"service_tier": "flex"})))
+    except ValueError as exc:
+        assert "extra" in str(exc)
+    else:
+        raise AssertionError("Expected ValueError for websocket-incompatible config")
 
     assert len(websocket_backend.warmup_calls) == 0
-    assert len(http_backend.warmup_calls) == 1
+
+
+def test_llm_provider_rejects_websocket_incompatible_base_config_at_init():
+    try:
+        LlmProvider(
+            model="openai/gpt-5.2",
+            api_key="test-key",
+            backend="websocket",
+            config=LlmConfig(temperature=0.2),
+        )
+    except ValueError as exc:
+        assert "temperature" in str(exc)
+    else:
+        raise AssertionError("Expected ValueError for websocket-incompatible base config")
 
 
 def test_extract_instructions_includes_config_system_prompt():
@@ -254,6 +281,31 @@ def test_build_openai_tool_defs_adds_native_web_search():
         web_search_options={"search_context_size": "high"},
         responses_api=True,
     ) == [{"type": "web_search", "search_context_size": "high"}]
+
+
+def test_build_openai_tool_defs_strips_strict_flag_when_requested():
+    """Realtime API rejects ``"strict": true`` on tool defs; the flag must be
+    suppressible without disabling strict schema construction."""
+    from line.llm_agent.tools.decorators import loopback_tool
+    from line.llm_agent.tools.utils import ToolEnv
+
+    @loopback_tool
+    async def simple_tool(ctx: ToolEnv, query: Annotated[str, "query"]):
+        """A simple tool."""
+        return "ok"
+
+    # Default: strict flag is emitted.
+    with_flag = build_openai_tool_defs([simple_tool], responses_api=True)
+    assert with_flag is not None
+    assert with_flag[0]["strict"] is True
+
+    # With include_strict_flag=False the flag is stripped, but the schema still
+    # reflects strict construction (additionalProperties: false, required list).
+    without_flag = build_openai_tool_defs([simple_tool], responses_api=True, include_strict_flag=False)
+    assert without_flag is not None
+    assert "strict" not in without_flag[0]
+    assert without_flag[0]["parameters"]["additionalProperties"] is False
+    assert without_flag[0]["parameters"]["required"] == ["query"]
 
 
 def test_llm_provider_requires_api_key():
@@ -282,7 +334,7 @@ def test_is_supported_model_accepts_direct_openai_websocket_model(monkeypatch):
     import litellm
 
     monkeypatch.setattr(litellm, "get_supported_openai_params", lambda model: None)
-    assert _get_model_config("openai/gpt-5.2") is not None
+    assert _get_model_config(parse_model_id("openai/gpt-5.2"), backend="websocket") is not None
 
 
 def test_backend_override_http_for_websocket_model():
@@ -319,22 +371,165 @@ def test_backend_override_invalid_value():
         raise AssertionError("Expected ValueError for invalid backend value")
 
 
+# ---------------------------------------------------------------------------
+# _get_model_config
+# ---------------------------------------------------------------------------
+
+
+class TestGetModelConfig:
+    """Tests for _get_model_config backend routing and reasoning-effort detection."""
+
+    # -- Backend routing -------------------------------------------------------
+
+    def test_realtime_model_selects_realtime_backend(self):
+        cfg = _get_model_config(parse_model_id("openai/gpt-4o-realtime-preview"))
+        assert cfg.backend == "realtime"
+        assert cfg.supports_reasoning_effort is False
+        assert cfg.default_reasoning_effort is None
+
+    def test_websocket_model_selects_websocket_backend(self):
+        cfg = _get_model_config(parse_model_id("openai/gpt-5.2"))
+        assert cfg.backend == "http"
+
+    def test_websocket_model_with_http_override_selects_http(self):
+        cfg = _get_model_config(parse_model_id("openai/gpt-5.2"), backend="http")
+        assert cfg.backend == "http"
+
+    def test_websocket_model_with_explicit_websocket_backend(self):
+        cfg = _get_model_config(parse_model_id("openai/gpt-5.2"), backend="websocket")
+        assert cfg.backend == "websocket"
+
+    def test_plain_http_model_selects_http_backend(self):
+        cfg = _get_model_config(parse_model_id("openai/gpt-4o"))
+        assert cfg.backend == "http"
+
+    # -- Error cases -----------------------------------------------------------
+
+    def test_invalid_backend_raises(self):
+        try:
+            _get_model_config(parse_model_id("openai/gpt-4o"), backend="banana")
+        except ValueError as exc:
+            assert "Invalid backend" in str(exc)
+        else:
+            raise AssertionError("Expected ValueError")
+
+    def test_realtime_backend_with_non_realtime_model_raises(self):
+        try:
+            _get_model_config(parse_model_id("openai/gpt-4o"), backend="realtime")
+        except ValueError as exc:
+            assert "realtime" in str(exc).lower()
+        else:
+            raise AssertionError("Expected ValueError")
+
+    def test_non_realtime_backend_with_realtime_model_raises(self):
+        try:
+            _get_model_config(parse_model_id("openai/gpt-4o-realtime-preview"), backend="http")
+        except ValueError as exc:
+            assert "incompatible" in str(exc).lower()
+        else:
+            raise AssertionError("Expected ValueError")
+
+    def test_websocket_backend_with_non_websocket_model_raises(self):
+        try:
+            _get_model_config(parse_model_id("openai/gpt-4o"), backend="websocket")
+        except ValueError as exc:
+            assert "websocket" in str(exc).lower()
+        else:
+            raise AssertionError("Expected ValueError")
+
+    def test_unsupported_model_raises(self, monkeypatch):
+        import litellm
+
+        monkeypatch.setattr(litellm, "get_supported_openai_params", lambda model: None)
+        try:
+            _get_model_config(parse_model_id("fake-provider/not-a-model"))
+        except ValueError as exc:
+            assert "is not supported" in str(exc)
+        else:
+            raise AssertionError("Expected ValueError")
+
+    # -- Reasoning effort for websocket models ---------------------------------
+
+    def test_websocket_model_with_reasoning_support(self):
+        """Reasoning models (e.g. o3) routed via websocket get reasoning enabled."""
+        cfg = _get_model_config(parse_model_id("openai/gpt-5.2"), backend="websocket")
+        assert cfg.backend == "websocket"
+        assert cfg.supports_reasoning_effort is True
+        assert cfg.default_reasoning_effort == "low"
+
+    # -- Reasoning effort for HTTP models --------------------------------------
+
+    def test_http_model_without_reasoning_support(self):
+        cfg = _get_model_config(parse_model_id("openai/gpt-4o"))
+        assert cfg.supports_reasoning_effort is False
+        assert cfg.default_reasoning_effort is None
+
+    def test_http_model_with_reasoning_support(self):
+        """o4-mini goes through the HTTP path and supports reasoning."""
+        cfg = _get_model_config(parse_model_id("openai/o4-mini"))
+        assert cfg.backend == "http"
+        assert cfg.supports_reasoning_effort is True
+        assert cfg.default_reasoning_effort is not None
+
+    def test_websocket_model_forced_to_http_gets_correct_reasoning(self):
+        """gpt-4.1 forced to HTTP should still have reasoning disabled."""
+        cfg = _get_model_config(parse_model_id("openai/gpt-4.1"), backend="http")
+        assert cfg.backend == "http"
+        assert cfg.supports_reasoning_effort is False
+        assert cfg.default_reasoning_effort is None
+
+    def test_anthropic_model_reasoning_default_is_none(self):
+        """Anthropic models use None (not 'low') to skip the thinking block."""
+        cfg = _get_model_config(parse_model_id("anthropic/claude-sonnet-4-20250514"))
+        assert cfg.backend == "http"
+        assert cfg.supports_reasoning_effort is True
+        assert cfg.default_reasoning_effort is None
+
+
 def test_is_websocket_model_matches_gpt52_variants():
-    assert _is_websocket_model("gpt-5.2")
-    assert _is_websocket_model("gpt-5.2-pro")
-    assert _is_websocket_model("gpt-5.4")
-    assert _is_websocket_model("gpt-5.4-mini")
-    assert _is_websocket_model("chatgpt/gpt-5.4-pro")
-    assert not _is_websocket_model("azure/gpt-5.2")
-    assert not _is_websocket_model("openrouter/gpt-5.2")
-    assert not _is_websocket_model("openai/gpt-4o")
+    assert _is_websocket_model(parse_model_id("gpt-5.2"))
+    assert _is_websocket_model(parse_model_id("gpt-5.2-pro"))
+    assert _is_websocket_model(parse_model_id("gpt-5.4"))
+    assert _is_websocket_model(parse_model_id("gpt-5.4-mini"))
+    assert _is_websocket_model(parse_model_id("chatgpt/gpt-5.4-pro"))
+    assert not _is_websocket_model(parse_model_id("azure/gpt-5.2"))
+    assert not _is_websocket_model(parse_model_id("openrouter/gpt-5.2"))
+    assert not _is_websocket_model(parse_model_id("openai/gpt-4o"))
 
 
 def test_is_realtime_model_matches_only_direct_openai_models():
-    assert _is_realtime_model("openai/gpt-4o-realtime-preview")
-    assert _is_realtime_model("gpt-4o-realtime-preview")  # detected via LiteLLM registry
-    assert not _is_realtime_model("azure/gpt-4o-realtime-preview")
-    assert not _is_realtime_model("openrouter/gpt-4o-realtime-preview")
+    assert _is_realtime_model(parse_model_id("openai/gpt-4o-realtime-preview"))
+    assert _is_realtime_model(parse_model_id("gpt-4o-realtime-preview"))
+    assert not _is_realtime_model(parse_model_id("azure/gpt-4o-realtime-preview"))
+    assert not _is_realtime_model(parse_model_id("openrouter/gpt-4o-realtime-preview"))
+
+
+class TestParseModelId:
+    """Tests for parse_model_id normalization."""
+
+    def test_bare_gpt_string_defaults_to_openai(self):
+        assert parse_model_id("gpt-4o") == ParsedModelId("openai", "gpt-4o")
+
+    def test_openai_prefix_preserved(self):
+        assert parse_model_id("openai/gpt-4o") == ParsedModelId("openai", "gpt-4o")
+
+    def test_chatgpt_prefix_normalized_to_openai(self):
+        assert parse_model_id("chatgpt/gpt-5.4-pro") == ParsedModelId("openai", "gpt-5.4-pro")
+
+    def test_anthropic_prefix_preserved(self):
+        assert parse_model_id("anthropic/claude-sonnet-4-5") == ParsedModelId(
+            "anthropic", "claude-sonnet-4-5"
+        )
+
+    def test_gemini_prefix_preserved(self):
+        assert parse_model_id("gemini/gemini-2.5-flash") == ParsedModelId("gemini", "gemini-2.5-flash")
+
+    def test_provider_lowercased(self):
+        assert parse_model_id("OpenAI/gpt-4o") == ParsedModelId("openai", "gpt-4o")
+
+    def test_str_round_trips_to_canonical_form(self):
+        assert str(parse_model_id("chatgpt/gpt-5.2")) == "openai/gpt-5.2"
+        assert str(parse_model_id("gpt-4o")) == "openai/gpt-4o"
 
 
 def test_llm_provider_public_methods_have_type_hints():
@@ -378,7 +573,7 @@ def test_http_chat_stream_awaits_response_aclose(monkeypatch):
 
     monkeypatch.setattr("line.llm_agent.http_provider.acompletion", _fake_acompletion)
 
-    provider = _HttpProvider(model="gpt-4o")
+    provider = _HttpProvider(model_id=parse_model_id("gpt-4o"))
 
     async def _consume():
         async for _ in provider.chat(

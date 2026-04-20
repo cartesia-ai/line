@@ -28,14 +28,6 @@ ConversationEntry = Tuple[tuple, Optional[str]]  # (identity, opaque_id | None)
 HistoryUpdate = Callable[[List[ConversationEntry], Dict[str, Any]], List[ConversationEntry]]
 
 
-def _normalize_openai_model_name(model: str) -> str:
-    """Strip LiteLLM-style ``openai/`` or ``chatgpt/`` prefixes for direct OpenAI API calls."""
-    lower = model.lower()
-    if lower.startswith("openai/") or lower.startswith("chatgpt/"):
-        return model.split("/", 1)[1]
-    return model
-
-
 def _context_identity(
     instructions: Optional[str],
     tool_defs: Optional[List[Dict[str, Any]]],
@@ -248,6 +240,7 @@ class _WsEventStream:
     async def __aiter__(self) -> AsyncIterator[StreamChunk]:
         ws = self._ws
         tool_calls: Dict[str, ToolCall] = {}
+        received_content = False  # Track whether any content events arrived
 
         try:
             while True:
@@ -259,6 +252,7 @@ class _WsEventStream:
                 if event_type in ("response.output_text.delta", "response.text.delta"):
                     delta = event.get("delta", "")
                     if delta:
+                        received_content = True
                         yield StreamChunk(text=delta)
 
                 # --- Function call argument deltas ---
@@ -283,6 +277,7 @@ class _WsEventStream:
 
                 # --- Output item added (get function name early) ---
                 elif event_type == "response.output_item.added":
+                    received_content = True
                     item = event.get("item", {})
                     if item.get("type") == "function_call":
                         call_id = item.get("call_id", "")
@@ -313,21 +308,33 @@ class _WsEventStream:
                 elif event_type in _TERMINAL_EVENTS:
                     self.done = True
                     response = event.get("response") or {}
+                    status = response.get("status") or ""
                     self._on_response_done(response)
 
                     # Check for failure — covers both APIs:
                     # Realtime: response.done with status="failed"
                     # Responses: response.failed event
                     error = response.get("error") or {}
-                    status = response.get("status") or ""
                     if event_type == "response.failed" or status == "failed":
                         raise RuntimeError(
                             f"OpenAI API error ({error.get('code', '')}): "
                             f"{error.get('message', 'unknown error')}"
                         )
 
-                    for tc in tool_calls.values():
-                        tc.is_complete = True
+                    # Only force-mark tool calls on completed responses.
+                    # Incomplete/cancelled responses may have truncated
+                    # arguments that would fail json.loads downstream.
+                    if status == "completed":
+                        for tc in tool_calls.values():
+                            tc.is_complete = True
+                    else:
+                        details = response.get("incomplete_details") or {}
+                        logger.warning(
+                            "Non-completed response from API: status=%s, reason=%s, response_id=%s",
+                            status,
+                            details.get("reason", ""),
+                            response.get("id", ""),
+                        )
 
                     yield StreamChunk(
                         tool_calls=list(tool_calls.values()) if tool_calls else [],
@@ -347,10 +354,26 @@ class _WsEventStream:
                 elif event_type in _IGNORED_EVENTS:
                     pass
 
+                # --- Unrecognized events ---
+                else:
+                    logger.warning(
+                        f"Unrecognized WebSocket event type: {event_type} (keys: {list(event.keys())})"
+                    )
+
         except websockets.exceptions.ConnectionClosed as e:
             self.done = True
+            close_code = e.rcvd.code if e.rcvd else None
+            close_reason = e.rcvd.reason if e.rcvd else None
+            if not received_content:
+                logger.error(
+                    f"WebSocket closed before delivering any content: code={close_code} reason={close_reason}"
+                )
+                raise RuntimeError(
+                    f"WebSocket closed (code={close_code}) before delivering any response content"
+                ) from e
+            logger.warning(f"WebSocket closed during streaming: code={close_code} reason={close_reason}")
             if e.rcvd and e.rcvd.code == 1000:
-                # Server closed cleanly — treat as normal stream end.
+                # Server closed cleanly after partial content — yield what we have.
                 yield StreamChunk(
                     tool_calls=list(tool_calls.values()) if tool_calls else [],
                     is_final=True,

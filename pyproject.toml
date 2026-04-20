@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cartesia-line"
-version = "0.2.8a"
+version = "0.2.9"
 description = "Cartesia Voice Agents SDK"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -38,7 +38,7 @@ dependencies = [
     "pydantic>=2.0.0,<3",
     "uvicorn>=0.35.0,<1",
     "websockets>=13.0.0,<14",
-    "litellm>=1.81.6,<=1.82.6",
+    "litellm>=1.83.0,<=1.84",
     "starlette>=0.37.0,<1.0.0",
     "ddgs>=9.8.0,<10",
     "phonenumbers>=9.0.22,<10",

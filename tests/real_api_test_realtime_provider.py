@@ -5,7 +5,7 @@ Test script for the _RealtimeProvider — OpenAI Realtime WebSocket (text-only).
 Compares latency against the conventional HTTP LlmProvider approach.
 
 Usage:
-    uv run python line/llm_agent/scripts/test_realtime.py [OPTIONS]
+    uv run python tests/real_api_test_realtime_provider.py [OPTIONS]
 
 Options:
     --tests TESTS           Comma-separated tests (default: all)
@@ -41,7 +41,7 @@ from line.events import (
     UserTextSent,
 )
 from line.llm_agent import LlmAgent, LlmConfig, loopback_tool
-from line.llm_agent.provider import LlmProvider, Message
+from line.llm_agent.provider import LlmProvider, Message, ParsedModelId, parse_model_id
 from line.llm_agent.realtime_provider import _RealtimeProvider
 
 # =============================================================================
@@ -111,11 +111,11 @@ def print_header(title: str):
 # =============================================================================
 
 
-async def test_streaming(api_key: str, model: str):
+async def test_streaming(api_key: str, model_id: ParsedModelId):
     """Basic text streaming over Realtime WS."""
-    print_header(f"Streaming Test ({model})")
+    print_header(f"Streaming Test ({model_id.model})")
 
-    provider = _RealtimeProvider(model=model, api_key=api_key)
+    provider = _RealtimeProvider(model_id=model_id, api_key=api_key)
     messages = [Message(role="user", content="Say 'Hello, World!' and nothing else.")]
 
     try:
@@ -178,11 +178,11 @@ async def test_tools(api_key: str, model: str):
     await agent.cleanup()
 
 
-async def test_multi_turn(api_key: str, model: str):
+async def test_multi_turn(api_key: str, model_id: ParsedModelId):
     """Multi-turn conversation — WS benefits from persistent connection."""
-    print_header(f"Multi-Turn Test ({model})")
+    print_header(f"Multi-Turn Test ({model_id.model})")
 
-    provider = _RealtimeProvider(model=model, api_key=api_key)
+    provider = _RealtimeProvider(model_id=model_id, api_key=api_key)
     config = LlmConfig(system_prompt="You are a helpful assistant. Be brief.")
 
     turns = [
@@ -205,11 +205,11 @@ async def test_multi_turn(api_key: str, model: str):
         await provider.aclose()
 
 
-async def test_diff_sync(api_key: str, model: str):
+async def test_diff_sync(api_key: str, model_id: ParsedModelId):
     """Simulate history divergence (interrupted text) and verify diff-sync."""
-    print_header(f"Diff-Sync Test ({model})")
+    print_header(f"Diff-Sync Test ({model_id.model})")
 
-    provider = _RealtimeProvider(model=model, api_key=api_key)
+    provider = _RealtimeProvider(model_id=model_id, api_key=api_key)
     config = LlmConfig(system_prompt="You are a helpful assistant. Be brief.")
 
     try:
@@ -243,17 +243,17 @@ async def test_diff_sync(api_key: str, model: str):
 
 async def test_latency_comparison(
     api_key: str,
-    rt_model: str,
+    rt_model_id: ParsedModelId,
     http_model: str,
     runs: int,
     diverge_rate: float,
 ):
     """Compare HTTP vs Realtime WS latency across multiple iterations."""
-    print_header(f"Latency Comparison: HTTP ({http_model}) vs WS ({rt_model})")
+    print_header(f"Latency Comparison: HTTP ({http_model}) vs WS ({rt_model_id.model})")
     print(f"Runs: {runs} | Diverge rate: {diverge_rate}")
 
     http_provider = LlmProvider(model=http_model, api_key=api_key)
-    ws_provider = _RealtimeProvider(model=rt_model, api_key=api_key)
+    ws_provider = _RealtimeProvider(model_id=rt_model_id, api_key=api_key)
     config = LlmConfig(system_prompt="You are a helpful assistant. Be brief (1-2 sentences max).")
 
     conversation_prompts = [
@@ -403,19 +403,21 @@ async def main(args):
     print(f"Realtime model: {args.model}")
     print(f"HTTP model: {args.http_model}")
 
+    model_id = parse_model_id(args.model)
+
     try:
         if "streaming" in tests_to_run:
-            await test_streaming(api_key, args.model)
+            await test_streaming(api_key, model_id)
         if "tools" in tests_to_run:
             await test_tools(api_key, args.model)
         if "multi_turn" in tests_to_run:
-            await test_multi_turn(api_key, args.model)
+            await test_multi_turn(api_key, model_id)
         if "diff_sync" in tests_to_run:
-            await test_diff_sync(api_key, args.model)
+            await test_diff_sync(api_key, model_id)
         if "latency_comparison" in tests_to_run:
             await test_latency_comparison(
                 api_key,
-                args.model,
+                model_id,
                 args.http_model,
                 args.runs,
                 args.diverge_rate,

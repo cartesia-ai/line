@@ -16,7 +16,7 @@ from typing import Any, AsyncIterator, Dict, List, NamedTuple, Optional, Protoco
 from litellm import acompletion
 
 from line.llm_agent.config import LlmConfig
-from line.llm_agent.provider import Message, StreamChunk, ToolCall
+from line.llm_agent.provider import Message, ParsedModelId, StreamChunk, ToolCall
 from line.llm_agent.schema_converter import tools_to_litellm
 from line.llm_agent.tools.utils import FunctionTool
 
@@ -40,12 +40,12 @@ class _HttpProvider:
 
     def __init__(
         self,
-        model: str,
+        model_id: ParsedModelId,
         api_key: Optional[str] = None,
         supports_reasoning_effort: bool = False,
         default_reasoning_effort: Optional[str] = "low",
     ):
-        self._model = model
+        self._model_id = model_id
         self._api_key = api_key
         self._supports_reasoning_effort = supports_reasoning_effort
         self._default_reasoning_effort = default_reasoning_effort
@@ -71,7 +71,7 @@ class _HttpProvider:
         llm_messages = self._build_messages(messages, config)
 
         llm_kwargs: Dict[str, Any] = {
-            "model": self._model,
+            "model": str(self._model_id),
             "messages": llm_messages,
             "stream": True,
             "num_retries": config.num_retries,

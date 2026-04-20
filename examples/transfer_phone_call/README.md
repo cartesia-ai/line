@@ -30,8 +30,9 @@ send_dtmf(button="1")
 Transfers the call to another phone number. Validates E.164 format.
 
 ```python
-# Transfer to a specific number
-transfer_call(target_phone_number="+14155551234", message="Transferring you now...")
+# Optional spoken line before transfer is fixed when you build the tool (not chosen by the model):
+tools=[transfer_call(message="Transferring you now..."), send_dtmf]
+# The model only passes the destination: transfer_call(target_phone_number="+14155551234")
 ```
 
 ### `end_call`

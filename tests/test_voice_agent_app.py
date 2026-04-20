@@ -16,13 +16,15 @@ from unittest.mock import AsyncMock, MagicMock
 from fastapi import WebSocket, WebSocketDisconnect
 import pytest
 
-from line._harness_types import MessageOutput
+from line._harness_types import EndCallOutput, MessageOutput, TransferOutput
 from line.agent import TurnEnv
 from line.events import (
+    AgentEndCall,
     AgentSendText,
     AgentTextSent,
     AgentToolCalled,
     AgentToolReturned,
+    AgentTransferCall,
     AgentUpdateCall,
     CallEnded,
     CallStarted,
@@ -36,6 +38,7 @@ from line.events import (
 from line.voice_agent_app import (
     AgentEnv,
     ConversationRunner,
+    _call_request_from_start_data,
     _consume_expected_ack_back_prefix,
     _get_processed_history,
     _parse_committed,
@@ -1136,6 +1139,45 @@ class TestConsumeExpectedAckBackAdversarial:
 
 
 # ============================================================
+# AgentEndCall / AgentTransferCall -> OutputMessage mapping tests
+# ============================================================
+
+
+class TestEndCallAndTransferCallMapping:
+    """Tests for _map_output_event forwarding interruptible on end_call and transfer_call."""
+
+    def _map(self, event):
+        ws = create_mock_websocket()
+        runner = ConversationRunner(ws, noop_agent, env)
+        return runner._map_output_event(event)
+
+    def test_end_call_interruptible_false(self):
+        """AgentEndCall(interruptible=False) maps to EndCallOutput(interruptible=False)."""
+        result = self._map(AgentEndCall(interruptible=False))
+        assert isinstance(result, EndCallOutput)
+        assert result.interruptible is False
+
+    def test_end_call_interruptible_true_by_default(self):
+        """AgentEndCall() defaults to interruptible=True."""
+        result = self._map(AgentEndCall())
+        assert isinstance(result, EndCallOutput)
+        assert result.interruptible is True
+
+    def test_transfer_call_interruptible_false(self):
+        """AgentTransferCall(interruptible=False) maps to TransferOutput(interruptible=False)."""
+        result = self._map(AgentTransferCall(target_phone_number="+14155551234", interruptible=False))
+        assert isinstance(result, TransferOutput)
+        assert result.target_phone_number == "+14155551234"
+        assert result.interruptible is False
+
+    def test_transfer_call_interruptible_true_by_default(self):
+        """AgentTransferCall() defaults to interruptible=True."""
+        result = self._map(AgentTransferCall(target_phone_number="+14155551234"))
+        assert isinstance(result, TransferOutput)
+        assert result.interruptible is True
+
+
+# ============================================================
 # AgentUpdateCall -> ConfigOutput mapping tests
 # ============================================================
 
@@ -1274,3 +1316,55 @@ class TestEventMessageTruncation:
         event = LogMessage(name="test", level="info", message="hi", metadata={"ts": datetime.now()})
         output = self._map(event)
         assert isinstance(output.metadata, dict)
+
+
+# ============================================================
+# Start message tests
+# ============================================================
+
+
+class TestCallRequestFromStartData:
+    """Tests for _call_request_from_start_data parsing."""
+
+    def test_valid_start_message(self):
+        data = {
+            "type": "start",
+            "call_id": "call-123",
+            "from": "+15551234567",
+            "to": "+15559876543",
+            "agent_call_id": "ac-456",
+            "agent": {"system_prompt": "You are helpful.", "introduction": "Hello!"},
+            "metadata": {"key": "value"},
+        }
+        result = _call_request_from_start_data(data)
+        assert result.call_id == "call-123"
+        assert result.from_ == "+15551234567"
+        assert result.to == "+15559876543"
+        assert result.agent_call_id == "ac-456"
+        assert result.agent.system_prompt == "You are helpful."
+        assert result.agent.introduction == "Hello!"
+        assert result.metadata == {"key": "value"}
+
+    def test_defaults_for_missing_fields(self):
+        data = {"type": "start"}
+        result = _call_request_from_start_data(data)
+        assert result.call_id == "unknown"
+        assert result.from_ == "unknown"
+        assert result.to == "unknown"
+        assert result.agent_call_id == "unknown"
+        assert result.agent.system_prompt is None
+        assert result.agent.introduction is None
+        assert result.metadata == {}
+
+    def test_extra_fields_ignored(self):
+        data = {
+            "type": "start",
+            "call_id": "call-123",
+            "from": "+1555",
+            "to": "+1555",
+            "agent_call_id": "ac-1",
+            "agent": {},
+            "future_field": "should be ignored",
+        }
+        result = _call_request_from_start_data(data)
+        assert result.call_id == "call-123"
