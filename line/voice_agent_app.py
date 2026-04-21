@@ -686,11 +686,6 @@ class ConversationRunner:
                 responding_to=event.responding_to,
             )
         if isinstance(event, AgentUpdateCall):
-            # "multilingual" is a special sentinel: STT gets None (auto-detect),
-            # TTS gets None (use voice default language).
-            is_multilingual = event.language == "multilingual"
-            effective_language = None if is_multilingual else event.language
-
             logger.info(
                 f"<- ⚙️ Update call: voice_id={event.voice_id}, "
                 f"pronunciation_dict_id={event.pronunciation_dict_id}, "
@@ -700,10 +695,10 @@ class ConversationRunner:
                 tts=TTSConfig(
                     voice_id=event.voice_id,
                     pronunciation_dict_id=event.pronunciation_dict_id,
-                    language=effective_language,
+                    language=event.language,
                 ),
-                stt=STTConfig(language=effective_language) if event.language is not None else None,
-                language=effective_language,
+                stt=STTConfig(language=event.language) if event.language is not None else None,
+                language=event.language,
                 responding_to=event.responding_to,
             )
         if isinstance(event, AgentSendCustom):
