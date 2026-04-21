@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "A web research voice agent using Tavily API and Cartesia Line SDK"
 requires-python = ">=3.10"
 dependencies = [
-    "cartesia-line>=0.2.7",
+    "cartesia-line==0.2.10",
     "tavily-python>=0.7.23",
     "loguru>=0.7.3",
     "python-dotenv>=1.2.2",
