@@ -22,6 +22,7 @@ from line.events import (
     CallStarted,
     LogMetric,
     OutputEvent,
+    UserCustomSent,
     UserTextSent,
 )
 from line.llm_agent.config import LlmConfig
@@ -1443,6 +1444,69 @@ class TestBuildMessagesPendingToolResults:
         messages = await build_messages_with(agent, [], [], "current")
 
         assert len(messages) == 0
+
+
+# =============================================================================
+# Tests: _build_messages - UserCustomSent serialization
+# =============================================================================
+
+
+class TestBuildMessagesUserCustomSent:
+    """Tests for _build_messages handling of UserCustomSent events.
+
+    UserCustomSent events should be serialized as system messages containing
+    the event metadata as JSON, giving the LLM context about client-side events.
+    """
+
+    async def test_user_custom_sent_with_metadata(self):
+        """UserCustomSent with metadata is serialized as a system message with JSON content."""
+        agent, _ = create_agent_with_mock([])
+
+        custom = UserCustomSent(metadata={"kind": "diamonds_purchased", "amount": 100})
+        user = UserTextSent(content="I topped up")
+        input_history = [custom, user]
+
+        messages = await build_messages_with(agent, input_history, [], "current")
+
+        assert len(messages) == 2
+        assert messages[0].role == "system"
+        assert '"kind": "diamonds_purchased"' in messages[0].content
+        assert messages[1].role == "user"
+        assert messages[1].content == "I topped up"
+
+    async def test_user_custom_sent_with_empty_metadata(self):
+        """UserCustomSent with empty metadata uses fallback content."""
+        agent, _ = create_agent_with_mock([])
+
+        custom = UserCustomSent(metadata={})
+        user = UserTextSent(content="Hello")
+        input_history = [custom, user]
+
+        messages = await build_messages_with(agent, input_history, [], "current")
+
+        assert len(messages) == 2
+        assert messages[0].role == "system"
+        assert "[custom event]" in messages[0].content
+        assert messages[1].role == "user"
+
+    async def test_user_custom_sent_between_conversation_turns(self):
+        """UserCustomSent between user and agent turns preserves conversation flow."""
+        agent, _ = create_agent_with_mock([])
+
+        user1 = UserTextSent(content="Tell me more", event_id="e1")
+        agent1 = AgentTextSent(content="Sure thing!", event_id="e2")
+        custom = UserCustomSent(metadata={"kind": "diamonds_depleted"}, event_id="e3")
+        user2 = UserTextSent(content="What happened?", event_id="e4")
+        input_history = [user1, agent1, custom, user2]
+
+        messages = await build_messages_with(agent, input_history, [], "current")
+
+        assert len(messages) == 4
+        assert messages[0].role == "user"
+        assert messages[1].role == "assistant"
+        assert messages[2].role == "system"
+        assert "diamonds_depleted" in messages[2].content
+        assert messages[3].role == "user"
 
 
 # =============================================================================
