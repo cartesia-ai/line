@@ -702,7 +702,7 @@ class TestUninterruptibleMessages:
                 yield AgentSendText(text="How can I help?", interruptible=True)
 
         runner = ConversationRunner(ws, scripted_agent, env)
-        await runner._start_agent_task(TurnEnv(), CallStarted())
+        await runner._start_agent_task(TurnEnv(agent_env=env), CallStarted())
         if runner.agent_task:
             await runner.agent_task
 
@@ -874,11 +874,11 @@ class TestUninterruptibleMessages:
 
         runner = ConversationRunner(ws, scripted_agent, env)
 
-        await runner._start_agent_task(TurnEnv(), CallStarted())
+        await runner._start_agent_task(TurnEnv(agent_env=env), CallStarted())
         await first_turn_started.wait()
 
         # UserTurnEnded starts a new LM run and cancels the old task.
-        await runner._start_agent_task(TurnEnv(), UserTurnEnded())
+        await runner._start_agent_task(TurnEnv(agent_env=env), UserTurnEnded())
         if runner.agent_task:
             await runner.agent_task
 

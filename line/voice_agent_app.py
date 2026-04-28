@@ -49,7 +49,7 @@ from line._harness_types import (
     UserStateInput,
     ValidationErrorInput,
 )
-from line.agent import Agent, AgentSpec, EventFilter, TurnEnv
+from line.agent import Agent, AgentEnv, AgentSpec, EventFilter, TurnEnv
 from line.events import (
     AgentDtmfSent,
     AgentEndCall,
@@ -113,11 +113,6 @@ class UserState:
 
     SPEAKING = "speaking"
     IDLE = "idle"
-
-
-class AgentEnv:
-    def __init__(self, loop: Optional[asyncio.AbstractEventLoop] = None):
-        self.loop = loop
 
 
 CARTESIA_VERSION = "2026-04-03"
@@ -230,8 +225,8 @@ class VoiceAgentApp:
             return
 
         runner: Optional[ConversationRunner] = None
-        # Create the AgentEnv with the current event loop
         loop = asyncio.get_running_loop()
+        # Create the AgentEnv with the current event loop.
         env = AgentEnv(loop)
         try:
             agent_spec = await self.get_agent(env, call_request)
@@ -284,7 +279,8 @@ class ConversationRunner:
         Args:
             websocket: The WebSocket connection.
             agent_spec: Agent or (Agent, run_filter, cancel_filter).
-            env: Environment passed to the agent.
+            env: Per-call environment, passed through to TurnEnv for each
+                agent turn.
         """
         self.websocket = websocket
         self.env = env
@@ -357,7 +353,7 @@ class ConversationRunner:
         """
         # Emit call_started to seed history/context
         start_event, self.history = self._process_input_event(self.history, CallStarted())
-        await self._handle_event(TurnEnv(), start_event)
+        await self._handle_event(TurnEnv(agent_env=self.env), start_event)
 
         while not self.shutdown_event.is_set():
             try:
@@ -376,13 +372,13 @@ class ConversationRunner:
                 ev, self.history = self._process_input_event(self.history, event)
                 if ev is None:
                     continue
-                await self._handle_event(TurnEnv(), ev)
+                await self._handle_event(TurnEnv(agent_env=self.env), ev)
 
             except WebSocketDisconnect:
                 logger.info("WebSocket disconnected in loop")
                 self.shutdown_event.set()
                 end_event, self.history = self._process_input_event(self.history, CallEnded())
-                await self._handle_event(TurnEnv(), end_event)
+                await self._handle_event(TurnEnv(agent_env=self.env), end_event)
             except json.JSONDecodeError as e:
                 # Don't send EndCall event, as that may trigger side effects
                 # we accept the risk of incomplete call cleanup in this case,

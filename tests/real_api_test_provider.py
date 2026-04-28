@@ -47,7 +47,7 @@ import warnings
 import litellm
 from loguru import logger
 
-from line.agent import TurnEnv
+from line.agent import AgentEnv, TurnEnv
 from line.events import (
     AgentSendText,
     AgentToolCalled,
@@ -190,7 +190,7 @@ async def test_tool_calling(model: str, api_key: str, backend: Optional[str] = N
         backend=backend,
     )
 
-    env = TurnEnv()
+    env = TurnEnv(agent_env=AgentEnv())
     user_message = "What's the weather in Tokyo? Also, what's 25 * 4?"
     event = UserTextSent(
         content=user_message,
@@ -233,7 +233,7 @@ async def test_introduction(model: str, api_key: str, backend: Optional[str] = N
         backend=backend,
     )
 
-    env = TurnEnv()
+    env = TurnEnv(agent_env=AgentEnv())
     event = CallStarted()
 
     print("Event: CallStarted")
@@ -271,7 +271,7 @@ async def test_web_search(
         backend=backend,
     )
 
-    env = TurnEnv()
+    env = TurnEnv(agent_env=AgentEnv())
     user_message = "What is the current weather in New York City? Search the web for this information."
     event = UserTextSent(
         content=user_message,
@@ -326,7 +326,7 @@ async def test_function_tools_with_web_search(model: str, api_key: str, backend:
         backend=backend,
     )
 
-    env = TurnEnv()
+    env = TurnEnv(agent_env=AgentEnv())
     user_message = "Hi, how are you?"
     event = UserTextSent(
         content=user_message,
@@ -377,7 +377,7 @@ async def test_mcp_list_tools(model: str, api_key: str, backend: Optional[str] =
         backend=backend,
     )
 
-    env = TurnEnv()
+    env = TurnEnv(agent_env=AgentEnv())
     user_message = "What tools are available?"
     event = UserTextSent(
         content=user_message,
@@ -429,7 +429,7 @@ async def test_mcp_tool_execution(model: str, api_key: str, backend: Optional[st
         backend=backend,
     )
 
-    env = TurnEnv()
+    env = TurnEnv(agent_env=AgentEnv())
     user_message = "Roll 3 six-sided dice for me."
     event = UserTextSent(
         content=user_message,
@@ -568,7 +568,7 @@ Always include menu_item_id, quantity, and modifiers (can be empty list).""",
         backend=backend,
     )
 
-    env = TurnEnv()
+    env = TurnEnv(agent_env=AgentEnv())
     user_message = "I'd like to order 2 grilled oysters please"
     event = UserTextSent(
         content=user_message,
@@ -678,7 +678,7 @@ Always include menu_item_id and quantity.""",
             backend=backend,
         )
 
-    env = TurnEnv()
+    env = TurnEnv(agent_env=AgentEnv())
     user_message = "Order 2 grilled oysters"
     event = UserTextSent(
         content=user_message,

@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import AsyncIterable, Callable, Protocol, Sequence, Union
+import asyncio
+from typing import AsyncIterable, Callable, Optional, Protocol, Sequence, Union
 
 from line.events import InputEvent, OutputEvent
 
@@ -25,10 +26,18 @@ EventFilter = Union[Callable[[InputEvent], bool], Sequence[type[InputEvent]]]
 AgentSpec = Union[Agent, tuple[Agent, EventFilter, EventFilter]]
 
 
-# Intentionally empty for now
-# We can add more context here later as needed.
+class AgentEnv:
+    """Per-call environment created by the harness once per websocket connection."""
+
+    def __init__(self, loop: Optional[asyncio.AbstractEventLoop] = None):
+        self.loop = loop
+
+
 class TurnEnv:
-    pass
+    """Per-turn environment passed to agents and tools."""
+
+    def __init__(self, agent_env: AgentEnv):
+        self.agent_env = agent_env
 
 
 def call_agent(agent: Agent, turn_env: TurnEnv, event: InputEvent) -> AsyncIterable[OutputEvent]:
