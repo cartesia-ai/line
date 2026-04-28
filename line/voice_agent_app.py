@@ -88,6 +88,9 @@ class PreCallResult(BaseModel):
 class AgentConfig(BaseModel):
     """Agent information for the call."""
 
+    # Persistent agent ID forwarded by inferno on the start message. Used to
+    # scope call-back operations (e.g. knowledge base queries) to this agent.
+    id: Optional[str] = None
     system_prompt: Optional[str] = None  # System prompt to define the agent's role and behavior
     introduction: Optional[str] = None  # Introduction message for the agent to start the call with
 
@@ -101,6 +104,14 @@ class CallRequest(BaseModel):
     agent_call_id: str  # Agent call ID for logging and correlation
     agent: AgentConfig
     metadata: Optional[Dict[str, Any]] = None
+    # Agent-scoped JWT minted by the API and forwarded by inferno over the
+    # websocket start message. Used to authenticate calls back to the API
+    # on behalf of the agent (e.g. knowledge base queries).
+    agent_token: Optional[str] = None
+    # Base URL for callbacks to the Cartesia API, forwarded by inferno on
+    # the start message. Threaded into AgentEnv so call-scoped clients
+    # (e.g. KnowledgeBase) hit the same API that minted agent_token.
+    api_base_url: Optional[str] = None
 
     model_config = ConfigDict(
         # Allow both field name (from_) and alias (from) for input
@@ -225,9 +236,20 @@ class VoiceAgentApp:
             return
 
         runner: Optional[ConversationRunner] = None
+        # Create the AgentEnv with the current event loop and the
+        # agent-scoped credentials forwarded by inferno on the start message.
         loop = asyncio.get_running_loop()
-        # Create the AgentEnv with the current event loop.
-        env = AgentEnv(loop)
+        if call_request.agent.id is None:
+            logger.error(
+                "Start message missing agent.id; agent-scoped operations "
+                "(e.g. knowledge base) will be unavailable for this call."
+            )
+        env = AgentEnv(
+            loop=loop,
+            agent_id=call_request.agent.id,
+            agent_token=call_request.agent_token,
+            base_url=call_request.api_base_url,
+        )
         try:
             agent_spec = await self.get_agent(env, call_request)
             runner = ConversationRunner(websocket, agent_spec, env)
@@ -258,6 +280,8 @@ def _call_request_from_start_data(data: dict) -> CallRequest:
         agent_call_id=start_msg.agent_call_id,
         agent=AgentConfig(**start_msg.agent),
         metadata=start_msg.metadata or {},
+        agent_token=start_msg.agent_token,
+        api_base_url=start_msg.api_base_url,
     )
 
 
@@ -279,8 +303,8 @@ class ConversationRunner:
         Args:
             websocket: The WebSocket connection.
             agent_spec: Agent or (Agent, run_filter, cancel_filter).
-            env: Per-call environment, passed through to TurnEnv for each
-                agent turn.
+            env: Per-call environment, passed through to TurnEnv so tools
+                can resolve call-scoped resources (e.g. knowledge base).
         """
         self.websocket = websocket
         self.env = env
