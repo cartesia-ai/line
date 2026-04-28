@@ -11,7 +11,7 @@ from typing import Annotated, List, Optional
 
 import pytest
 
-from line.agent import TurnEnv
+from line.agent import AgentEnv, TurnEnv
 from line.events import (
     AgentEndCall,
     AgentHandedOff,
@@ -182,7 +182,7 @@ async def build_messages_with(agent, input_history, local_history, current_event
 @pytest.fixture
 def turn_env():
     """Create a basic TurnEnv."""
-    return TurnEnv()
+    return TurnEnv(agent_env=AgentEnv())
 
 
 # =============================================================================

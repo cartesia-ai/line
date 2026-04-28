@@ -33,7 +33,7 @@ import warnings
 import litellm
 from loguru import logger
 
-from line.agent import TurnEnv
+from line.agent import AgentEnv, TurnEnv
 from line.events import (
     AgentSendText,
     AgentToolCalled,
@@ -142,7 +142,7 @@ async def test_tools(api_key: str, model: str):
         config=LlmConfig(system_prompt="You are a helpful assistant. Use tools when needed."),
     )
 
-    env = TurnEnv()
+    env = TurnEnv(agent_env=AgentEnv())
     user_message = "What's the weather in Tokyo? Also, what's 25 * 4?"
     event = UserTextSent(
         content=user_message,
