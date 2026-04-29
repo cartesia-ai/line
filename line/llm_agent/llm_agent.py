@@ -120,9 +120,8 @@ class LlmAgent:
         self.history = History()
         self._handoff_target: Optional[AgentCallable] = None  # Normalized process function
         # Queue for events from backgrounded tools that need to trigger loopback
-        # Lazy-init: asyncio.Queue() requires a running event loop on Python 3.9.
-        self._background_event_queue: Optional[BackgroundQueue[Tuple[AgentToolCalled, AgentToolReturned]]] = (
-            None
+        self._background_event_queue: BackgroundQueue[Tuple[AgentToolCalled, AgentToolReturned]] = (
+            BackgroundQueue()
         )
         # Cache for thought signatures (Gemini 3+ models)
         # Maps tool_call_id -> thought_signature
@@ -134,8 +133,6 @@ class LlmAgent:
     def _get_background_event_queue(
         self,
     ) -> "BackgroundQueue[Tuple[AgentToolCalled, AgentToolReturned]]":
-        if self._background_event_queue is None:
-            self._background_event_queue = BackgroundQueue()
         return self._background_event_queue
 
     def set_tools(self, tools: List[ToolSpec]) -> None:
