@@ -8,7 +8,7 @@ from typing import List, Optional
 
 import pytest
 
-from line.agent import TurnEnv
+from line.agent import AgentEnv, TurnEnv
 from line.events import (
     AgentSendText,
     AgentToolCalled,
@@ -48,7 +48,7 @@ async def _collect(wrapper: WordBufferingWrapper, event: Optional[InputEvent] = 
     if event is None:
         event = UserTurnEnded()
     results = []
-    async for output in wrapper.process(TurnEnv(), event):
+    async for output in wrapper.process(TurnEnv(agent_env=AgentEnv()), event):
         results.append(output)
     return results
 

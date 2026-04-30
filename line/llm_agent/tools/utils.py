@@ -51,10 +51,16 @@ from typing import (
 
 from line.agent import TurnEnv
 from line.events import InputEvent, OutputEvent
+from line.knowledge_base import KnowledgeBase
 
 if TYPE_CHECKING:
     from line.llm_agent.provider import ParsedModelId
-    from line.llm_agent.tools.system import EndCallTool, TransferCallTool, WebSearchTool
+    from line.llm_agent.tools.system import (
+        EndCallTool,
+        KnowledgeBaseTool,
+        TransferCallTool,
+        WebSearchTool,
+    )
 
 # -------------------------
 # Tool Type Enum
@@ -79,6 +85,10 @@ class ToolEnv:
     """Context passed to tool functions."""
 
     turn_env: TurnEnv
+
+    def knowledge_base(self) -> KnowledgeBase:
+        """Return a KnowledgeBase client scoped to the calling agent."""
+        return self.turn_env.knowledge_base()
 
 
 # -------------------------
@@ -142,7 +152,14 @@ class FunctionTool:
 # Type alias for tools that can be passed to LlmAgent/LlmProvider.
 # Plain callables are automatically wrapped as loopback tools.
 # Uses string literal because WebSearchTool/EndCallTool are TYPE_CHECKING-only imports.
-ToolSpec = Union[FunctionTool, "WebSearchTool", "EndCallTool", "TransferCallTool", Callable]
+ToolSpec = Union[
+    FunctionTool,
+    "WebSearchTool",
+    "EndCallTool",
+    "TransferCallTool",
+    "KnowledgeBaseTool",
+    Callable,
+]
 
 
 @dataclass
@@ -332,7 +349,12 @@ def _normalize_tools(
         FunctionTool in the first list.
     """
     from line.llm_agent.tools.decorators import loopback_tool
-    from line.llm_agent.tools.system import EndCallTool, TransferCallTool, WebSearchTool
+    from line.llm_agent.tools.system import (
+        EndCallTool,
+        KnowledgeBaseTool,
+        TransferCallTool,
+        WebSearchTool,
+    )
 
     function_tools: List[FunctionTool] = []
     web_search_tool: Optional[Any] = None
@@ -340,7 +362,7 @@ def _normalize_tools(
     for tool in tool_specs:
         if isinstance(tool, FunctionTool):
             function_tools.append(tool)
-        elif isinstance(tool, (EndCallTool, TransferCallTool)):
+        elif isinstance(tool, (EndCallTool, TransferCallTool, KnowledgeBaseTool)):
             function_tools.append(tool.as_function_tool())
         elif isinstance(tool, WebSearchTool):
             web_search_tool = tool
@@ -349,7 +371,8 @@ def _normalize_tools(
         else:
             raise TypeError(
                 f"Unsupported tool type: {type(tool).__name__}. "
-                f"Expected FunctionTool, EndCallTool, TransferCallTool, WebSearchTool, or callable."
+                f"Expected FunctionTool, EndCallTool, TransferCallTool, "
+                f"KnowledgeBaseTool, WebSearchTool, or callable."
             )
 
     web_search_options: Optional[Dict[str, Any]] = None
@@ -358,6 +381,16 @@ def _normalize_tools(
             web_search_options = web_search_tool.get_web_search_options()
         else:
             function_tools.append(_web_search_tool_to_function_tool(web_search_tool))
+
+    seen: Dict[str, int] = {}
+    for ft in function_tools:
+        seen[ft.name] = seen.get(ft.name, 0) + 1
+    duplicates = sorted(name for name, count in seen.items() if count > 1)
+    if duplicates:
+        raise ValueError(
+            f"Duplicate tool name(s): {', '.join(duplicates)}. "
+            f"Each tool passed to LlmAgent must have a unique name."
+        )
 
     return function_tools, web_search_options
 
