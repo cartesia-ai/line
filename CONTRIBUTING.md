@@ -13,7 +13,7 @@ Welcome to the Line Voice Agents SDK repository. This file contains guidelines f
 
 
 ## Python Version Support
-Line SDK supports Python 3.10+. All code should be written to be compatible with Python 3.10+.
+Line SDK supports Python 3.10+. All code should be written to be compatible with Python 3.10+. (Versions <=3.9 are no longer supported as of April 22, 2026)
 
 ## Coding Style
 We follow the [Google Python Style Guide](https://google.github.io/styleguide/pyguide.html) with some modifications (listed below).
