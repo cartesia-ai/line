@@ -67,11 +67,9 @@ class _RealtimeProvider:
         self._ws_url = f"{WS_URL}?model={model_id.model}"
         self._ws: Optional[WebSocketClientProtocol] = None
         self._history: List[ConversationEntry] = []
-        # Lazy-init: asyncio.Lock() requires a running event loop on Python 3.9.
-        self._lock: Optional[asyncio.Lock] = None
+        self._lock: asyncio.Lock = asyncio.Lock()
 
     def _get_lock(self) -> asyncio.Lock:
-        self._lock = self._lock or asyncio.Lock()
         return self._lock
 
     # --- Public interface ---
