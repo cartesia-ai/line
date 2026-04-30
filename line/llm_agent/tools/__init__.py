@@ -14,7 +14,6 @@ from line.llm_agent.tools.decorators import (
 # System tools
 from line.llm_agent.tools.system import (
     DtmfButton,
-    KnowledgeBaseTool,
     WebSearchTool,
     agent_as_handoff,
     end_call,
@@ -49,7 +48,6 @@ __all__ = [
     "send_dtmf",
     "transfer_call",
     "agent_as_handoff",
-    "KnowledgeBaseTool",
     "knowledge_base",
     # Utility types
     "ToolType",

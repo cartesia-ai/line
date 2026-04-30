@@ -88,8 +88,8 @@ class PreCallResult(BaseModel):
 class AgentConfig(BaseModel):
     """Agent information for the call."""
 
-    # Persistent agent ID forwarded by inferno on the start message. Used to
-    # scope call-back operations (e.g. knowledge base queries) to this agent.
+    # Persistent agent ID forwarded by the harness on the start message. Used
+    # to scope call-back operations (e.g. knowledge base queries) to this agent.
     id: Optional[str] = None
     system_prompt: Optional[str] = None  # System prompt to define the agent's role and behavior
     introduction: Optional[str] = None  # Introduction message for the agent to start the call with
@@ -104,11 +104,11 @@ class CallRequest(BaseModel):
     agent_call_id: str  # Agent call ID for logging and correlation
     agent: AgentConfig
     metadata: Optional[Dict[str, Any]] = None
-    # Agent-scoped JWT minted by the API and forwarded by inferno over the
+    # Agent-scoped JWT minted by the API and forwarded by the harness over the
     # websocket start message. Used to authenticate calls back to the API
     # on behalf of the agent (e.g. knowledge base queries).
     agent_token: Optional[str] = None
-    # Base URL for callbacks to the Cartesia API, forwarded by inferno on
+    # Base URL for callbacks to the Cartesia API, forwarded by the harness on
     # the start message. Threaded into AgentEnv so call-scoped clients
     # (e.g. KnowledgeBase) hit the same API that minted agent_token.
     api_base_url: Optional[str] = None
@@ -237,7 +237,7 @@ class VoiceAgentApp:
 
         runner: Optional[ConversationRunner] = None
         # Create the AgentEnv with the current event loop and the
-        # agent-scoped credentials forwarded by inferno on the start message.
+        # agent-scoped credentials forwarded by the harness on the start message.
         loop = asyncio.get_running_loop()
         if call_request.agent.id is None:
             logger.error(
