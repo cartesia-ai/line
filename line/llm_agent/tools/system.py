@@ -517,8 +517,8 @@ class KnowledgeBaseTool:
     knowledge base by issuing a natural-language query.
 
     Filters, ``top_k``, and ``timeout_s`` are set at construction
-    (``KnowledgeBaseTool(...)`` / ``knowledge_base(...)``), not by the LLM at
-    tool-call time. The LLM only chooses the query string.
+    (``knowledge_base(...)``), not by the LLM at tool-call time. The LLM only
+    chooses the query string.
 
     Usage:
         # Default behavior — no filters
@@ -532,7 +532,7 @@ class KnowledgeBaseTool:
     """
 
     DEFAULT_DESCRIPTION = (
-        "Look up information from the agent's knowledge base. "
+        "Look up information from your knowledge base. "
         "Use when the user asks about facts, policies, products, or other domain "
         "information that may be stored in reference documents. "
         "Pass a focused natural-language query describing what you need to find."
