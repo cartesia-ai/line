@@ -288,8 +288,7 @@ class ConversationRunner:
         """
         self.websocket = websocket
         self.env = env
-        # Lazy-init: asyncio.Event() requires a running event loop on Python 3.9.
-        self._shutdown_event: Optional[asyncio.Event] = None
+        self._shutdown_event: asyncio.Event = asyncio.Event()
         self.history: List[InputEvent] = []
         self.emitted_agent_text: List[Tuple[str, bool]] = []  # (content, interruptible)
 
@@ -298,8 +297,6 @@ class ConversationRunner:
 
     @property
     def shutdown_event(self) -> asyncio.Event:
-        if self._shutdown_event is None:
-            self._shutdown_event = asyncio.Event()
         return self._shutdown_event
 
     ######### Initialization Methods #########

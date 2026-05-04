@@ -7,7 +7,7 @@ name = "cartesia-line"
 version = "0.2.10"
 description = "Cartesia Voice Agents SDK"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 authors = [
     {name = "Cartesia AI, Inc.", email = "support@cartesia.ai"}
 ]
@@ -19,7 +19,6 @@ classifiers = [
     "License :: OSI Approved :: Apache Software License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -43,7 +42,7 @@ dependencies = [
     "ddgs>=9.8.0,<10",
     "phonenumbers>=9.0.22,<10",
     "build>=1.4.0,<2",
-    "mcp>=1.0.0,<2; python_version >= '3.10'",
+    "mcp>=1.0.0,<2",
 ]
 
 [project.optional-dependencies]
@@ -64,9 +63,7 @@ include = ["line*"]
 
 [tool.ruff]
 line-length = 110
-# We want to format the code with respect to Python 3.10 syntax.
-# even though we support 3.9+.
-target-version = 'py39'
+target-version = 'py310'
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
@@ -82,13 +79,12 @@ known-first-party = ["line"]
 force-sort-within-sections = true
 split-on-trailing-comma = true
 
-# type checking for python 3.9 syntax.
 # We only want to use this type checking for the main codebase.
 # We don't want to use it for the examples.
 [tool.pyright]
 include = ["line/", "tests/"]
 exclude = ["examples/"]
-pythonVersion = "3.9"
+pythonVersion = "3.10"
 typeCheckingMode = "off"
 reportIndexIssue = true
 reportGeneralTypeIssues = true
