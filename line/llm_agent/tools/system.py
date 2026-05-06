@@ -18,7 +18,7 @@ from line.events import (
     AgentUpdateCall,
     CallStarted,
 )
-from line.knowledge_base import DEFAULT_TOP_K, KnowledgeBaseError
+from line.knowledge_base import DEFAULT_TOP_K, KnowledgeBaseError, _warn_if_long_timeout
 from line.llm_agent.tools.decorators import passthrough_tool
 from line.llm_agent.tools.utils import FunctionTool, ToolEnv, ToolType, construct_function_tool
 
@@ -529,6 +529,10 @@ class KnowledgeBaseTool:
 
         # Override the per-tool description (e.g. domain-specific guidance)
         LlmAgent(tools=[knowledge_base(description="Look up insurance policy terms.")])
+
+        # Run lookups as a background loopback tool so the LLM can keep
+        # talking to the user while the query is in flight.
+        LlmAgent(tools=[knowledge_base(is_background=True)])
     """
 
     DEFAULT_DESCRIPTION = (
@@ -546,11 +550,14 @@ class KnowledgeBaseTool:
         top_k: int = DEFAULT_TOP_K,
         description: Optional[str] = None,
         timeout_s: Optional[float] = None,
+        is_background: bool = False,
     ):
         self._filters = filters
         self._top_k = top_k
         self._description = description if description else self.DEFAULT_DESCRIPTION
         self._timeout_s = timeout_s
+        self._is_background = is_background
+        _warn_if_long_timeout(timeout_s, source="KnowledgeBaseTool")
         self._function_tool = self._create_function_tool()
 
     @property
@@ -588,6 +595,7 @@ class KnowledgeBaseTool:
             name="knowledge_base",
             description=self._description,
             tool_type=ToolType.LOOPBACK,
+            is_background=self._is_background,
         )
 
     def as_function_tool(self) -> FunctionTool:
@@ -599,12 +607,14 @@ class KnowledgeBaseTool:
         top_k: Optional[int] = None,
         description: Optional[str] = None,
         timeout_s: Optional[float] = None,
+        is_background: Optional[bool] = None,
     ) -> "KnowledgeBaseTool":
         return KnowledgeBaseTool(
             filters=filters if filters is not None else self._filters,
             top_k=top_k if top_k is not None else self._top_k,
             description=description if description is not None else self._description,
             timeout_s=timeout_s if timeout_s is not None else self._timeout_s,
+            is_background=is_background if is_background is not None else self._is_background,
         )
 
 

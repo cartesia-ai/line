@@ -14,10 +14,25 @@ DEFAULT_BASE_URL = "https://api.cartesia.ai"
 DEFAULT_TOP_K = 5
 DEFAULT_TIMEOUT_S = 3.0
 LOG_TRUNCATION = 500
+# Threshold above which we surface a warning so a developer who accidentally
+# set an unreasonably long timeout (e.g. ``60.0``) can spot the misconfiguration
+# from the logs rather than wondering why the call appears to hang.
+LONG_TIMEOUT_WARN_S = 10.0
 
 
 class KnowledgeBaseError(RuntimeError):
     """Raised when a knowledge base query fails."""
+
+
+def _warn_if_long_timeout(timeout_s: Optional[float], *, source: str) -> None:
+    if timeout_s is not None and timeout_s > LONG_TIMEOUT_WARN_S:
+        logger.warning(
+            "{} timeout_s={}s exceeds {}s; long timeouts can stall the call "
+            "while a slow knowledge base query is in flight.",
+            source,
+            timeout_s,
+            LONG_TIMEOUT_WARN_S,
+        )
 
 
 class KnowledgeBase:
@@ -38,6 +53,7 @@ class KnowledgeBase:
         self.agent_token = agent_token
         self.base_url = (base_url or os.getenv("CARTESIA_BASE_URL") or DEFAULT_BASE_URL).rstrip("/")
         self.timeout_s = timeout_s
+        _warn_if_long_timeout(timeout_s, source="KnowledgeBase")
 
     async def query(
         self,

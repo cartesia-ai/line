@@ -155,6 +155,50 @@ async def test_knowledge_base_tool_handles_kb_error_gracefully(anyio_backend):
     assert "currently unavailable" in result.lower()
 
 
+def test_knowledge_base_tool_default_is_not_background(anyio_backend):
+    assert knowledge_base.as_function_tool().is_background is False
+
+
+def test_knowledge_base_tool_is_background_propagates_to_function_tool(anyio_backend):
+    configured = knowledge_base(is_background=True)
+    assert configured._is_background is True
+    assert configured.as_function_tool().is_background is True
+
+
+def test_knowledge_base_tool_call_inherits_is_background(anyio_backend):
+    # is_background must round-trip through __call__ chaining like the
+    # other config fields, otherwise re-configuring (e.g. tweaking top_k)
+    # would silently flip it back to the default.
+    configured = knowledge_base(is_background=True)
+    rechained = configured(top_k=7)
+    assert rechained._is_background is True
+    assert rechained.as_function_tool().is_background is True
+
+
+def test_knowledge_base_tool_warns_on_long_timeout(anyio_backend):
+    from loguru import logger as loguru_logger
+
+    messages: List[str] = []
+    handler_id = loguru_logger.add(lambda msg: messages.append(str(msg)), level="WARNING")
+    try:
+        knowledge_base(timeout_s=30.0)
+    finally:
+        loguru_logger.remove(handler_id)
+    assert any("timeout_s=30.0" in m for m in messages)
+
+
+def test_knowledge_base_tool_does_not_warn_on_short_timeout(anyio_backend):
+    from loguru import logger as loguru_logger
+
+    messages: List[str] = []
+    handler_id = loguru_logger.add(lambda msg: messages.append(str(msg)), level="WARNING")
+    try:
+        knowledge_base(timeout_s=2.0)
+    finally:
+        loguru_logger.remove(handler_id)
+    assert not any("timeout_s" in m for m in messages)
+
+
 # =============================================================================
 # Tests: transfer_call
 # =============================================================================
