@@ -226,6 +226,7 @@ class VoiceAgentApp:
 
         try:
             start_data = await websocket.receive_json()
+            logger.info(f"Received start message: {start_data}")
             call_request = _call_request_from_start_data(start_data)
         except WebSocketDisconnect:
             logger.error("WebSocket disconnected before start message received")

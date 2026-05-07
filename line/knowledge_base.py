@@ -92,6 +92,7 @@ class KnowledgeBase:
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.get(url, params=params, headers=headers) as resp:
                     body = await resp.text()
+                    logger.info("knowledge_base query: url={} params={} status={} body={}", url, params, resp.status, body[:LOG_TRUNCATION])
                     if resp.status != 200:
                         logger.warning(
                             "knowledge_base query failed: status={} body={}",
@@ -103,6 +104,7 @@ class KnowledgeBase:
                         )
                     try:
                         payload = json.loads(body)
+                        logger.debug("knowledge_base query payload: {}", payload)
                     except json.JSONDecodeError as e:
                         raise KnowledgeBaseError(f"Invalid JSON from knowledge base: {e}") from e
         except asyncio.TimeoutError as e:
