@@ -21,6 +21,7 @@ from typing import (
     Tuple,
     TypeVar,
     Union,
+    get_args,
 )
 
 from loguru import logger
@@ -62,8 +63,11 @@ from line.llm_agent.tools.utils import (
 
 T = TypeVar("T")
 
-# Type alias for tools that can be passed to LlmAgent
-# Plain callables are automatically wrapped as loopback tools
+# Concrete OutputEvent types for isinstance checks (OutputEvent itself is a Union).
+_OUTPUT_EVENT_TYPES: Tuple[type, ...] = get_args(OutputEvent)
+
+# Type alias for tools that can be passed to LlmAgent.
+# Plain callables are automatically wrapped via the @tool decorator.
 ToolSpec = Union[FunctionTool, WebSearchTool, EndCallTool, TransferCallTool, Callable]
 
 
@@ -375,7 +379,7 @@ class LlmAgent:
 
                 # For backgrounded tools, we emit AgentToolCalled/AgentToolReturned pairs
                 # inside _execute_backgroundable_tool, not here
-                if tool.tool_type == ToolType.LOOPBACK and tool.is_background:
+                if tool.tool_type == ToolType.TOOL and tool.is_background:
                     # Backgroundable tool: run in a shielded task that survives cancellation
                     # Each yielded value triggers a loopback with AgentToolCalled/AgentToolReturned pair
                     self._execute_backgroundable_tool(
@@ -383,73 +387,68 @@ class LlmAgent:
                     )
                     continue
 
-                if tool.tool_type == ToolType.LOOPBACK:
-                    should_loopback = True
-                    # Regular loopback tool: collect results to send back to LLM
+                if tool.tool_type == ToolType.TOOL:
+                    # Branch per yielded value:
+                    #   - OutputEvent → emit directly to the user (passthrough)
+                    #   - raw value  → wrap as a synthetic tool result and trigger loopback
                     n = 0
+                    yielded_raw = False
+                    closed = False
                     try:
-                        async for value in normalized_func(ctx, **tool_args):
-                            call_id = f"{tc.id}-{n}"
+                        try:
+                            async for value in normalized_func(ctx, **tool_args):
+                                if isinstance(value, _OUTPUT_EVENT_TYPES):
+                                    self.history._append_local(value)
+                                    yield value
+                                else:
+                                    yielded_raw = True
+                                    should_loopback = True
+                                    call_id = f"{tc.id}-{n}"
+                                    tool_called_output, tool_returned_output = _construct_tool_events(
+                                        call_id, tc.name, tool_args, value
+                                    )
+                                    self.history._append_local(tool_called_output)
+                                    self.history._append_local(tool_returned_output)
+                                    yield tool_called_output
+                                    yield tool_returned_output
+                                    n += 1
+                        except Exception as e:
+                            # Use negative limit to show last 10 frames (most relevant)
+                            logger.error(
+                                f'Error in Tool Call to "{tc.name}":\n{traceback.format_exc(limit=-10)}'
+                            )
                             tool_called_output, tool_returned_output = _construct_tool_events(
-                                call_id, tc.name, tool_args, value
+                                f"{tc.id}-{n}", tc.name, tool_args, f"error: {e}"
                             )
                             self.history._append_local(tool_called_output)
                             self.history._append_local(tool_returned_output)
                             yield tool_called_output
                             yield tool_returned_output
-                            n += 1
-                    except Exception as e:
-                        # Use negative limit to show last 10 frames (most relevant)
-                        logger.error(f'Error in Tool Call to "{tc.name}":\n{traceback.format_exc(limit=-10)}')
-                        tool_called_output, tool_returned_output = _construct_tool_events(
-                            f"{tc.id}-{n}", tc.name, tool_args, f"error: {e}"
-                        )
-                        self.history._append_local(tool_called_output)
-                        self.history._append_local(tool_returned_output)
-                        yield tool_called_output
-                        yield tool_returned_output
+                            yielded_raw = True
+                            should_loopback = True
 
-                elif tool.tool_type == ToolType.PASSTHROUGH:
-                    # Emit AgentToolCalled before executing
-                    tool_called_output = AgentToolCalled(
-                        tool_call_id=tc.id,
-                        tool_name=tc.name,
-                        tool_args=tool_args,
-                    )
-                    self.history._append_local(tool_called_output)
-                    yield tool_called_output
-
-                    tool_returned = False
-                    try:
-                        async for evt in normalized_func(ctx, **tool_args):
-                            self.history._append_local(evt)
-                            yield evt
-                        # Emit AgentToolReturned after successful completion
-                        tool_returned_output = AgentToolReturned(
-                            tool_call_id=tc.id,
-                            tool_name=tc.name,
-                            tool_args=tool_args,
-                            result="success",
-                        )
-                        self.history._append_local(tool_returned_output)
-                        tool_returned = True
-                        yield tool_returned_output
-                    except Exception as e:
-                        # Use negative limit to show last 10 frames (most relevant)
-                        logger.error(f'Error in Tool Call to "{tc.name}":\n{traceback.format_exc(limit=-10)}')
-                        # Emit AgentToolReturned with error
-                        tool_returned_output = AgentToolReturned(
-                            tool_call_id=tc.id,
-                            tool_name=tc.name,
-                            tool_args=tool_args,
-                            result=f"error: {e}",
-                        )
-                        self.history._append_local(tool_returned_output)
-                        tool_returned = True
-                        yield tool_returned_output
+                        # If the tool yielded only OutputEvents (or nothing at all), close out the
+                        # LLM-issued tool_call_id with a success pair so the LLM has a tool result anchor.
+                        if not yielded_raw:
+                            tool_called_output, tool_returned_output = _construct_tool_events(
+                                tc.id, tc.name, tool_args, "success"
+                            )
+                            self.history._append_local(tool_called_output)
+                            self.history._append_local(tool_returned_output)
+                            yield tool_called_output
+                            yield tool_returned_output
+                        closed = True
                     finally:
-                        if not tool_returned:
-                            # CancelledError (BaseException) - ensure history stays consistent
+                        if not closed and not yielded_raw:
+                            # CancelledError before any tool result was produced — record a
+                            # cancelled pair in history so the LLM doesn't see an orphan call.
+                            self.history._append_local(
+                                AgentToolCalled(
+                                    tool_call_id=tc.id,
+                                    tool_name=tc.name,
+                                    tool_args=tool_args,
+                                )
+                            )
                             self.history._append_local(
                                 AgentToolReturned(
                                     tool_call_id=tc.id,

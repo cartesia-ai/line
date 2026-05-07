@@ -7,6 +7,14 @@ Usage:
         '''Tool description from docstring.'''
         ...
 
+The runtime classifies each yielded value:
+- Raw values (str, dict, etc.) feed back to the LLM as tool results.
+- OutputEvent instances pass through directly to the user.
+
+`loopback_tool` and `passthrough_tool` are interchangeable — they construct
+identical FunctionTools. The distinction is legacy from when the runtime had separate handling for each,
+but now the runtime behavior is decided by what the tool yields.
+
 Works on both standalone functions and class methods.
 """
 
@@ -63,8 +71,6 @@ def loopback_tool(
     func: Callable = None, *, is_background: bool = False
 ) -> Union[FunctionTool, Callable[[Callable], FunctionTool]]:
     """
-    Decorator for loopback tools. Result is sent back to the LLM to trigger a new completion.
-
     Signature: (ctx: ToolEnv, **args) -> AsyncIterable[Any] | Awaitable[Any] | Any
 
     Can be used with or without arguments:
@@ -105,7 +111,7 @@ def loopback_tool(
     """
 
     def decorator(f: Callable) -> FunctionTool:
-        return _construct_tool_descriptor(f, ToolType.LOOPBACK, is_background=is_background)
+        return _construct_tool_descriptor(f, ToolType.TOOL, is_background=is_background)
 
     if func is not None:
         # Called without arguments: @loopback_tool
@@ -116,14 +122,9 @@ def loopback_tool(
 
 def passthrough_tool(func: Callable) -> FunctionTool:
     """
-    Decorator for passthrough tools. Response bypasses the LLM, and is sent directly downstream
-
-    Signature: (ctx: ToolEnv, **args) -> AsyncIterable[OutputEvent] | Awaitable[OutputEvent] | OutputEvent
-
-    Use for deterministic actions like EndCall, TransferCall.
-    Tool yields OutputEvent objects directly to the caller.
+    Legacy decorator for passthrough tools. Behaves identically to loopback_tool, but exported separately for backwards compatibility.
     """
-    return _construct_tool_descriptor(func, ToolType.PASSTHROUGH)
+    return _construct_tool_descriptor(func, ToolType.TOOL)
 
 
 def handoff_tool(func: Callable) -> FunctionTool:
