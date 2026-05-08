@@ -74,7 +74,7 @@ def tool_ctx_with_kb(kb: FakeKnowledgeBase):
 def test_knowledge_base_tool_default_metadata(anyio_backend):
     ft = knowledge_base.as_function_tool()
     assert ft.name == "knowledge_base"
-    assert ft.tool_type == ToolType.LOOPBACK
+    assert ft.tool_type == ToolType.GENERAL
     assert "knowledge base" in ft.description.lower()
     assert "query" in ft.parameters
 

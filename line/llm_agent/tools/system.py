@@ -507,7 +507,7 @@ def mcp_tool(name: str, server_url: Optional[str] = None, **server_config: Any) 
         description=f"Access the '{name}' MCP server. "
         "Call without arguments to list available tools, "
         "or with tool_name and tool_args to invoke one.",
-        tool_type=ToolType.LOOPBACK,
+        tool_type=ToolType.GENERAL,
     )
 
 
@@ -594,7 +594,7 @@ class KnowledgeBaseTool:
             _knowledge_base_impl,
             name="knowledge_base",
             description=self._description,
-            tool_type=ToolType.LOOPBACK,
+            tool_type=ToolType.GENERAL,
             is_background=self._is_background,
         )
 

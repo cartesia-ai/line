@@ -122,7 +122,8 @@ def loopback_tool(
 
 def passthrough_tool(func: Callable) -> FunctionTool:
     """
-    Legacy decorator for passthrough tools. Behaves identically to loopback_tool, but exported separately for backwards compatibility.
+    Legacy decorator for passthrough tools. Behaves identically to loopback_tool, but exported separately
+    for backwards compatibility.
     """
     return _construct_tool_descriptor(func, ToolType.GENERAL)
 
