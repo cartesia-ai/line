@@ -216,7 +216,7 @@ is possible."""
             _end_call_impl,
             name="end_call",
             description=self.description,
-            tool_type=ToolType.PASSTHROUGH,
+            tool_type=ToolType.GENERAL,
         )
 
     def as_function_tool(self) -> FunctionTool:
@@ -299,7 +299,7 @@ class TransferCallTool:
             _transfer_call_impl,
             name="transfer_call",
             description=_transfer_call_impl.__doc__,
-            tool_type=ToolType.PASSTHROUGH,
+            tool_type=ToolType.GENERAL,
         )
 
     def as_function_tool(self) -> FunctionTool:
@@ -507,7 +507,7 @@ def mcp_tool(name: str, server_url: Optional[str] = None, **server_config: Any) 
         description=f"Access the '{name}' MCP server. "
         "Call without arguments to list available tools, "
         "or with tool_name and tool_args to invoke one.",
-        tool_type=ToolType.LOOPBACK,
+        tool_type=ToolType.GENERAL,
     )
 
 
@@ -594,7 +594,7 @@ class KnowledgeBaseTool:
             _knowledge_base_impl,
             name="knowledge_base",
             description=self._description,
-            tool_type=ToolType.LOOPBACK,
+            tool_type=ToolType.GENERAL,
             is_background=self._is_background,
         )
 

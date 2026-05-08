@@ -92,7 +92,13 @@ class KnowledgeBase:
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.get(url, params=params, headers=headers) as resp:
                     body = await resp.text()
-                    logger.info("knowledge_base query: url={} params={} status={} body={}", url, params, resp.status, body[:LOG_TRUNCATION])
+                    logger.info(
+                        "knowledge_base query: url={} params={} status={} body={}",
+                        url,
+                        params,
+                        resp.status,
+                        body[:LOG_TRUNCATION],
+                    )
                     if resp.status != 200:
                         logger.warning(
                             "knowledge_base query failed: status={} body={}",

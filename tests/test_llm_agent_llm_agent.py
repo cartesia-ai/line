@@ -634,30 +634,32 @@ async def test_passthrough_tool_bypasses_llm(turn_env):
         agent, turn_env, UserTextSent(content="Bye", history=[UserTextSent(content="Bye")])
     )
 
-    # Expected outputs:
+    # Expected outputs (the runtime branches per yielded value: OutputEvents pass
+    # through directly, then a (Called, Returned-success) pair closes out the
+    # LLM-issued tool_call_id once the tool finishes without yielding raw values):
     # 1. AgentSendText "Goodbye! "
-    # 2. AgentToolCalled
-    # 3. AgentSendText "Have a great day!" (from passthrough)
-    # 4. AgentEndCall (from passthrough)
-    # 5. AgentToolReturned (emitted at the end of tool execution)
+    # 2. AgentSendText "Have a great day!" (from yield)
+    # 3. AgentEndCall (from yield)
+    # 4. AgentToolCalled (closing pair)
+    # 5. AgentToolReturned (closing pair)
 
     assert len(outputs) == 5
 
     assert isinstance(outputs[0], AgentSendText)
     assert outputs[0].text == "Goodbye! "
 
-    assert isinstance(outputs[1], AgentToolCalled)
-    assert outputs[1].tool_name == "end_call"
+    assert isinstance(outputs[1], AgentSendText)
+    assert outputs[1].text == "Have a great day!"
 
-    assert isinstance(outputs[2], AgentSendText)
-    assert outputs[2].text == "Have a great day!"
+    assert isinstance(outputs[2], AgentEndCall)
 
-    assert isinstance(outputs[3], AgentEndCall)
+    assert isinstance(outputs[3], AgentToolCalled)
+    assert outputs[3].tool_name == "end_call"
 
     assert isinstance(outputs[4], AgentToolReturned)
     assert outputs[4].result == "success"
 
-    # LLM should only be called ONCE - passthrough doesn't loop back
+    # Yielding only OutputEvents doesn't trigger a loopback — LLM is called once.
     assert mock_llm._call_count == 1
 
 
@@ -1105,9 +1107,7 @@ async def test_plain_function_wrapped_as_loopback_tool():
 
     # Should be a FunctionTool
     assert isinstance(tool, FunctionTool)
-
-    # Should be loopback type
-    assert tool.tool_type == ToolType.LOOPBACK
+    assert tool.tool_type == ToolType.GENERAL
 
     # Name and description should come from the function
     assert tool.name == "my_tool"
@@ -1194,10 +1194,8 @@ async def test_mixed_decorated_and_plain_functions(turn_env):
     resolved_tools, _ = _normalize_tools([decorated_tool, plain_tool], model_id=parse_model_id("gpt-4o"))
 
     assert len(resolved_tools) == 2
-
-    # Both should be loopback tools after resolution
-    assert resolved_tools[0].tool_type == ToolType.LOOPBACK
-    assert resolved_tools[1].tool_type == ToolType.LOOPBACK
+    assert resolved_tools[0].tool_type == ToolType.GENERAL
+    assert resolved_tools[1].tool_type == ToolType.GENERAL
 
     # Names should be correct
     assert resolved_tools[0].name == "decorated_tool"

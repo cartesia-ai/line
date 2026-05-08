@@ -68,10 +68,14 @@ if TYPE_CHECKING:
 
 
 class ToolType(Enum):
-    """Tool execution paradigm type."""
+    """Tool execution paradigm.
 
-    LOOPBACK = "loopback"
-    PASSTHROUGH = "passthrough"
+    TOOL covers the unified loopback/passthrough behavior: branching now happens
+    per yielded value at runtime — raw values feed back to the LLM, OutputEvent
+    instances pass through directly to the user.
+    """
+
+    GENERAL = "general"
     HANDOFF = "handoff"
 
 
@@ -96,8 +100,11 @@ class ToolEnv:
 # -------------------------
 
 
-class LoopbackToolFn(Protocol):
-    """Loopback tool: result is sent back to the LLM for continued generation.
+class ToolFn(Protocol):
+    """Tool callable. Each yielded value is classified at runtime:
+
+    - OutputEvent instances pass through directly to the user.
+    - Raw values (str, dict, etc.) are sent back to the LLM as the tool result.
 
     Signature: (ctx: ToolEnv, **kwargs) -> AsyncIterable[Any] | Awaitable[Any] | Any
     """
@@ -105,16 +112,10 @@ class LoopbackToolFn(Protocol):
     def __call__(self, ctx: ToolEnv, /, **kwargs: Any) -> Union[AsyncIterable[Any], Awaitable[Any], Any]: ...
 
 
-class PassthroughToolFn(Protocol):
-    """Passthrough tool: response bypasses the LLM and goes directly to the user.
-
-    Signature: (ctx: ToolEnv, **kwargs) ->
-        AsyncIterable[OutputEvent] | Awaitable[OutputEvent] | OutputEvent
-    """
-
-    def __call__(
-        self, ctx: ToolEnv, /, **kwargs: Any
-    ) -> Union[AsyncIterable[OutputEvent], Awaitable[OutputEvent], OutputEvent]: ...
+# Aliases — the runtime no longer distinguishes loopback vs. passthrough at the
+# tool-type level, so the protocols collapse onto ToolFn.
+LoopbackToolFn = ToolFn
+PassthroughToolFn = ToolFn
 
 
 class HandoffToolFn(Protocol):
@@ -145,7 +146,7 @@ class FunctionTool:
     description: str
     func: Callable
     parameters: Dict[str, "ParameterInfo"]
-    tool_type: ToolType = ToolType.LOOPBACK
+    tool_type: ToolType = ToolType.GENERAL
     is_background: bool = False
 
 
@@ -420,7 +421,7 @@ def _web_search_tool_to_function_tool(web_search_tool: Any) -> FunctionTool:
         name="web_search",
         description="Search the web for real-time information."
         + " Use this when you need current information that may not be in your training data.",
-        tool_type=ToolType.LOOPBACK,
+        tool_type=ToolType.GENERAL,
     )
 
 

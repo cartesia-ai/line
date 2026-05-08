@@ -27,11 +27,11 @@ from line.llm_agent.tools.decorators import handoff_tool, loopback_tool, passthr
 from line.llm_agent.tools.system import (
     agent_as_handoff,
     end_call,
+    knowledge_base,
     mcp_tool,
     send_dtmf,
     transfer_call,
     web_search,
-    knowledge_base,
 )
 
 # Function tool definitions and types
