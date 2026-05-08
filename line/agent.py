@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-from typing import AsyncIterable, Callable, Protocol, Sequence, Union
+import asyncio
+from typing import AsyncIterable, Callable, Optional, Protocol, Sequence, Union
 
 from line.events import InputEvent, OutputEvent
+from line.knowledge_base import KnowledgeBase
 
 
 # Equivalent to a constructor type in TS where a class provides a process method.
@@ -25,10 +27,47 @@ EventFilter = Union[Callable[[InputEvent], bool], Sequence[type[InputEvent]]]
 AgentSpec = Union[Agent, tuple[Agent, EventFilter, EventFilter]]
 
 
-# Intentionally empty for now
-# We can add more context here later as needed.
+class AgentEnv:
+    """Per-call environment created by the harness once per websocket connection.
+
+    Owns the long-lived, call-scoped data: the asyncio loop and the
+    agent-scoped credentials needed to call back into the Cartesia API on
+    behalf of the agent (e.g. for knowledge base queries).
+    """
+
+    def __init__(
+        self,
+        loop: Optional[asyncio.AbstractEventLoop] = None,
+        agent_id: Optional[str] = None,
+        agent_token: Optional[str] = None,
+        base_url: Optional[str] = None,
+    ):
+        self.loop = loop
+        self.agent_id = agent_id
+        self.agent_token = agent_token
+        self.base_url = base_url
+
+    def knowledge_base(self) -> KnowledgeBase:
+        """Return a KnowledgeBase client scoped to the calling agent."""
+        return KnowledgeBase(
+            agent_id=self.agent_id,
+            agent_token=self.agent_token,
+            base_url=self.base_url,
+        )
+
+
 class TurnEnv:
-    pass
+    """Per-turn environment passed to agents and tools.
+
+    Holds a reference to the call's `AgentEnv` and delegates call-scoped
+    operations (like knowledge base lookups) to it.
+    """
+
+    def __init__(self, agent_env: AgentEnv):
+        self.agent_env = agent_env
+
+    def knowledge_base(self) -> KnowledgeBase:
+        return self.agent_env.knowledge_base()
 
 
 def call_agent(agent: Agent, turn_env: TurnEnv, event: InputEvent) -> AsyncIterable[OutputEvent]:

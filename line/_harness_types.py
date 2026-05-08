@@ -186,5 +186,13 @@ class StartInput(BaseModel):
     agent_call_id: str = "unknown"
     agent: Dict[str, Any] = Field(default_factory=dict)
     metadata: Optional[Dict[str, Any]] = None
+    # Agent-scoped JWT minted by the API. Forwarded by the harness so agent
+    # code can authenticate calls back to the API on behalf of the agent (e.g.
+    # knowledge base document queries).
+    agent_token: Optional[str] = None
+    # Base URL for callbacks to the Cartesia API. Forwarded by the harness so
+    # the agent uses the same API endpoint that minted its credentials,
+    # rather than guessing via env var or a hardcoded prod default.
+    api_base_url: Optional[str] = None
 
     model_config = ConfigDict(populate_by_name=True)

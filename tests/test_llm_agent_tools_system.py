@@ -4,14 +4,23 @@ Tests for built-in tools.
 uv run pytest tests/test_llm_agent_tools_system.py -v
 """
 
-from typing import List
+from typing import List, Optional
 from unittest.mock import MagicMock
 
 import pytest
 
 from line.events import AgentEndCall, AgentSendDtmf, AgentSendText, AgentTransferCall
+from line.knowledge_base import KnowledgeBaseError
 from line.llm_agent.provider import parse_model_id
-from line.llm_agent.tools.system import EndCallTool, TransferCallTool, end_call, send_dtmf, transfer_call
+from line.llm_agent.tools.system import (
+    EndCallTool,
+    KnowledgeBaseTool,
+    TransferCallTool,
+    end_call,
+    knowledge_base,
+    send_dtmf,
+    transfer_call,
+)
 from line.llm_agent.tools.utils import ToolType
 
 # Use anyio for async test support with asyncio backend only
@@ -30,6 +39,164 @@ async def collect_events(gen) -> List:
 def mock_ctx():
     """Create a mock ToolEnv context."""
     return MagicMock()
+
+
+class FakeKnowledgeBase:
+    def __init__(self, results=None, error: Optional[Exception] = None):
+        self.results = results if results is not None else []
+        self.error = error
+        self.last_query = None
+        self.last_filters = None
+        self.last_top_k = None
+        self.last_timeout_s = None
+
+    async def query(self, query, filters=None, top_k=None, timeout_s=None):
+        self.last_query = query
+        self.last_filters = filters
+        self.last_top_k = top_k
+        self.last_timeout_s = timeout_s
+        if self.error is not None:
+            raise self.error
+        return self.results
+
+
+def tool_ctx_with_kb(kb: FakeKnowledgeBase):
+    ctx = MagicMock()
+    ctx.knowledge_base.return_value = kb
+    return ctx
+
+
+# =============================================================================
+# Tests: knowledge_base
+# =============================================================================
+
+
+def test_knowledge_base_tool_default_metadata(anyio_backend):
+    ft = knowledge_base.as_function_tool()
+    assert ft.name == "knowledge_base"
+    assert ft.tool_type == ToolType.LOOPBACK
+    assert "knowledge base" in ft.description.lower()
+    assert "query" in ft.parameters
+
+
+def test_knowledge_base_tool_configured_filters(anyio_backend):
+    configured = knowledge_base(filters={"k": "v"}, top_k=2, timeout_s=1.5)
+    assert isinstance(configured, KnowledgeBaseTool)
+    assert configured._filters == {"k": "v"}
+    assert configured._top_k == 2
+    assert configured._timeout_s == 1.5
+
+
+def test_knowledge_base_tool_call_inherits_existing_config(anyio_backend):
+    # Calling an already-configured tool with no overrides preserves the
+    # original config rather than silently resetting it to defaults.
+    configured = knowledge_base(filters={"k": "v"}, top_k=2, timeout_s=1.5)
+    rechained = configured()
+    assert rechained._filters == {"k": "v"}
+    assert rechained._top_k == 2
+    assert rechained._timeout_s == 1.5
+
+    # Per-arg overrides win, the rest are inherited.
+    overridden = configured(top_k=7)
+    assert overridden._filters == {"k": "v"}
+    assert overridden._top_k == 7
+    assert overridden._timeout_s == 1.5
+
+
+async def test_knowledge_base_tool_invokes_kb_with_configured_filters(anyio_backend):
+    kb = FakeKnowledgeBase(results=[{"content": "doc"}])
+    ctx = tool_ctx_with_kb(kb)
+
+    tool = knowledge_base(filters={"category": "billing"}, top_k=2, timeout_s=1.5).as_function_tool()
+    result = await tool.func(ctx, "what is X?")
+
+    assert result == "doc"
+    assert kb.last_query == "what is X?"
+    assert kb.last_filters == {"category": "billing"}
+    assert kb.last_top_k == 2
+    assert kb.last_timeout_s == 1.5
+
+
+async def test_knowledge_base_tool_joins_multiple_chunks(anyio_backend):
+    kb = FakeKnowledgeBase(results=[{"content": "first"}, {"content": "second"}])
+    ctx = tool_ctx_with_kb(kb)
+
+    result = await knowledge_base.as_function_tool().func(ctx, "q")
+
+    assert result == "first\n\n---\n\nsecond"
+
+
+async def test_knowledge_base_tool_skips_blank_content(anyio_backend):
+    # Blank/missing content is dropped at the tool layer (presentation concern),
+    # not at the client layer (transport concern).
+    kb = FakeKnowledgeBase(results=[{"content": ""}, {"content": "real"}, {"foo": "bar"}])
+    ctx = tool_ctx_with_kb(kb)
+
+    result = await knowledge_base.as_function_tool().func(ctx, "q")
+
+    assert result == "real"
+
+
+async def test_knowledge_base_tool_returns_friendly_no_results(anyio_backend):
+    kb = FakeKnowledgeBase(results=[])
+    ctx = tool_ctx_with_kb(kb)
+
+    result = await knowledge_base.as_function_tool().func(ctx, "anything")
+
+    assert "no relevant" in result.lower()
+
+
+async def test_knowledge_base_tool_handles_kb_error_gracefully(anyio_backend):
+    kb = FakeKnowledgeBase(error=KnowledgeBaseError("missing credentials"))
+    ctx = tool_ctx_with_kb(kb)
+
+    result = await knowledge_base.as_function_tool().func(ctx, "anything")
+
+    assert "currently unavailable" in result.lower()
+
+
+def test_knowledge_base_tool_default_is_not_background(anyio_backend):
+    assert knowledge_base.as_function_tool().is_background is False
+
+
+def test_knowledge_base_tool_is_background_propagates_to_function_tool(anyio_backend):
+    configured = knowledge_base(is_background=True)
+    assert configured._is_background is True
+    assert configured.as_function_tool().is_background is True
+
+
+def test_knowledge_base_tool_call_inherits_is_background(anyio_backend):
+    # is_background must round-trip through __call__ chaining like the
+    # other config fields, otherwise re-configuring (e.g. tweaking top_k)
+    # would silently flip it back to the default.
+    configured = knowledge_base(is_background=True)
+    rechained = configured(top_k=7)
+    assert rechained._is_background is True
+    assert rechained.as_function_tool().is_background is True
+
+
+def test_knowledge_base_tool_warns_on_long_timeout(anyio_backend):
+    from loguru import logger as loguru_logger
+
+    messages: List[str] = []
+    handler_id = loguru_logger.add(lambda msg: messages.append(str(msg)), level="WARNING")
+    try:
+        knowledge_base(timeout_s=30.0)
+    finally:
+        loguru_logger.remove(handler_id)
+    assert any("timeout_s=30.0" in m for m in messages)
+
+
+def test_knowledge_base_tool_does_not_warn_on_short_timeout(anyio_backend):
+    from loguru import logger as loguru_logger
+
+    messages: List[str] = []
+    handler_id = loguru_logger.add(lambda msg: messages.append(str(msg)), level="WARNING")
+    try:
+        knowledge_base(timeout_s=2.0)
+    finally:
+        loguru_logger.remove(handler_id)
+    assert not any("timeout_s" in m for m in messages)
 
 
 # =============================================================================
@@ -390,3 +557,26 @@ async def test_normalize_tools_handles_end_call_tool(anyio_backend):
     assert len(tools) == 1
     assert isinstance(tools[0], FunctionTool)
     assert tools[0].name == "end_call"
+
+
+async def test_normalize_tools_handles_knowledge_base_tool(anyio_backend):
+    """Test that _normalize_tools correctly handles a single KnowledgeBaseTool."""
+    from line.llm_agent.tools.utils import _normalize_tools
+
+    function_tools, web_search_options = _normalize_tools(
+        [knowledge_base(filters={"x": "y"})],
+        parse_model_id("openai/gpt-4o"),
+    )
+
+    assert web_search_options is None
+    assert [t.name for t in function_tools] == ["knowledge_base"]
+
+
+async def test_normalize_tools_rejects_duplicate_names(anyio_backend):
+    from line.llm_agent.tools.utils import _normalize_tools
+
+    with pytest.raises(ValueError, match="Duplicate tool name"):
+        _normalize_tools(
+            [knowledge_base, knowledge_base(filters={"x": "y"})],
+            parse_model_id("openai/gpt-4o"),
+        )

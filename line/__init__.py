@@ -41,6 +41,7 @@ from line.events import (
     UserTurnEnded,
     UserTurnStarted,
 )
+from line.knowledge_base import KnowledgeBase, KnowledgeBaseError
 from line.voice_agent_app import (
     AgentConfig,
     AgentEnv,
@@ -96,6 +97,9 @@ __all__ = [
     "CustomHistoryEntry",
     # History
     "HistoryEvent",
+    # Knowledge base
+    "KnowledgeBase",
+    "KnowledgeBaseError",
     # Utilities
     "word_buffer",
 ]

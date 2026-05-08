@@ -18,6 +18,7 @@ from line.events import (
     AgentUpdateCall,
     CallStarted,
 )
+from line.knowledge_base import DEFAULT_TOP_K, KnowledgeBaseError, _warn_if_long_timeout
 from line.llm_agent.tools.decorators import passthrough_tool
 from line.llm_agent.tools.utils import FunctionTool, ToolEnv, ToolType, construct_function_tool
 
@@ -508,6 +509,120 @@ def mcp_tool(name: str, server_url: Optional[str] = None, **server_config: Any) 
         "or with tool_name and tool_args to invoke one.",
         tool_type=ToolType.LOOPBACK,
     )
+
+
+class KnowledgeBaseTool:
+    """
+    knowledge_base tool: lets the LLM look up information from the agent's
+    knowledge base by issuing a natural-language query.
+
+    Filters, ``top_k``, and ``timeout_s`` are set at construction
+    (``knowledge_base(...)``), not by the LLM at tool-call time. The LLM only
+    chooses the query string.
+
+    Usage:
+        # Default behavior — no filters
+        LlmAgent(tools=[knowledge_base])
+
+        # Pre-filter every retrieval to a specific subset
+        LlmAgent(tools=[knowledge_base(filters={"category": "billing"})])
+
+        # Override the per-tool description (e.g. domain-specific guidance)
+        LlmAgent(tools=[knowledge_base(description="Look up insurance policy terms.")])
+
+        # Run lookups as a background loopback tool so the LLM can keep
+        # talking to the user while the query is in flight.
+        LlmAgent(tools=[knowledge_base(is_background=True)])
+    """
+
+    DEFAULT_DESCRIPTION = (
+        "Look up information from your knowledge base. "
+        "Use when the user asks about facts, policies, products, or other domain "
+        "information that may be stored in reference documents. "
+        "Pass a focused natural-language query describing what you need to find."
+    )
+
+    CHUNK_SEPARATOR = "\n\n---\n\n"
+
+    def __init__(
+        self,
+        filters: Optional[Dict[str, Any]] = None,
+        top_k: int = DEFAULT_TOP_K,
+        description: Optional[str] = None,
+        timeout_s: Optional[float] = None,
+        is_background: bool = False,
+    ):
+        self._filters = filters
+        self._top_k = top_k
+        self._description = description if description else self.DEFAULT_DESCRIPTION
+        self._timeout_s = timeout_s
+        self._is_background = is_background
+        _warn_if_long_timeout(timeout_s, source="KnowledgeBaseTool")
+        self._function_tool = self._create_function_tool()
+
+    @property
+    def name(self) -> str:
+        return "knowledge_base"
+
+    def _create_function_tool(self) -> FunctionTool:
+        filters = self._filters
+        top_k = self._top_k
+        timeout_s = self._timeout_s
+        separator = self.CHUNK_SEPARATOR
+
+        async def _knowledge_base_impl(
+            ctx: ToolEnv,
+            query: Annotated[str, "Natural-language query describing what to look up"],
+        ) -> str:
+            kb = ctx.knowledge_base()
+            try:
+                results = await kb.query(
+                    query,
+                    filters=filters,
+                    top_k=top_k,
+                    timeout_s=timeout_s,
+                )
+            except KnowledgeBaseError as e:
+                logger.warning("knowledge_base tool error: %s", e)
+                return "Knowledge base lookup is currently unavailable."
+            chunks = [r["content"] for r in results if r.get("content")]
+            if not chunks:
+                return "No relevant information found in the knowledge base."
+            return separator.join(chunks)
+
+        return construct_function_tool(
+            _knowledge_base_impl,
+            name="knowledge_base",
+            description=self._description,
+            tool_type=ToolType.LOOPBACK,
+            is_background=self._is_background,
+        )
+
+    def as_function_tool(self) -> FunctionTool:
+        return self._function_tool
+
+    def __call__(
+        self,
+        filters: Optional[Dict[str, Any]] = None,
+        top_k: Optional[int] = None,
+        description: Optional[str] = None,
+        timeout_s: Optional[float] = None,
+        is_background: Optional[bool] = None,
+    ) -> "KnowledgeBaseTool":
+        return KnowledgeBaseTool(
+            filters=filters if filters is not None else self._filters,
+            top_k=top_k if top_k is not None else self._top_k,
+            description=description if description is not None else self._description,
+            timeout_s=timeout_s if timeout_s is not None else self._timeout_s,
+            is_background=is_background if is_background is not None else self._is_background,
+        )
+
+
+# Default instance - can be used directly or called to configure
+# Examples:
+#   knowledge_base                                      # Default lookup, no filters
+#   knowledge_base(filters={"category": "billing"})     # Pre-filtered lookup
+knowledge_base = KnowledgeBaseTool()
 
 
 @passthrough_tool

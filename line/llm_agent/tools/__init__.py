@@ -17,6 +17,7 @@ from line.llm_agent.tools.system import (
     WebSearchTool,
     agent_as_handoff,
     end_call,
+    knowledge_base,
     send_dtmf,
     transfer_call,
     web_search,
@@ -47,6 +48,7 @@ __all__ = [
     "send_dtmf",
     "transfer_call",
     "agent_as_handoff",
+    "knowledge_base",
     # Utility types
     "ToolType",
     "ToolEnv",
