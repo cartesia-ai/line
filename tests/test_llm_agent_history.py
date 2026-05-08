@@ -14,6 +14,7 @@ from line.events import (
     AgentToolReturned,
     CallEnded,
     CustomHistoryEntry,
+    UserCustomSent,
     UserTextSent,
 )
 from line.llm_agent.history import History, _build_full_history
@@ -61,6 +62,39 @@ class TestBuildFullHistory:
         assert len(result) == 1
         assert isinstance(result[0], UserTextSent)
         assert result[0].content == "Hello"
+
+    async def test_user_custom_sent_passes_through_in_history(self):
+        """UserCustomSent events should pass through history without crashing."""
+        input_history = [
+            UserTextSent(content="Hello"),
+            UserCustomSent(metadata={"kind": "diamonds_purchased"}),
+            UserTextSent(content="I topped up"),
+        ]
+        result = _build_full_history(input_history, [], current_event_id="current")
+
+        assert len(result) == 3
+        assert isinstance(result[0], UserTextSent)
+        assert isinstance(result[1], UserCustomSent)
+        assert result[1].metadata == {"kind": "diamonds_purchased"}
+        assert isinstance(result[2], UserTextSent)
+
+    async def test_user_custom_sent_with_local_history(self):
+        """UserCustomSent mixed with agent responses should not crash."""
+        input_history = [
+            UserTextSent(content="Hello", event_id="e1"),
+            AgentTextSent(content="Hi!", event_id="e2"),
+            UserCustomSent(metadata={"kind": "diamonds_depleted"}, event_id="e3"),
+            UserTextSent(content="What happened?", event_id="e4"),
+        ]
+        local_history = self._annotate(
+            [AgentSendText(text="Hi!")], "e1"
+        )
+        result = _build_full_history(input_history, local_history, current_event_id="current")
+
+        # UserCustomSent should be present in the result
+        custom_events = [e for e in result if isinstance(e, UserCustomSent)]
+        assert len(custom_events) == 1
+        assert custom_events[0].metadata == {"kind": "diamonds_depleted"}
 
     async def test_only_input_history_with_observable_event(self):
         """When only input_history exists with observable event, include it (pass through)."""
