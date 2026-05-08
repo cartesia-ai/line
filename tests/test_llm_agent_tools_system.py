@@ -389,7 +389,7 @@ async def test_end_call_has_function_tool_attributes(mock_ctx, anyio_backend):
     assert hasattr(func_tool, "func")
 
     assert func_tool.name == "end_call"
-    assert func_tool.tool_type == ToolType.TOOL
+    assert func_tool.tool_type == ToolType.GENERAL
     assert func_tool.is_background is False
 
     # Verify it's actually a FunctionTool instance (not duck-typed)
@@ -528,7 +528,7 @@ async def test_transfer_call_has_function_tool_attributes(mock_ctx, anyio_backen
     func_tool = transfer_call.as_function_tool()
     assert isinstance(func_tool, FunctionTool)
     assert func_tool.name == "transfer_call"
-    assert func_tool.tool_type == ToolType.TOOL
+    assert func_tool.tool_type == ToolType.GENERAL
     assert set(func_tool.parameters.keys()) == {"target_phone_number"}
     assert "message" not in func_tool.parameters
     assert func_tool.parameters["target_phone_number"].required is True

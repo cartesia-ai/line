@@ -216,7 +216,7 @@ is possible."""
             _end_call_impl,
             name="end_call",
             description=self.description,
-            tool_type=ToolType.TOOL,
+            tool_type=ToolType.GENERAL,
         )
 
     def as_function_tool(self) -> FunctionTool:
@@ -299,7 +299,7 @@ class TransferCallTool:
             _transfer_call_impl,
             name="transfer_call",
             description=_transfer_call_impl.__doc__,
-            tool_type=ToolType.TOOL,
+            tool_type=ToolType.GENERAL,
         )
 
     def as_function_tool(self) -> FunctionTool:

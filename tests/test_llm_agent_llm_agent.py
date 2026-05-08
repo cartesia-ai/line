@@ -1107,7 +1107,7 @@ async def test_plain_function_wrapped_as_loopback_tool():
 
     # Should be a FunctionTool
     assert isinstance(tool, FunctionTool)
-    assert tool.tool_type == ToolType.TOOL
+    assert tool.tool_type == ToolType.GENERAL
 
     # Name and description should come from the function
     assert tool.name == "my_tool"
@@ -1194,8 +1194,8 @@ async def test_mixed_decorated_and_plain_functions(turn_env):
     resolved_tools, _ = _normalize_tools([decorated_tool, plain_tool], model_id=parse_model_id("gpt-4o"))
 
     assert len(resolved_tools) == 2
-    assert resolved_tools[0].tool_type == ToolType.TOOL
-    assert resolved_tools[1].tool_type == ToolType.TOOL
+    assert resolved_tools[0].tool_type == ToolType.GENERAL
+    assert resolved_tools[1].tool_type == ToolType.GENERAL
 
     # Names should be correct
     assert resolved_tools[0].name == "decorated_tool"

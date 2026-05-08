@@ -111,7 +111,7 @@ def loopback_tool(
     """
 
     def decorator(f: Callable) -> FunctionTool:
-        return _construct_tool_descriptor(f, ToolType.TOOL, is_background=is_background)
+        return _construct_tool_descriptor(f, ToolType.GENERAL, is_background=is_background)
 
     if func is not None:
         # Called without arguments: @loopback_tool
@@ -124,7 +124,7 @@ def passthrough_tool(func: Callable) -> FunctionTool:
     """
     Legacy decorator for passthrough tools. Behaves identically to loopback_tool, but exported separately for backwards compatibility.
     """
-    return _construct_tool_descriptor(func, ToolType.TOOL)
+    return _construct_tool_descriptor(func, ToolType.GENERAL)
 
 
 def handoff_tool(func: Callable) -> FunctionTool:

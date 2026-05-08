@@ -75,7 +75,7 @@ class ToolType(Enum):
     instances pass through directly to the user.
     """
 
-    TOOL = "tool"
+    GENERAL = "general"
     HANDOFF = "handoff"
 
 
@@ -146,7 +146,7 @@ class FunctionTool:
     description: str
     func: Callable
     parameters: Dict[str, "ParameterInfo"]
-    tool_type: ToolType = ToolType.TOOL
+    tool_type: ToolType = ToolType.GENERAL
     is_background: bool = False
 
 
@@ -421,7 +421,7 @@ def _web_search_tool_to_function_tool(web_search_tool: Any) -> FunctionTool:
         name="web_search",
         description="Search the web for real-time information."
         + " Use this when you need current information that may not be in your training data.",
-        tool_type=ToolType.TOOL,
+        tool_type=ToolType.GENERAL,
     )
 
 

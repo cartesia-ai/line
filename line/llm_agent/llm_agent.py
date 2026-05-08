@@ -379,7 +379,7 @@ class LlmAgent:
 
                 # For backgrounded tools, we emit AgentToolCalled/AgentToolReturned pairs
                 # inside _execute_backgroundable_tool, not here
-                if tool.tool_type == ToolType.TOOL and tool.is_background:
+                if tool.tool_type == ToolType.GENERAL and tool.is_background:
                     # Backgroundable tool: run in a shielded task that survives cancellation
                     # Each yielded value triggers a loopback with AgentToolCalled/AgentToolReturned pair
                     self._execute_backgroundable_tool(
@@ -387,7 +387,7 @@ class LlmAgent:
                     )
                     continue
 
-                if tool.tool_type == ToolType.TOOL:
+                if tool.tool_type == ToolType.GENERAL:
                     # Branch per yielded value:
                     #   - OutputEvent → emit directly to the user (passthrough)
                     #   - raw value  → wrap as a synthetic tool result and trigger loopback

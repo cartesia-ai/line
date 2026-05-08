@@ -81,7 +81,7 @@ def test_loopback_tool_with_ctx_succeeds():
         return f"Weather in {city}"
 
     assert good_tool.name == "good_tool"
-    assert good_tool.tool_type.value == "tool"
+    assert good_tool.tool_type.value == "general"
     assert "city" in good_tool.parameters
     assert good_tool.parameters["city"].description == "City name"
 
@@ -107,7 +107,7 @@ def test_passthrough_tool_with_ctx_succeeds():
         yield AgentSendText(text=message)
 
     assert good_tool.name == "good_tool"
-    assert good_tool.tool_type.value == "tool"
+    assert good_tool.tool_type.value == "general"
     assert "message" in good_tool.parameters
 
 
@@ -249,7 +249,7 @@ def test_method_tool_binding():
 
     # Check it's still a FunctionTool
     assert bound_tool.name == "greet"
-    assert bound_tool.tool_type.value == "tool"
+    assert bound_tool.tool_type.value == "general"
     assert "name" in bound_tool.parameters
     # 'self' should NOT be in parameters
     assert "self" not in bound_tool.parameters
@@ -299,7 +299,7 @@ def test_method_passthrough_tool():
     bound_tool = filler.submit
 
     assert bound_tool.name == "submit"
-    assert bound_tool.tool_type.value == "tool"
+    assert bound_tool.tool_type.value == "general"
 
 
 @pytest.mark.asyncio
