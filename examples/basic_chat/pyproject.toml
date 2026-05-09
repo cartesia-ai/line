@@ -10,6 +10,3 @@ dependencies = [
 
 [tool.setuptools]
 py-modules = ["main"]
-
-[tool.uv.sources]
-cartesia-line = { path = "../../", editable=true }
