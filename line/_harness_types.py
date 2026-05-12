@@ -184,6 +184,7 @@ class StartInput(BaseModel):
     from_: str = Field(default="unknown", alias="from")
     to: str = "unknown"
     agent_call_id: str = "unknown"
+    zdr: bool = False
     agent: Dict[str, Any] = Field(default_factory=dict)
     metadata: Optional[Dict[str, Any]] = None
     # Agent-scoped JWT minted by the API. Forwarded by the harness so agent

@@ -43,6 +43,7 @@ from line.voice_agent_app import (
     _get_processed_history,
     _parse_committed,
 )
+from line.zdr import reset_zdr_enabled, set_zdr_enabled
 
 # ============================================================
 # Fixtures and Helpers
@@ -155,6 +156,27 @@ class TestConversationRunner:
         sent_data = ws.send_json.call_args[0][0]
         assert "Something went wrong" in str(sent_data)
         assert "ValueError" in str(sent_data)
+
+    @pytest.mark.asyncio
+    async def test_fatal_error_sends_generic_error_in_zdr_context(self):
+        """ZDR calls should not send stack traces or exception messages back to the harness."""
+        ws = create_mock_websocket()
+        ws.close = AsyncMock()
+        ws.receive_json.side_effect = RuntimeError("secret account data leaked in exception")
+
+        token = set_zdr_enabled(True)
+        try:
+            runner = ConversationRunner(ws, noop_agent, env)
+            await runner.run()
+        finally:
+            reset_zdr_enabled(token)
+
+        ws.send_json.assert_called()
+        sent_data = ws.send_json.call_args[0][0]
+        assert sent_data["content"] == "Internal error"
+        assert "secret account data" not in str(sent_data)
+        assert "RuntimeError" not in str(sent_data)
+        ws.close.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_disconnect_stops_loop(self):
@@ -1344,6 +1366,17 @@ class TestCallRequestFromStartData:
         assert result.agent.system_prompt == "You are helpful."
         assert result.agent.introduction == "Hello!"
         assert result.metadata == {"key": "value"}
+        assert result.zdr is False
+
+    def test_zdr_start_message(self):
+        data = {
+            "type": "start",
+            "call_id": "call-123",
+            "zdr": True,
+        }
+        result = _call_request_from_start_data(data)
+        assert result.call_id == "call-123"
+        assert result.zdr is True
 
     def test_defaults_for_missing_fields(self):
         data = {"type": "start"}

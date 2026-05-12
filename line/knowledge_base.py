@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional
 
 import aiohttp
 from loguru import logger
+from line.zdr import is_zdr_enabled
 
 DEFAULT_BASE_URL = "https://api.cartesia.ai"
 DEFAULT_TOP_K = 5
@@ -92,26 +93,41 @@ class KnowledgeBase:
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.get(url, params=params, headers=headers) as resp:
                     body = await resp.text()
-                    logger.info(
-                        "knowledge_base query: url={} params={} status={} body={}",
-                        url,
-                        params,
-                        resp.status,
-                        body[:LOG_TRUNCATION],
-                    )
-                    if resp.status != 200:
-                        logger.warning(
-                            "knowledge_base query failed: status={} body={}",
+                    if is_zdr_enabled():
+                        logger.info("knowledge_base query: status={}", resp.status)
+                    else:
+                        logger.info(
+                            "knowledge_base query: url={} params={} status={} body={}",
+                            url,
+                            params,
                             resp.status,
                             body[:LOG_TRUNCATION],
                         )
+                    if resp.status != 200:
+                        if is_zdr_enabled():
+                            logger.warning("knowledge_base query failed: status={}", resp.status)
+                        else:
+                            logger.warning(
+                                "knowledge_base query failed: status={} body={}",
+                                resp.status,
+                                body[:LOG_TRUNCATION],
+                            )
+                        if is_zdr_enabled():
+                            raise KnowledgeBaseError(
+                                f"Knowledge base query failed with status {resp.status}"
+                            )
                         raise KnowledgeBaseError(
                             f"Knowledge base query failed with status {resp.status}: {body[:LOG_TRUNCATION]}"
                         )
                     try:
                         payload = json.loads(body)
-                        logger.debug("knowledge_base query payload: {}", payload)
+                        if is_zdr_enabled():
+                            logger.debug("knowledge_base query payload redacted")
+                        else:
+                            logger.debug("knowledge_base query payload: {}", payload)
                     except json.JSONDecodeError as e:
+                        if is_zdr_enabled():
+                            raise KnowledgeBaseError("Invalid JSON from knowledge base") from e
                         raise KnowledgeBaseError(f"Invalid JSON from knowledge base: {e}") from e
         except asyncio.TimeoutError as e:
             raise KnowledgeBaseError(f"Knowledge base query timed out after {effective_timeout}s") from e

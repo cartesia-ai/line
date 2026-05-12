@@ -41,11 +41,13 @@ class AgentEnv:
         agent_id: Optional[str] = None,
         agent_token: Optional[str] = None,
         base_url: Optional[str] = None,
+        zdr: bool = False,
     ):
         self.loop = loop
         self.agent_id = agent_id
         self.agent_token = agent_token
         self.base_url = base_url
+        self.zdr = zdr
 
     def knowledge_base(self) -> KnowledgeBase:
         """Return a KnowledgeBase client scoped to the calling agent."""

@@ -27,6 +27,7 @@ from typing import (
 from loguru import logger
 
 from line.agent import AgentCallable, TurnEnv
+from line.zdr import is_zdr_enabled
 from line.events import (
     AgentHandedOff,
     AgentSendText,
@@ -414,9 +415,12 @@ class LlmAgent:
                                     n += 1
                         except Exception as e:
                             # Use negative limit to show last 10 frames (most relevant)
-                            logger.error(
-                                f'Error in Tool Call to "{tc.name}":\n{traceback.format_exc(limit=-10)}'
-                            )
+                            if is_zdr_enabled():
+                                logger.error(f'Error in Tool Call to "{tc.name}"')
+                            else:
+                                logger.error(
+                                    f'Error in Tool Call to "{tc.name}":\n{traceback.format_exc(limit=-10)}'
+                                )
                             tool_called_output, tool_returned_output = _construct_tool_events(
                                 f"{tc.id}-{n}", tc.name, tool_args, f"error: {e}"
                             )
@@ -505,7 +509,10 @@ class LlmAgent:
                         self._handoff_target = handoff_target
                     except Exception as e:
                         # Use negative limit to show last 10 frames (most relevant)
-                        logger.error(f'Error in Tool Call to "{tc.name}":\n{traceback.format_exc(limit=-10)}')
+                        if is_zdr_enabled():
+                            logger.error(f'Error in Tool Call to "{tc.name}"')
+                        else:
+                            logger.error(f'Error in Tool Call to "{tc.name}":\n{traceback.format_exc(limit=-10)}')
                         # Emit AgentToolReturned with error
                         tool_returned_output = AgentToolReturned(
                             tool_call_id=tc.id,
@@ -669,7 +676,10 @@ class LlmAgent:
                     yield (called, returned)
                     n += 1
             except Exception as e:
-                logger.error(f"Error in Tool Call {tc_name}: {e}\n{traceback.format_exc(limit=-10)}")
+                if is_zdr_enabled():
+                    logger.error(f"Error in Tool Call {tc_name}")
+                else:
+                    logger.error(f"Error in Tool Call {tc_name}: {e}\n{traceback.format_exc(limit=-10)}")
                 called, returned = _construct_tool_events(f"{tc_id}-{n}", tc_name, tool_args, f"error: {e}")
                 called.responding_to = triggering_event_id
                 returned.responding_to = triggering_event_id

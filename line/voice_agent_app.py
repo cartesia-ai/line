@@ -75,6 +75,7 @@ from line.events import (
     UserTurnEnded,
     UserTurnStarted,
 )
+from line.zdr import is_zdr_enabled, reset_zdr_enabled, safe_error_message, set_zdr_enabled
 
 
 # Call request types
@@ -102,6 +103,7 @@ class CallRequest(BaseModel):
     from_: str = Field(alias="from")  # Using from_ to avoid Python keyword conflict
     to: str
     agent_call_id: str  # Agent call ID for logging and correlation
+    zdr: bool = False
     agent: AgentConfig
     metadata: Optional[Dict[str, Any]] = None
     # Agent-scoped JWT minted by the API and forwarded by the harness over the
@@ -226,44 +228,66 @@ class VoiceAgentApp:
 
         try:
             start_data = await websocket.receive_json()
-            logger.info(f"Received start message: {start_data}")
+            if start_data.get("zdr"):
+                logger.info(
+                    "Received ZDR start message",
+                    call_id=start_data.get("call_id"),
+                    agent_call_id=start_data.get("agent_call_id"),
+                    has_metadata=start_data.get("metadata") is not None,
+                )
+            else:
+                logger.info(f"Received start message: {start_data}")
             call_request = _call_request_from_start_data(start_data)
         except WebSocketDisconnect:
             logger.error("WebSocket disconnected before start message received")
             return
         except Exception as e:
-            logger.error(f"Failed to receive/parse start message: {e}")
-            await self._close_with_error(websocket, f"Failed to receive/parse start message: {e}")
+            is_zdr_start = isinstance(locals().get("start_data"), dict) and start_data.get("zdr")
+            if is_zdr_start:
+                logger.error("Failed to receive/parse ZDR start message")
+                await self._close_with_error(websocket, "Internal error")
+            else:
+                logger.error(f"Failed to receive/parse start message: {e}")
+                await self._close_with_error(websocket, f"Failed to receive/parse start message: {e}")
             return
 
+        zdr_token = set_zdr_enabled(call_request.zdr)
         runner: Optional[ConversationRunner] = None
-        # Create the AgentEnv with the current event loop and the
-        # agent-scoped credentials forwarded by the harness on the start message.
-        loop = asyncio.get_running_loop()
-        if call_request.agent.id is None:
-            logger.error(
-                "Start message missing agent.id; agent-scoped operations "
-                "(e.g. knowledge base) will be unavailable for this call."
-            )
-        env = AgentEnv(
-            loop=loop,
-            agent_id=call_request.agent.id,
-            agent_token=call_request.agent_token,
-            base_url=call_request.api_base_url,
-        )
         try:
-            agent_spec = await self.get_agent(env, call_request)
-            runner = ConversationRunner(websocket, agent_spec, env)
-        except Exception:
-            error_msg = traceback.format_exc()
-            error_string = f"Error in get_agent for {call_request.call_id}: {error_msg}"
-            logger.error(error_string)
-            await self._close_with_error(websocket, error_string)
-            return
+            # Create the AgentEnv with the current event loop and the
+            # agent-scoped credentials forwarded by the harness on the start message.
+            loop = asyncio.get_running_loop()
+            if call_request.agent.id is None:
+                logger.error(
+                    "Start message missing agent.id; agent-scoped operations "
+                    "(e.g. knowledge base) will be unavailable for this call."
+                )
+            env = AgentEnv(
+                loop=loop,
+                agent_id=call_request.agent.id,
+                agent_token=call_request.agent_token,
+                base_url=call_request.api_base_url,
+                zdr=call_request.zdr,
+            )
+            try:
+                agent_spec = await self.get_agent(env, call_request)
+                runner = ConversationRunner(websocket, agent_spec, env)
+            except Exception:
+                if is_zdr_enabled():
+                    logger.error("Error in get_agent", call_id=call_request.call_id)
+                    await self._close_with_error(websocket, "Internal error")
+                else:
+                    error_msg = traceback.format_exc()
+                    error_string = f"Error in get_agent for {call_request.call_id}: {error_msg}"
+                    logger.error(error_string)
+                    await self._close_with_error(websocket, error_string)
+                return
 
-        # Create and run the conversation runner
-        await runner.run()
-        logger.info("Websocket session ended")
+            # Create and run the conversation runner
+            await runner.run()
+            logger.info("Websocket session ended")
+        finally:
+            reset_zdr_enabled(zdr_token)
 
     def run(self, host="", port: int = None):
         """Run the voice agent server."""
@@ -279,6 +303,7 @@ def _call_request_from_start_data(data: dict) -> CallRequest:
         from_=start_msg.from_,
         to=start_msg.to,
         agent_call_id=start_msg.agent_call_id,
+        zdr=start_msg.zdr,
         agent=AgentConfig(**start_msg.agent),
         metadata=start_msg.metadata or {},
         agent_token=start_msg.agent_token,
@@ -387,7 +412,10 @@ class ConversationRunner:
                 try:
                     input_msg = _input_message_adapter.validate_python(message)
                 except ValidationError:
-                    logger.warning(f"Dropping unparseable websocket message: {message}")
+                    if is_zdr_enabled():
+                        logger.warning("Dropping unparseable websocket message")
+                    else:
+                        logger.warning(f"Dropping unparseable websocket message: {message}")
                     continue
 
                 # Convert and process the input message
@@ -410,7 +438,10 @@ class ConversationRunner:
                 # since this is an exceptional case that we will fix at the
                 # SDK level
                 self.shutdown_event.set()
-                logger.error(f"Failed to parse JSON message: {e}")
+                if is_zdr_enabled():
+                    logger.error("Failed to parse JSON message")
+                else:
+                    logger.error(f"Failed to parse JSON message: {e}")
                 await self.send_error(f"Failed to parse JSON message: {e}")
                 await self.websocket.close()
             except Exception:
@@ -421,9 +452,13 @@ class ConversationRunner:
                 # since this is an exceptional case that we will fix at the
                 # SDK level
                 self.shutdown_event.set()
-                error_msg = traceback.format_exc()
-                logger.error(f"Error in websocket loop (likely message processing): {error_msg}")
-                await self.send_error(f"Error in websocket loop (likely message processing): {error_msg}")
+                if is_zdr_enabled():
+                    logger.error("Error in websocket loop")
+                    await self.send_error("Internal error")
+                else:
+                    error_msg = traceback.format_exc()
+                    logger.error(f"Error in websocket loop (likely message processing): {error_msg}")
+                    await self.send_error(f"Error in websocket loop (likely message processing): {error_msg}")
                 await self.websocket.close()
 
         if self.agent_task:
@@ -462,9 +497,13 @@ class ConversationRunner:
                 pass
             except Exception:
                 self.shutdown_event.set()
-                error_msg = traceback.format_exc()
-                logger.error(f"Error in agent.process: {error_msg}")
-                await self.send_error(f"Error in agent.process: {error_msg}")
+                if is_zdr_enabled():
+                    logger.error("Error in agent.process")
+                    await self.send_error("Internal error")
+                else:
+                    error_msg = traceback.format_exc()
+                    logger.error(f"Error in agent.process: {error_msg}")
+                    await self.send_error(f"Error in agent.process: {error_msg}")
                 await self.websocket.close()
 
         self.agent_task = asyncio.create_task(runner())
@@ -482,7 +521,7 @@ class ConversationRunner:
     async def send_error(self, error: str):
         """Send an error message via WebSocket."""
         try:
-            await self.websocket.send_json(ErrorOutput(content=error).model_dump())
+            await self.websocket.send_json(ErrorOutput(content=safe_error_message(error)).model_dump())
         except Exception as e:
             logger.warning(f"Failed to send error via WebSocket: {e}")
 
@@ -532,9 +571,12 @@ class ConversationRunner:
         elif isinstance(message, ValidationErrorInput):
             # TODO: parse to a real event if we want to expose validation errors to the agent; for now just
             # log and ignore
-            logger.warning(
-                f"Received validation error from client: {message.error_type} - {message.error_message}"
-            )
+            if is_zdr_enabled():
+                logger.warning("Received validation error from client", error_type=message.error_type)
+            else:
+                logger.warning(
+                    f"Received validation error from client: {message.error_type} - {message.error_message}"
+                )
             return None
 
         raise ValueError(f"Unhandled input message type: {type(message).__name__}")
@@ -571,7 +613,10 @@ class ConversationRunner:
         if type(processed_event) is not type(raw_event):
             if isinstance(raw_event, AgentTextSent):
                 # Ack-back was consumed by dedup — skip it
-                logger.debug(f'Ack-back "{raw_event.content}" consumed by dedup (already pre-committed)')
+                if is_zdr_enabled():
+                    logger.debug("Ack-back consumed by dedup")
+                else:
+                    logger.debug(f'Ack-back "{raw_event.content}" consumed by dedup (already pre-committed)')
                 return None, raw_history
             logger.warning(
                 f"Processed event type {type(processed_event).__name__} "
@@ -590,10 +635,16 @@ class ConversationRunner:
             logger.info("-> 🧑🔊 User started speaking")
         elif isinstance(processed_event, UserDtmfSent):
             event = UserDtmfSent(history=processed_history, **base_data)
-            logger.info(f"-> 🧑🔔 User DTMF received: {event.button}")
+            if is_zdr_enabled():
+                logger.info("-> 🧑🔔 User DTMF received")
+            else:
+                logger.info(f"-> 🧑🔔 User DTMF received: {event.button}")
         elif isinstance(processed_event, UserTextSent):
             event = UserTextSent(history=processed_history, **base_data)
-            logger.info(f'-> 🧑🗣️ User said: "{event.content}"')
+            if is_zdr_enabled():
+                logger.info("-> 🧑🗣️ User said: [redacted]")
+            else:
+                logger.info(f'-> 🧑🗣️ User said: "{event.content}"')
         elif isinstance(processed_event, UserTurnEnded):
             event = UserTurnEnded(history=processed_history, **base_data)
             logger.info("-> 🧑🔇 User stopped speaking")
@@ -603,12 +654,18 @@ class ConversationRunner:
         elif isinstance(processed_event, AgentTextSent):
             event = AgentTextSent(history=processed_history, **base_data)
             if type(event) is not type(raw_event):
-                logger.info(f'-> 🤖🗣️ Agent said: "{event.content}"')
+                if is_zdr_enabled():
+                    logger.info("-> 🤖🗣️ Agent said: [redacted]")
+                else:
+                    logger.info(f'-> 🤖🗣️ Agent said: "{event.content}"')
             else:
                 # special case: log the raw event content (without whitespace restoration)
                 # otherwise we re-log the same text multiple times with the new stuff
                 # concatenated
-                logger.info(f'-> 🤖🗣️ Agent said: "{raw_event.content}"')
+                if is_zdr_enabled():
+                    logger.info("-> 🤖🗣️ Agent said: [redacted]")
+                else:
+                    logger.info(f'-> 🤖🗣️ Agent said: "{raw_event.content}"')
         elif isinstance(processed_event, AgentDtmfSent):
             event = AgentDtmfSent(history=processed_history, **base_data)
         elif isinstance(processed_event, AgentTurnEnded):
@@ -616,7 +673,10 @@ class ConversationRunner:
             logger.info("-> 🤖🔇 Agent stopped speaking")
         elif isinstance(processed_event, UserCustomSent):
             event = UserCustomSent(history=processed_history, **base_data)
-            logger.debug(f"-> 📦 Custom event with metadata: {event.metadata}")
+            if is_zdr_enabled():
+                logger.debug("-> 📦 Custom event with metadata: [redacted]")
+            else:
+                logger.debug(f"-> 📦 Custom event with metadata: {event.metadata}")
         else:
             raise ValueError(f"Unknown event type: {type(processed_event).__name__}")
 
@@ -655,14 +715,23 @@ class ConversationRunner:
         """Convert OutputEvent to websocket OutputMessage."""
         if isinstance(event, AgentSendText):
             if event.interruptible:
-                logger.info(f'<- 🤖🗣️ Agent said: "{event.text}"')
+                if is_zdr_enabled():
+                    logger.info("<- 🤖🗣️ Agent said: [redacted]")
+                else:
+                    logger.info(f'<- 🤖🗣️ Agent said: "{event.text}"')
             else:
-                logger.info(f'<- 🤖🔒 Agent said (uninterruptible): "{event.text}"')
+                if is_zdr_enabled():
+                    logger.info("<- 🤖🔒 Agent said (uninterruptible): [redacted]")
+                else:
+                    logger.info(f'<- 🤖🔒 Agent said (uninterruptible): "{event.text}"')
             return MessageOutput(
                 content=event.text, interruptible=event.interruptible, responding_to=event.responding_to
             )
         if isinstance(event, AgentSendDtmf):
-            logger.info(f"<- 🤖🔔 Agent DTMF sent: {event.button}")
+            if is_zdr_enabled():
+                logger.info("<- 🤖🔔 Agent DTMF sent")
+            else:
+                logger.info(f"<- 🤖🔔 Agent DTMF sent: {event.button}")
             return DTMFOutput(button=event.button, responding_to=event.responding_to)
         if isinstance(event, AgentEndCall):
             logger.info(f"<- 📞 End call (interruptible={event.interruptible})")
@@ -677,10 +746,16 @@ class ConversationRunner:
                 interruptible=event.interruptible,
             )
         if isinstance(event, LogMetric):
-            logger.debug(f"<- 📈 Log metric: {event.name}={event.value}")
+            if is_zdr_enabled():
+                logger.debug(f"<- 📈 Log metric: {event.name}=[redacted]")
+            else:
+                logger.debug(f"<- 📈 Log metric: {event.name}={event.value}")
             return LogMetricOutput(name=event.name, value=event.value, responding_to=event.responding_to)
         if isinstance(event, LogMessage):
-            logger.debug(f"<- 🪵 Log message: {event.name} [{event.level}] {event.message}")
+            if is_zdr_enabled():
+                logger.debug(f"<- 🪵 Log message: {event.name} [{event.level}] [redacted]")
+            else:
+                logger.debug(f"<- 🪵 Log message: {event.name} [{event.level}] {event.message}")
             metadata = {
                 "level": event.level,
                 "message": event.message,
@@ -688,14 +763,20 @@ class ConversationRunner:
             }
             return LogEventOutput(event=event.name, metadata=metadata, responding_to=event.responding_to)
         if isinstance(event, AgentToolCalled):
-            logger.info(f"<- 🔧 Tool called: {event.tool_name}({event.tool_args})")
+            if is_zdr_enabled():
+                logger.info(f"<- 🔧 Tool called: {event.tool_name}([redacted])")
+            else:
+                logger.info(f"<- 🔧 Tool called: {event.tool_name}({event.tool_args})")
             return ToolCallOutput(
                 name=event.tool_name,
                 arguments=self._truncate_dict_for_ws(event.tool_args),
                 responding_to=event.responding_to,
             )
         if isinstance(event, AgentToolReturned):
-            logger.info(f"<- 🔧 Tool returned: {event.tool_name}({event.tool_args}) -> {event.result}")
+            if is_zdr_enabled():
+                logger.info(f"<- 🔧 Tool returned: {event.tool_name}([redacted]) -> [redacted]")
+            else:
+                logger.info(f"<- 🔧 Tool returned: {event.tool_name}({event.tool_args}) -> {event.result}")
             result_str = self._truncate_for_ws(event.result) if event.result is not None else None
             return ToolCallOutput(
                 name=event.tool_name,
@@ -720,7 +801,10 @@ class ConversationRunner:
                 responding_to=event.responding_to,
             )
         if isinstance(event, AgentSendCustom):
-            logger.debug(f"<- 📦 Custom event with metadata: {event.metadata}")
+            if is_zdr_enabled():
+                logger.debug("<- 📦 Custom event with metadata: [redacted]")
+            else:
+                logger.debug(f"<- 📦 Custom event with metadata: {event.metadata}")
             return CustomOutput(metadata=event.metadata, responding_to=event.responding_to)
 
         return ErrorOutput(content=f"Unhandled output event type: {type(event).__name__}")
