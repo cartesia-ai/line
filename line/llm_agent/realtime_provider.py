@@ -21,7 +21,7 @@ from websockets.legacy.client import WebSocketClientProtocol
 from line.llm_agent.config import LlmConfig
 from line.llm_agent.provider import Message, ParsedModelId, _extract_instructions_and_messages
 from line.llm_agent.schema_converter import build_openai_tool_defs
-from line.llm_agent.stream import (
+from line.llm_agent.provider_utils import (
     ConversationEntry,
     HistoryUpdate,
     _AsyncIterableContext,

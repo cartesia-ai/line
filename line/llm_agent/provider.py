@@ -246,8 +246,10 @@ class ProviderProtocol(Protocol):
 class LlmProvider:
     """Unified LLM provider facade.
 
-    Selects the appropriate backend (HTTP/LiteLLM, Realtime WS, or Responses WS)
-    based on the model name, and delegates all calls to it.
+    Selects the appropriate backend (HTTP/LiteLLM by default; Realtime WS for
+    realtime models; Responses WS or HTTPS Responses as opt-in alternatives
+    for ``gpt-5.2`` / ``gpt-5.4-*`` models) based on the model name and the
+    optional ``backend`` override, and delegates all calls to it.
 
     Handles config normalization and reasoning-effort detection so that
     backends receive normalized configs and pre-computed flags.  This class
@@ -261,10 +263,18 @@ class LlmProvider:
         tools: Tool specs (``List[ToolSpec]``).  Normalized internally,
             stored as defaults and merged with any per-call tool overrides by
             tool name.
-        backend: Force a specific backend (``"http"``, ``"realtime"``, or
-            ``"websocket"``).  When ``None`` (default), the backend is
-            auto-detected from the model name.  Raises ``ValueError`` if
-            the requested backend is incompatible with the model.
+        backend: Force a specific backend (``"http"``, ``"http_responses"``,
+            ``"realtime"``, or ``"websocket"``).  When ``None`` (default),
+            the backend is auto-detected from the model name (HTTP/LiteLLM
+            for all non-realtime models).  Set ``backend="http_responses"``
+            for Responses-API-capable OpenAI models (e.g. ``gpt-5.2``,
+            ``gpt-5.4-mini``) to speak the Responses API natively over
+            HTTPS via ``litellm.aresponses``, bypassing LiteLLM's
+            chat-completions → responses bridge — useful for avoiding
+            duplicated TTS output on gpt-5.4+ where the bridge drops the
+            ``phase`` field on ``message`` output items.  Raises
+            ``ValueError`` if the requested backend is incompatible with
+            the model.
     """
 
     def __init__(
@@ -301,6 +311,16 @@ class LlmProvider:
             logger.info(f"WebSocket provider selected for model: {model_id}")
 
             self._backend = _WebSocketProvider(
+                model_id=model_id,
+                api_key=api_key,
+                default_reasoning_effort=mcfg.default_reasoning_effort,
+            )
+        elif mcfg.backend == "http_responses":
+            from line.llm_agent.http_responses_provider import _HttpResponsesProvider
+
+            logger.info(f"HTTPS Responses provider selected for model: {model_id}")
+
+            self._backend = _HttpResponsesProvider(
                 model_id=model_id,
                 api_key=api_key,
                 default_reasoning_effort=mcfg.default_reasoning_effort,
@@ -370,12 +390,12 @@ class _ModelConfig:
     parameter discovery so that every call-site uses the same precedence.
     """
 
-    backend: str  # "realtime" | "websocket" | "http"
+    backend: str  # "realtime" | "websocket" | "http_responses" | "http"
     supports_reasoning_effort: bool
     default_reasoning_effort: Optional[str]
 
 
-_VALID_BACKENDS = frozenset({"http", "realtime", "websocket"})
+_VALID_BACKENDS = frozenset({"http", "http_responses", "realtime", "websocket"})
 
 
 def _get_model_config(
@@ -396,7 +416,10 @@ def _get_model_config(
         config: When provided, validate that every field is compatible with the
             selected backend. Raises ``ValueError`` otherwise.
     """
-    # WebSocket models — opt-in via backend="websocket"; default is HTTP.
+    # Responses-API-capable OpenAI models (gpt-5.2 / gpt-5.4-*) default to
+    # the HTTP/LiteLLM backend (chat-completions endpoint).  The Responses
+    # API can be reached directly via the opt-in ``websocket`` (WS) or
+    # ``http_responses`` (HTTPS via ``litellm.aresponses``) backends.
     from litellm import get_supported_openai_params
 
     litellm_model = str(model_id)
@@ -424,13 +447,24 @@ def _get_model_config(
         raise ValueError(
             f"Backend 'websocket' requires a websocket-compatible model (e.g. gpt-5.2), got {str(model_id)!r}"
         )
-    elif _is_websocket_model(model_id) and backend == "websocket":
-        ws_supported = get_supported_openai_params(model=litellm_model) or []
-        ws_supports_reasoning = "reasoning_effort" in ws_supported
+    elif backend == "http_responses" and not _is_websocket_model(model_id):
+        raise ValueError(
+            f"Backend 'http_responses' requires a Responses-API-capable model "
+            f"(e.g. gpt-5.2, gpt-5.4-mini), got {str(model_id)!r}"
+        )
+    elif _is_websocket_model(model_id) and backend in ("websocket", "http_responses"):
+        # Opt-in Responses-API-native paths.  WS speaks the Responses
+        # API over ``wss://api.openai.com/v1/responses``; http_responses
+        # speaks it over HTTPS via ``litellm.aresponses``.  Either
+        # avoids LiteLLM's chat-completions → responses bridge
+        # translator, which drops the ``phase`` field on ``message``
+        # output items and produces duplicated TTS output for gpt-5.4+.
+        responses_supported = get_supported_openai_params(model=litellm_model) or []
+        responses_supports_reasoning = "reasoning_effort" in responses_supported
         mcfg = _ModelConfig(
-            backend="websocket",
-            supports_reasoning_effort=ws_supports_reasoning,
-            default_reasoning_effort="low" if ws_supports_reasoning else None,
+            backend=backend,
+            supports_reasoning_effort=responses_supports_reasoning,
+            default_reasoning_effort="low" if responses_supports_reasoning else None,
         )
 
     elif litellm_support:
