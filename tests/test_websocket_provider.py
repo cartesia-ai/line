@@ -5,13 +5,13 @@ from typing import List
 
 from line.llm_agent.config import LlmConfig, _normalize_config
 from line.llm_agent.provider import Message, StreamChunk, ToolCall, parse_model_id
-from line.llm_agent.schema_converter import build_openai_tool_defs
 from line.llm_agent.provider_utils import (
     _compute_divergence,
     _context_identity,
     _expand_messages,
     _extract_model_output_identities,
 )
+from line.llm_agent.schema_converter import build_openai_tool_defs
 from line.llm_agent.websocket_provider import (
     _build_request,
     _plan_chat,

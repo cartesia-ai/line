@@ -47,7 +47,6 @@ from line.llm_agent.provider_utils import (
 )
 from line.llm_agent.tools.utils import FunctionTool
 
-
 # Terminal event types in the Responses streaming protocol.
 _TERMINAL_EVENTS = frozenset(
     {
@@ -316,10 +315,10 @@ class _HttpResponsesProvider:
 
                         iterator = await aresponses(**request_kwargs)
 
-                        def on_response_done(response_dict: Dict[str, Any]) -> None:
+                        def on_response_done(response_dict: Dict[str, Any], _update=update) -> None:
                             if response_dict.get("status") != "completed":
                                 return
-                            self._history = update(self._history, response_dict)
+                            self._history = _update(self._history, response_dict)
 
                         stream = _HttpResponseEventStream(iterator, on_response_done)
 
@@ -330,11 +329,7 @@ class _HttpResponsesProvider:
                         lock.release()
                     return
                 except RuntimeError as exc:
-                    if (
-                        "previous_response_not_found" not in str(exc)
-                        or emitted_any
-                        or attempt >= 1
-                    ):
+                    if "previous_response_not_found" not in str(exc) or emitted_any or attempt >= 1:
                         raise
                     self._history = []
                     attempt += 1
@@ -346,16 +341,12 @@ class _HttpResponsesProvider:
                     # ``BadRequestError`` / generic Exception with the
                     # code in the message.  Match by substring to mirror
                     # the WS provider's behavior.
-                    if (
-                        "previous_response_not_found" not in str(exc)
-                        or emitted_any
-                        or attempt >= 1
-                    ):
+                    if "previous_response_not_found" not in str(exc) or emitted_any or attempt >= 1:
                         raise
                     self._history = []
                     attempt += 1
                     logger.debug(
-                        "Responses API lost previous_response_id (via %s); retrying current turn from scratch",
+                        "Responses API lost previous_response_id (via %s); retrying current turn",
                         type(exc).__name__,
                     )
 

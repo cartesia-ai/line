@@ -28,7 +28,6 @@ from websockets.legacy.client import WebSocketClientProtocol
 
 from line.llm_agent.config import LlmConfig
 from line.llm_agent.provider import Message, ParsedModelId
-from line.llm_agent.schema_converter import build_openai_tool_defs
 from line.llm_agent.provider_utils import (
     ConversationEntry,
     HistoryUpdate,
@@ -41,6 +40,7 @@ from line.llm_agent.provider_utils import (
     _ws_is_closed,
     _WsEventStream,
 )
+from line.llm_agent.schema_converter import build_openai_tool_defs
 from line.llm_agent.tools.utils import FunctionTool
 
 WS_URL = "wss://api.openai.com/v1/responses"
