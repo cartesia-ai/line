@@ -469,24 +469,15 @@ def _get_model_config(
 
     elif litellm_support:
         supports = "reasoning_effort" in litellm_support
-        default: Optional[str] = "low" if supports else None
+        default: Optional[str] = None
         if supports:
-            from litellm import get_llm_provider
-            from litellm.utils import get_optional_params
-
-            try:
-                _, provider, _, _ = get_llm_provider(model=litellm_model)
-                get_optional_params(
-                    model=litellm_model, custom_llm_provider=provider, reasoning_effort="none"
-                )
-                default = "none"
-            except Exception:
-                # HACK: Anthropic's LiteLLM mapping annoyingly doesn't support `"none"` (the string) as a
-                # value for reasoning_effort, so None (omitting the param) is the correct way
-                # to skip the thinking block entirely; "low" would still enable a 1024-token
-                # thinking budget.
-                if model_id.provider == "anthropic":
-                    default = None
+            # Anthropic: omit the param entirely to skip the thinking block. Across
+            # litellm versions the "none" string is handled inconsistently — older
+            # versions raise, newer versions accept it. None (no param) is the only
+            # deterministic skip; "low" would enable a 1024-token thinking budget.
+            # Other providers (OpenAI reasoning models, etc.): "none" is the
+            # well-defined "no reasoning" value.
+            default = None if model_id.provider == "anthropic" else "none"
 
         mcfg = _ModelConfig(
             backend="http",

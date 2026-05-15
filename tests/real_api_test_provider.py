@@ -726,6 +726,49 @@ Always include menu_item_id and quantity.""",
     return True
 
 
+async def test_reasoning_disabled_by_default(model: str, api_key: str, backend: Optional[str] = None):
+    """Verify the codebase's default reasoning_effort actually suppresses thinking on the wire."""
+    from line.llm_agent.provider import _get_model_config, parse_model_id
+
+    print("\n" + "=" * 60)
+    print(f"Testing reasoning disabled by default for {model} (backend={backend})")
+    print("=" * 60)
+
+    mcfg = _get_model_config(parse_model_id(model))
+    print(f"  supports_reasoning_effort: {mcfg.supports_reasoning_effort}")
+    print(f"  default_reasoning_effort:  {mcfg.default_reasoning_effort!r}")
+
+    llm_kwargs: dict = {
+        "model": model,
+        "api_key": api_key,
+        "messages": [{"role": "user", "content": "What is 2+2? Just give the number."}],
+    }
+    if mcfg.supports_reasoning_effort and mcfg.default_reasoning_effort is not None:
+        llm_kwargs["reasoning_effort"] = mcfg.default_reasoning_effort
+
+    response = await litellm.acompletion(**llm_kwargs)
+    msg = response.choices[0].message
+    reasoning_content = getattr(msg, "reasoning_content", None)
+    thinking_blocks = getattr(msg, "thinking_blocks", None)
+    details = getattr(response.usage, "completion_tokens_details", None)
+    reasoning_tokens = getattr(details, "reasoning_tokens", 0) or 0
+
+    print(f"  reasoning_content present: {bool(reasoning_content)}")
+    print(f"  thinking_blocks present:   {bool(thinking_blocks)}")
+    print(f"  reasoning_tokens:          {reasoning_tokens}")
+    print(f"  response.content:          {msg.content!r}")
+
+    if reasoning_content or thinking_blocks or reasoning_tokens > 0:
+        raise AssertionError(
+            f"Expected NO reasoning for {model} with reasoning_effort="
+            f"{llm_kwargs.get('reasoning_effort')!r}, but the API returned "
+            f"reasoning_content={bool(reasoning_content)}, "
+            f"thinking_blocks={bool(thinking_blocks)}, "
+            f"reasoning_tokens={reasoning_tokens}"
+        )
+    print("  ✓ No reasoning was produced")
+
+
 # =============================================================================
 # Main
 # =============================================================================
@@ -761,6 +804,7 @@ AVAILABLE_TESTS = [
     "web_search_fn",  # test_function_tools_with_web_search
     "mcp",  # test_mcp_list_tools and test_mcp_tool_execution
     "reset",  # test_conversation_reset
+    "reasoning_default",  # test_reasoning_disabled_by_default
 ]
 
 
@@ -881,6 +925,10 @@ async def main(args):
             test_plan.append(("mcp_tool_execution", test_mcp_tool_execution, model, api_key, backend))
         if "reset" in tests_to_run:
             test_plan.append(("reset", test_conversation_reset, model, api_key, backend))
+        if "reasoning_default" in tests_to_run:
+            test_plan.append(
+                ("reasoning_default", test_reasoning_disabled_by_default, model, api_key, backend)
+            )
 
         for test_entry in test_plan:
             test_name, test_fn, *test_args = test_entry
