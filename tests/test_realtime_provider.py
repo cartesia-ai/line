@@ -2,8 +2,8 @@
 
 from line.llm_agent.config import LlmConfig, _normalize_config
 from line.llm_agent.provider import Message, ToolCall
+from line.llm_agent.provider_utils import _context_identity, _expand_messages
 from line.llm_agent.realtime_provider import RECONNECT_THRESHOLD, _plan_chat, _track_output_items
-from line.llm_agent.stream import _context_identity, _expand_messages
 
 
 def _cfg(**overrides):

@@ -387,7 +387,10 @@ class TestGetModelConfig:
         assert cfg.supports_reasoning_effort is False
         assert cfg.default_reasoning_effort is None
 
-    def test_websocket_model_selects_websocket_backend(self):
+    def test_websocket_model_selects_http_backend_by_default(self):
+        # Default for Responses-API-capable OpenAI models is still HTTP
+        # via LiteLLM's chat-completions endpoint.  ``http_responses``
+        # and ``websocket`` are both opt-in alternatives.
         cfg = _get_model_config(parse_model_id("openai/gpt-5.2"))
         assert cfg.backend == "http"
 
@@ -398,6 +401,18 @@ class TestGetModelConfig:
     def test_websocket_model_with_explicit_websocket_backend(self):
         cfg = _get_model_config(parse_model_id("openai/gpt-5.2"), backend="websocket")
         assert cfg.backend == "websocket"
+
+    def test_websocket_model_with_explicit_http_responses_backend(self):
+        cfg = _get_model_config(parse_model_id("openai/gpt-5.2"), backend="http_responses")
+        assert cfg.backend == "http_responses"
+
+    def test_http_responses_backend_with_non_responses_model_raises(self):
+        try:
+            _get_model_config(parse_model_id("openai/gpt-4o"), backend="http_responses")
+        except ValueError as exc:
+            assert "http_responses" in str(exc)
+        else:
+            raise AssertionError("Expected ValueError")
 
     def test_plain_http_model_selects_http_backend(self):
         cfg = _get_model_config(parse_model_id("openai/gpt-4o"))

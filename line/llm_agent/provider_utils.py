@@ -1,13 +1,14 @@
 """
-Shared stream utilities for WebSocket-based providers.
+Shared utilities for the Responses-API-based providers.
 
 Contains:
 
 - ``_ws_connect`` / ``_ws_is_closed`` — WebSocket connection helpers
 - ``_WsEventStream`` — unified event→chunk translator for Realtime and Responses APIs
 - ``_AsyncIterableContext`` — async context manager + async iterable wrapper
-- ``_setup_ws_chat`` / ``_ws_warmup`` — shared provider patterns (free functions)
-- Divergence/identity utilities used by both providers
+- ``_build_responses_body`` / ``_plan_responses_chat`` — transport-agnostic
+  Responses-API request building and history planning
+- Divergence/identity utilities used by both WebSocket and HTTPS Responses providers
 """
 
 import asyncio
@@ -19,7 +20,16 @@ import websockets
 from websockets.legacy.client import WebSocketClientProtocol
 from websockets.protocol import State as WsState
 
-from line.llm_agent.provider import Message, StreamChunk, ToolCall
+from line.llm_agent.config import LlmConfig
+from line.llm_agent.provider import (
+    Message,
+    ParsedModelId,
+    StreamChunk,
+    ToolCall,
+    _extract_instructions_and_messages,
+)
+from line.llm_agent.schema_converter import build_openai_tool_defs
+from line.llm_agent.tools.utils import FunctionTool
 
 ExpandedItem = Tuple[Dict[str, Any], tuple]
 ConversationEntry = Tuple[tuple, Optional[str]]  # (identity, opaque_id | None)
@@ -123,6 +133,159 @@ def _expand_messages(
     for msg in messages:
         pairs.extend(_expand_message(msg, assistant_text_type=assistant_text_type))
     return pairs
+
+
+def _build_responses_body(
+    *,
+    model_id: ParsedModelId,
+    default_reasoning_effort: Optional[str],
+    instructions: Optional[str],
+    tool_defs: Optional[List[Dict[str, Any]]],
+    cfg: LlmConfig,
+    input: Optional[List[Dict[str, Any]]] = None,
+    previous_response_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Build the transport-agnostic Responses-API request body.
+
+    Used by both the WebSocket provider (which wraps this in a
+    ``{"type": "response.create", ...}`` envelope) and the HTTPS provider
+    (which spreads it as ``litellm.aresponses(**body)`` kwargs).
+    """
+    body: Dict[str, Any] = {
+        "model": model_id.model,
+        "store": True,
+    }
+    if input is not None:
+        body["input"] = input
+    if previous_response_id is not None:
+        body["previous_response_id"] = previous_response_id
+    if instructions is not None:
+        body["instructions"] = instructions
+    if tool_defs is not None:
+        body["tools"] = tool_defs
+    reasoning_effort = cfg.reasoning_effort or default_reasoning_effort
+    if reasoning_effort is not None:
+        body["reasoning"] = {"effort": reasoning_effort}
+    if cfg.temperature is not None:
+        body["temperature"] = cfg.temperature
+    if cfg.max_tokens is not None:
+        body["max_output_tokens"] = cfg.max_tokens
+    if cfg.top_p is not None:
+        body["top_p"] = cfg.top_p
+    return body
+
+
+def _plan_responses_chat(
+    *,
+    history: List[ConversationEntry],
+    model_id: ParsedModelId,
+    default_reasoning_effort: Optional[str],
+    messages: List[Message],
+    tools: Optional[List[FunctionTool]],
+    config: LlmConfig,
+    web_search_options: Optional[Dict[str, Any]] = None,
+) -> Tuple[Dict[str, Any], HistoryUpdate]:
+    """Compute the Responses-API request body and the history-update callback.
+
+    Returns ``(body, update_fn)`` where ``body`` is a transport-agnostic
+    request body (no ``"type"`` envelope — that's WS-specific) and
+    ``update_fn(history, response) -> new_history`` rewrites the
+    provider's history once the server emits a completed response.
+
+    Shared by ``_WebSocketProvider`` (which wraps ``body`` with
+    ``"type": "response.create"``) and ``_HttpResponsesProvider`` (which
+    spreads ``body`` as ``litellm.aresponses(**body)`` kwargs).
+    """
+    instructions, non_system = _extract_instructions_and_messages(messages, config)
+    tool_defs = build_openai_tool_defs(
+        tools,
+        web_search_options=web_search_options,
+        strict=config.strict_tool_schemas,
+        responses_api=True,
+    )
+
+    context_id = _context_identity(
+        instructions,
+        tool_defs,
+        temperature=config.temperature,
+        max_tokens=config.max_tokens,
+    )
+    desired_pairs = _expand_messages(non_system, assistant_text_type="output_text")
+    desired_ids = [context_id] + [identity for _, identity in desired_pairs]
+
+    if history and history[0][0] == context_id:
+        current_identities = [identity for identity, _ in history[1:]]
+        shared_item_count, _ = _compute_divergence(current_identities, desired_pairs)
+        prefix_len = 1 + shared_item_count
+    else:
+        prefix_len = 0
+
+    # Scan backwards for the latest response_id checkpoint.
+    continuation_idx = 0
+    continuation_resp_id: Optional[str] = None
+    for i in range(min(prefix_len, len(history)) - 1, -1, -1):
+        if history[i][1] is not None:
+            continuation_idx = i + 1
+            continuation_resp_id = history[i][1]
+            break
+
+    if prefix_len < len(history):
+        logger.debug(
+            "Responses conversation diverged at index %d/%d, rolling back to checkpoint at %d",
+            prefix_len,
+            len(history),
+            continuation_idx,
+        )
+
+    input_pairs = desired_pairs[max(0, continuation_idx - 1) :]
+    body = _build_responses_body(
+        model_id=model_id,
+        default_reasoning_effort=default_reasoning_effort,
+        instructions=instructions,
+        tool_defs=tool_defs,
+        cfg=config,
+        input=[item for item, _ in input_pairs],
+        previous_response_id=continuation_resp_id,
+    )
+
+    def update(old_history: List[ConversationEntry], response: Dict[str, Any]) -> List[ConversationEntry]:
+        response_id = response.get("id")
+        model_ids = _extract_model_output_identities(response)
+        new_history = list(old_history[:continuation_idx])
+        for ident in desired_ids[continuation_idx:]:
+            new_history.append((ident, None))
+        for ident in model_ids:
+            new_history.append((ident, response_id))
+        return new_history
+
+    return body, update
+
+
+def _extract_model_output_identities(response: Dict[str, Any]) -> List[tuple]:
+    """Derive ordered message identities from a Responses API output.
+
+    Shared by the WebSocket and HTTPS Responses providers — both use the
+    same identity-based history bookkeeping.
+    """
+    output_items = response.get("output", [])
+    identities: List[tuple] = []
+    for item in output_items:
+        if item.get("type") == "function_call":
+            identities.append(
+                (
+                    "assistant_tool_call",
+                    ((item.get("name", ""), item.get("arguments", ""), item.get("call_id", "")),),
+                )
+            )
+        elif item.get("type") == "message":
+            text_parts: List[str] = []
+            for part in item.get("content", []):
+                if part.get("type") in {"output_text", "text"}:
+                    text_parts.append(part.get("text", ""))
+            if text_parts:
+                identities.append(("assistant", "".join(text_parts), "", ""))
+
+    return identities
 
 
 def _compute_divergence(

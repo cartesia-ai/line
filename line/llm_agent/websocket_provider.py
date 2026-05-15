@@ -27,20 +27,20 @@ from loguru import logger
 from websockets.legacy.client import WebSocketClientProtocol
 
 from line.llm_agent.config import LlmConfig
-from line.llm_agent.provider import Message, ParsedModelId, _extract_instructions_and_messages
-from line.llm_agent.schema_converter import build_openai_tool_defs
-from line.llm_agent.stream import (
+from line.llm_agent.provider import Message, ParsedModelId
+from line.llm_agent.provider_utils import (
     ConversationEntry,
     HistoryUpdate,
     _AsyncIterableContext,
+    _build_responses_body,
     _cancel_and_drain,
-    _compute_divergence,
     _context_identity,
-    _expand_messages,
+    _plan_responses_chat,
     _ws_connect,
     _ws_is_closed,
     _WsEventStream,
 )
+from line.llm_agent.schema_converter import build_openai_tool_defs
 from line.llm_agent.tools.utils import FunctionTool
 
 WS_URL = "wss://api.openai.com/v1/responses"
@@ -250,73 +250,21 @@ def _plan_chat(
     config: LlmConfig,
     web_search_options: Optional[Dict[str, Any]] = None,
 ) -> Tuple[Dict[str, Any], HistoryUpdate]:
-    """Compute the request to send and the history update callback.
+    """Compute the WS request to send and the history-update callback.
 
-    Returns ``(request_dict, update_fn)`` where
-    ``update_fn(history, response) -> new_history``.
+    Wraps the shared :func:`_plan_responses_chat` planner with the
+    WS-protocol ``"type": "response.create"`` envelope.
     """
-    instructions, non_system = _extract_instructions_and_messages(messages, config)
-    tool_defs = build_openai_tool_defs(
-        tools,
-        web_search_options=web_search_options,
-        strict=config.strict_tool_schemas,
-        responses_api=True,
-    )
-
-    context_id = _context_identity(
-        instructions,
-        tool_defs,
-        temperature=config.temperature,
-        max_tokens=config.max_tokens,
-    )
-    desired_pairs = _expand_messages(non_system, assistant_text_type="output_text")
-    desired_ids = [context_id] + [identity for _, identity in desired_pairs]
-
-    if history and history[0][0] == context_id:
-        current_identities = [identity for identity, _ in history[1:]]
-        shared_item_count, _ = _compute_divergence(current_identities, desired_pairs)
-        prefix_len = 1 + shared_item_count
-    else:
-        prefix_len = 0
-
-    # Scan backwards for the latest response_id checkpoint.
-    continuation_idx = 0
-    continuation_resp_id: Optional[str] = None
-    for i in range(min(prefix_len, len(history)) - 1, -1, -1):
-        if history[i][1] is not None:
-            continuation_idx = i + 1
-            continuation_resp_id = history[i][1]
-            break
-
-    if prefix_len < len(history):
-        logger.debug(
-            "WebSocket conversation diverged at index %d/%d, rolling back to checkpoint at %d",
-            prefix_len,
-            len(history),
-            continuation_idx,
-        )
-
-    input_pairs = desired_pairs[max(0, continuation_idx - 1) :]
-    request = _build_request(
+    body, update = _plan_responses_chat(
+        history=history,
         model_id=model_id,
         default_reasoning_effort=default_reasoning_effort,
-        instructions=instructions,
-        tool_defs=tool_defs,
-        cfg=config,
-        input=[item for item, _ in input_pairs],
-        previous_response_id=continuation_resp_id,
+        messages=messages,
+        tools=tools,
+        config=config,
+        web_search_options=web_search_options,
     )
-
-    def update(old_history: List[ConversationEntry], response: Dict[str, Any]) -> List[ConversationEntry]:
-        response_id = response.get("id")
-        model_ids = _extract_model_output_identities(response)
-        new_history = list(old_history[:continuation_idx])
-        for ident in desired_ids[continuation_idx:]:
-            new_history.append((ident, None))
-        for ident in model_ids:
-            new_history.append((ident, response_id))
-        return new_history
-
+    request = {"type": "response.create", **body}
     return request, update
 
 
@@ -331,52 +279,21 @@ def _build_request(
     previous_response_id: Optional[str] = None,
     generate: Optional[bool] = None,
 ) -> Dict[str, Any]:
-    """Build a ``response.create`` request dict."""
-    request: Dict[str, Any] = {
-        "type": "response.create",
-        "model": model_id.model,
-        "store": True,
-    }
-    if input is not None:
-        request["input"] = input
-    if previous_response_id is not None:
-        request["previous_response_id"] = previous_response_id
+    """Build a ``response.create`` WebSocket request dict.
+
+    Wraps the shared :func:`_build_responses_body` with the WS-protocol
+    ``type`` envelope and the WS-only ``generate`` flag.
+    """
+    body = _build_responses_body(
+        model_id=model_id,
+        default_reasoning_effort=default_reasoning_effort,
+        instructions=instructions,
+        tool_defs=tool_defs,
+        cfg=cfg,
+        input=input,
+        previous_response_id=previous_response_id,
+    )
+    request: Dict[str, Any] = {"type": "response.create", **body}
     if generate is not None:
         request["generate"] = generate
-    if instructions is not None:
-        request["instructions"] = instructions
-    if tool_defs is not None:
-        request["tools"] = tool_defs
-    reasoning_effort = cfg.reasoning_effort or default_reasoning_effort
-    if reasoning_effort is not None:
-        request["reasoning"] = {"effort": reasoning_effort}
-    if cfg.temperature is not None:
-        request["temperature"] = cfg.temperature
-    if cfg.max_tokens is not None:
-        request["max_output_tokens"] = cfg.max_tokens
-    if cfg.top_p is not None:
-        request["top_p"] = cfg.top_p
     return request
-
-
-def _extract_model_output_identities(response: Dict[str, Any]) -> List[tuple]:
-    """Derive ordered message identities from a Responses API output."""
-    output_items = response.get("output", [])
-    identities: List[tuple] = []
-    for item in output_items:
-        if item.get("type") == "function_call":
-            identities.append(
-                (
-                    "assistant_tool_call",
-                    ((item.get("name", ""), item.get("arguments", ""), item.get("call_id", "")),),
-                )
-            )
-        elif item.get("type") == "message":
-            text_parts: List[str] = []
-            for part in item.get("content", []):
-                if part.get("type") in {"output_text", "text"}:
-                    text_parts.append(part.get("text", ""))
-            if text_parts:
-                identities.append(("assistant", "".join(text_parts), "", ""))
-
-    return identities
