@@ -1,10 +1,44 @@
-# Line SDK - Basic Chat Example
+# Line SDK - Echo Example
 
 ## About This Example
 
-This is the simplest Line SDK agent - a basic conversational chatbot. Use it as a starting point for understanding the SDK before adding tools and complexity.
+This example demonstrates the **handoff tool pattern** - transferring control from an LLM agent to a custom function that handles subsequent user interactions. The echo tool takes over the conversation and echoes back everything the user says with a prefix.
 
 > Line is Cartesia's open-source SDK for building real-time voice AI agents that connect any LLM to Cartesia's low-latency text-to-speech, enabling natural conversational experiences over phone calls and other voice interfaces.
+
+## Handoff Tool Pattern
+
+Use `@handoff_tool` when you need to transfer control from the LLM to custom logic that handles subsequent user turns directly.
+
+**Key concepts:**
+
+- `@handoff_tool` decorator marks the function as a handoff
+- `event` parameter is **required** as the final parameter
+- `AgentHandedOff` event fires once at initial handoff (capture arguments here)
+- `UserTurnEnded` event fires on each subsequent user message
+- Yield `OutputEvent` objects (e.g., `AgentSendText`) to respond
+
+```python
+from line.events import AgentHandedOff, AgentSendText, UserTextSent, UserTurnEnded
+from line.llm_agent import ToolEnv, handoff_tool
+
+@handoff_tool
+async def echo(ctx: ToolEnv, prefix: Annotated[str, "A prefix to add before each echoed message"], event):
+    """Echo the user's message back to them with a prefix."""
+    if isinstance(event, AgentHandedOff):
+        yield AgentSendText(text=f"Echo mode activated! I'll prefix everything with '{prefix}'")
+        return
+
+    if isinstance(event, UserTurnEnded):
+        for item in event.content:
+            if isinstance(item, UserTextSent):
+                yield AgentSendText(text=f"{prefix}: {item.content}")
+```
+
+**Event handling pattern:**
+
+1. **`AgentHandedOff`**: Initial handoff - send acknowledgment, store arguments
+2. **`UserTurnEnded`**: Subsequent turns - process `event.content` for `UserTextSent` items
 
 ## LlmAgent Configuration
 
@@ -118,28 +152,6 @@ async def transfer(ctx: ToolEnv, reason: Annotated[str, "desc"], event):
 
 **ToolEnv:** `ctx.turn_env` provides turn context (TurnEnv instance).
 
-## Custom Interruption Behavior
-
-Default: Agent runs on `CallStarted`, `UserTurnEnded`, `CallEnded`; cancels on `UserTurnStarted`.
-
-**Custom filters via AgentSpec tuple:**
-
-```python
-from line import CallStarted, UserTurnEnded, UserTurnStarted
-
-def custom_run(event):
-    return isinstance(event, (CallStarted, UserTurnEnded))
-
-def custom_cancel(event):
-    return isinstance(event, UserTurnStarted)
-
-# Return tuple from get_agent:
-(agent, custom_run, custom_cancel)
-
-# Or use event type lists:
-(agent, [UserTurnEnded], [UserTurnStarted])
-```
-
 ## Built-in Tools
 
 ```python
@@ -172,6 +184,7 @@ agent = LlmAgent(
 | No `Annotated` descriptions | Add for all params. This is used to describe the parameters of the tool to the LLM. |
 | Slow model for main agent | Use fast model, offload to background |
 | Missing `event` in handoff | Required final param |
+| Not handling `AgentHandedOff` | Handle initial handoff event to acknowledge transfer |
 | Blocking nested agent call | Use `is_background=True` |
 | Forgetting conversation history | Pass `history` in `UserTextSent` |
 | Not cleaning up nested agents | Call cleanup on all agents in `_cleanup()` |
