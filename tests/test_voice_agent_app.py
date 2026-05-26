@@ -38,6 +38,8 @@ from line.events import (
 from line.voice_agent_app import (
     AgentEnv,
     ConversationRunner,
+    PreCallResult,
+    VoiceAgentApp,
     _call_request_from_start_data,
     _consume_expected_ack_back_prefix,
     _get_processed_history,
@@ -1368,3 +1370,62 @@ class TestCallRequestFromStartData:
         }
         result = _call_request_from_start_data(data)
         assert result.call_id == "call-123"
+
+
+class TestCreateChatSessionErrorAttribution:
+    """Tests for the /chats endpoint's 500-response attribution header."""
+
+    def _build_app(self, pre_call_handler) -> "VoiceAgentApp":
+        async def get_agent(env, request):  # pragma: no cover - not exercised here
+            raise NotImplementedError
+
+        return VoiceAgentApp(get_agent=get_agent, pre_call_handler=pre_call_handler)
+
+    def _chats_body(self) -> dict:
+        return {
+            "call_id": "call-1",
+            "from_": "+1555",
+            "to": "+1555",
+            "agent_call_id": "ac-1",
+            "agent": {},
+        }
+
+    def test_pre_call_handler_exception_sets_agent_code_header(self):
+        from fastapi.testclient import TestClient
+
+        async def boom(_request):
+            # Mirrors the canonical customer-code failure (e.g. a NameError
+            # from referencing an undefined symbol like PreCallResult).
+            raise NameError("PreCallResult is not defined")
+
+        client = TestClient(self._build_app(boom).fastapi_app)
+        response = client.post("/chats", json=self._chats_body())
+
+        assert response.status_code == 500
+        assert response.headers.get("X-Cartesia-Error-Source") == "agent-code"
+
+    def test_pre_call_handler_success_omits_header(self):
+        from fastapi.testclient import TestClient
+
+        async def ok(_request):
+            return PreCallResult(metadata={}, config={})
+
+        client = TestClient(self._build_app(ok).fastapi_app)
+        response = client.post("/chats", json=self._chats_body())
+
+        assert response.status_code == 200
+        assert "X-Cartesia-Error-Source" not in response.headers
+
+    def test_pre_call_handler_rejection_omits_header(self):
+        from fastapi.testclient import TestClient
+
+        async def reject(_request):
+            return None
+
+        client = TestClient(self._build_app(reject).fastapi_app)
+        response = client.post("/chats", json=self._chats_body())
+
+        # Explicit rejection is a 403 from the SDK itself, not a customer-code
+        # exception, so it should not carry the agent-code attribution.
+        assert response.status_code == 403
+        assert "X-Cartesia-Error-Source" not in response.headers
