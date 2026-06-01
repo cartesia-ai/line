@@ -16,10 +16,12 @@ from line.llm_agent.tools.system import (
     EndCallTool,
     KnowledgeBaseTool,
     TransferCallTool,
+    VoicemailTool,
     end_call,
     knowledge_base,
     send_dtmf,
     transfer_call,
+    voicemail,
 )
 from line.llm_agent.tools.utils import ToolType
 
@@ -350,13 +352,15 @@ async def test_end_call_default_description(mock_ctx, anyio_backend):
 
 
 async def test_end_call_yields_agent_end_call(mock_ctx, anyio_backend):
-    """Test that end_call yields AgentEndCall event."""
+    """end_call always reports a normal agent hangup (reason=agent_ended)."""
     func_tool = end_call.as_function_tool()
-    # LLM must provide a reason when calling end_call
+    # The LLM supplies a free-form reason, but end_call hardcodes agent_ended;
+    # voicemail_detected only comes from the voicemail tool.
     events = await collect_events(func_tool.func(mock_ctx, reason="user said goodbye"))
 
     assert len(events) == 1
     assert isinstance(events[0], AgentEndCall)
+    assert events[0].reason == "agent_ended"
 
 
 async def test_end_call_requires_reason_parameter(mock_ctx, anyio_backend):
@@ -580,3 +584,48 @@ async def test_normalize_tools_rejects_duplicate_names(anyio_backend):
             [knowledge_base, knowledge_base(filters={"x": "y"})],
             parse_model_id("openai/gpt-4o"),
         )
+
+
+# ============================================================
+# Tests: voicemail
+# ============================================================
+
+
+async def test_voicemail_with_message(mock_ctx, anyio_backend):
+    """voicemail(message=...) speaks the message (uninterruptible) then ends the call."""
+    tool = voicemail(message="Hi, please call us back.")
+    events = await collect_events(tool.as_function_tool().func(mock_ctx))
+
+    assert len(events) == 2
+    assert isinstance(events[0], AgentSendText)
+    assert events[0].text == "Hi, please call us back."
+    assert events[0].interruptible is False
+    assert isinstance(events[1], AgentEndCall)
+    assert events[1].reason == "voicemail_detected"
+    assert events[1].interruptible is False
+
+
+async def test_voicemail_no_message_silent_end(mock_ctx, anyio_backend):
+    """Bare voicemail silently ends the call with reason=voicemail_detected."""
+    events = await collect_events(voicemail.as_function_tool().func(mock_ctx))
+
+    assert len(events) == 1
+    assert isinstance(events[0], AgentEndCall)
+    assert events[0].reason == "voicemail_detected"
+
+
+async def test_voicemail_name_and_takes_no_llm_args(mock_ctx, anyio_backend):
+    """The tool is named 'voicemail' and exposes no LLM-facing parameters."""
+    func_tool = voicemail.as_function_tool()
+    assert voicemail.name == "voicemail"
+    assert func_tool.name == "voicemail"
+    assert func_tool.parameters == {}
+
+
+async def test_voicemail_custom_description(mock_ctx, anyio_backend):
+    """A custom description overrides the default; default carries detection cues."""
+    assert "voicemail" in VoicemailTool().description.lower()
+    tool = voicemail(description="Reached an answering machine — leave a message and hang up.")
+    assert (
+        tool.as_function_tool().description == "Reached an answering machine — leave a message and hang up."
+    )

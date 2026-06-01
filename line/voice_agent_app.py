@@ -199,8 +199,8 @@ class VoiceAgentApp:
             except Exception as e:
                 logger.error(f"Error in pre_call_handler: {str(e)}")
                 # Mark this as customer-code-originated so downstream services
-                # (e.g. Inferno) can attribute the failure correctly rather than
-                # treating it as a Cartesia/SDK error.
+                # can attribute the failure correctly rather than treating it as
+                # a Cartesia/SDK error.
                 raise HTTPException(
                     status_code=500,
                     detail="Server error in call processing",
@@ -672,8 +672,12 @@ class ConversationRunner:
             logger.info(f"<- 🤖🔔 Agent DTMF sent: {event.button}")
             return DTMFOutput(button=event.button, responding_to=event.responding_to)
         if isinstance(event, AgentEndCall):
-            logger.info(f"<- 📞 End call (interruptible={event.interruptible})")
-            return EndCallOutput(responding_to=event.responding_to, interruptible=event.interruptible)
+            logger.info(f"<- 📞 End call (reason={event.reason}, interruptible={event.interruptible})")
+            return EndCallOutput(
+                reason=event.reason,
+                responding_to=event.responding_to,
+                interruptible=event.interruptible,
+            )
         if isinstance(event, AgentTransferCall):
             logger.info(
                 f"<- 📱 Transfer to: {event.target_phone_number} (interruptible={event.interruptible})"

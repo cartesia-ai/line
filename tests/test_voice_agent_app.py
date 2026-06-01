@@ -1165,6 +1165,18 @@ class TestEndCallAndTransferCallMapping:
         assert isinstance(result, EndCallOutput)
         assert result.interruptible is True
 
+    def test_end_call_reason_forwarded(self):
+        """AgentEndCall(reason=...) forwards the reason to EndCallOutput."""
+        result = self._map(AgentEndCall(reason="voicemail_detected"))
+        assert isinstance(result, EndCallOutput)
+        assert result.reason == "voicemail_detected"
+
+    def test_end_call_reason_defaults_to_agent_ended(self):
+        """AgentEndCall() defaults the reason to agent_ended."""
+        result = self._map(AgentEndCall())
+        assert isinstance(result, EndCallOutput)
+        assert result.reason == "agent_ended"
+
     def test_transfer_call_interruptible_false(self):
         """AgentTransferCall(interruptible=False) maps to TransferOutput(interruptible=False)."""
         result = self._map(AgentTransferCall(target_phone_number="+14155551234", interruptible=False))
