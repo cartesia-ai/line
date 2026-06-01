@@ -9,7 +9,7 @@ from typing import Any, Dict, Literal, Optional, Union
 from pydantic import BaseModel, ConfigDict, Field
 
 ########################################################
-#  Copied and adapted from Bifrost agent_types.py
+#  Wire message types for the Cartesia voice-agent websocket protocol.
 ########################################################
 
 # Input messages to be sent over the websocket to the user code
@@ -108,6 +108,9 @@ class TransferOutput(BaseModel):
 
 class EndCallOutput(BaseModel):
     type: Literal["end_call"] = "end_call"
+    # Free-form on the wire so the harness never rejects an unknown reason from a
+    # newer SDK; the canonical vocabulary is line.events.EndCallReason.
+    reason: Optional[str] = None
     responding_to: Optional[str] = None
     interruptible: bool = True
 

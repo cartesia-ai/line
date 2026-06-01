@@ -216,7 +216,9 @@ is possible."""
             ctx: ToolEnv,
             reason: Annotated[str, "The reason for ending the call"],
         ):
-            yield AgentEndCall(interruptible=self.interruptible)
+            # end_call always reports a normal agent hangup; the voicemail tool is
+            # the only path to reason="voicemail_detected".
+            yield AgentEndCall(reason="agent_ended", interruptible=self.interruptible)
 
         return construct_function_tool(
             _end_call_impl,
@@ -327,6 +329,94 @@ class TransferCallTool:
 #   transfer_call                                              # Use default behavior
 #   transfer_call(interruptible=False)                          # Disable interruptibility
 transfer_call = TransferCallTool()
+
+
+class VoicemailTool:
+    """
+    voicemail tool: the LLM calls this when it detects it has reached a voicemail /
+    answering machine. An optional fixed message and interruptibility are set at
+    construction (``VoicemailTool(...)`` / ``voicemail(...)``), not by the LLM.
+
+    The detection cues live in the tool's description (below), so the agent's system
+    prompt doesn't need to carry voicemail-handling instructions. When invoked the tool
+    speaks the configured message (if any) and then ends the call with
+    ``reason="voicemail_detected"``, which the Cartesia API records as the call's
+    ``end_reason``.
+
+    Behavior modes (all from this one tool):
+      - voicemail(message="...")  -> speak the message (uninterruptible), then end.
+      - voicemail                 -> silently end the call (no message).
+      - dynamic message           -> let the LLM speak in its turn, then call voicemail() to end.
+    """
+
+    DEFAULT_DESCRIPTION = """End the call because you've reached a voicemail or answering machine.
+
+Use when the greeting is a machine, e.g.:
+- "please leave a message", "at the tone", "you've reached the voicemail of…"
+- a beep, or a one-sided recorded greeting with no back-and-forth
+
+Do NOT use this if a real person is talking with you. You may leave a brief message
+first; this tool ends the call."""
+
+    def __init__(
+        self,
+        message: Optional[str] = None,
+        interruptible: bool = False,
+        description: Optional[str] = None,
+    ):
+        # interruptible defaults to False: on a voicemail there's no human to interrupt
+        # and we want the message left in full.
+        self.message = message
+        self.interruptible = interruptible
+        self.description = description if description else self.DEFAULT_DESCRIPTION
+        self._function_tool = self._create_function_tool()
+
+    @property
+    def name(self) -> str:
+        """Return the tool name."""
+        return "voicemail"
+
+    def _create_function_tool(self) -> FunctionTool:
+        """Create the underlying FunctionTool with the configured message and interruptibility."""
+
+        async def _voicemail_impl(ctx: ToolEnv):
+            # Keep "voicemail_detected" in sync with EndCallReason in line/events.py.
+            if self.message:
+                yield AgentSendText(text=self.message, interruptible=self.interruptible)
+            yield AgentEndCall(reason="voicemail_detected", interruptible=self.interruptible)
+
+        return construct_function_tool(
+            _voicemail_impl,
+            name="voicemail",
+            description=self.description,
+            tool_type=ToolType.GENERAL,
+        )
+
+    def as_function_tool(self) -> FunctionTool:
+        """Return the underlying FunctionTool for use in tool resolution."""
+        return self._function_tool
+
+    def __call__(
+        self,
+        message: Optional[str] = None,
+        interruptible: bool = False,
+        description: Optional[str] = None,
+    ) -> "VoicemailTool":
+        """Create a configured VoicemailTool instance.
+
+        Args:
+            message: Optional message spoken (uninterruptible by default) before the call ends.
+            interruptible: Whether the message/end are interruptible.
+            description: Override the default LLM-facing description (when to invoke).
+        """
+        return VoicemailTool(message=message, interruptible=interruptible, description=description)
+
+
+# Default instance - can be used directly or called to configure
+# Examples:
+#   voicemail                                          # Silently end on voicemail
+#   voicemail(message="Hi, please call us back…")      # Leave a message, then end
+voicemail = VoicemailTool()
 
 
 @dataclass
@@ -963,6 +1053,7 @@ __all__ = [
     "DtmfButton",
     "EndCallTool",
     "TransferCallTool",
+    "VoicemailTool",
     "UpdateCallConfig",
     "WebSearchTool",
     "web_search",
@@ -970,6 +1061,7 @@ __all__ = [
     "end_call",
     "send_dtmf",
     "transfer_call",
+    "voicemail",
     "agent_as_handoff",
     "http_server_tool",
 ]

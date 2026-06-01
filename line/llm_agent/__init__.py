@@ -32,6 +32,7 @@ from line.llm_agent.tools.system import (
     mcp_tool,
     send_dtmf,
     transfer_call,
+    voicemail,
     web_search,
 )
 
@@ -67,6 +68,7 @@ __all__ = [
     "end_call",
     "send_dtmf",
     "transfer_call",
+    "voicemail",
     "web_search",
     "agent_as_handoff",
     "mcp_tool",
