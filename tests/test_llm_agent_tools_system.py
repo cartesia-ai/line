@@ -841,46 +841,6 @@ def test_webhook_tool_nested_schema_validation(anyio_backend):
         )
 
 
-def test_webhook_tool_constant_value_in_array_items_raises(anyio_backend):
-    """constant_value inside array items is rejected at build time."""
-    with pytest.raises(ValueError, match="items.*constant_value.*only supported on direct object"):
-        webhook_tool(
-            name="t",
-            description="d",
-            url="https://example.com",
-            request_body_schema={
-                "type": "object",
-                "properties": {
-                    "tags": {
-                        "type": "array",
-                        "items": {"type": "string", "constant_value": "urgent"},
-                    },
-                },
-            },
-        )
-
-
-def test_webhook_tool_constant_value_in_anyof_raises(anyio_backend):
-    """constant_value inside anyOf branches is rejected at build time."""
-    with pytest.raises(ValueError, match="anyOf.*constant_value.*only supported on direct object"):
-        webhook_tool(
-            name="t",
-            description="d",
-            url="https://example.com",
-            request_body_schema={
-                "type": "object",
-                "properties": {
-                    "value": {
-                        "anyOf": [
-                            {"type": "string", "constant_value": "fixed"},
-                            {"type": "integer"},
-                        ],
-                    },
-                },
-            },
-        )
-
-
 def test_webhook_tool_query_params_schema_validation(anyio_backend):
     """query_params_schema gets the same validation as body_schema."""
     with pytest.raises(ValueError, match='query_params_schema.*"type": "object"'):

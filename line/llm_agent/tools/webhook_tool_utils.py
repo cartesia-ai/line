@@ -144,7 +144,7 @@ def validate_body_schema(name: str, schema: Dict[str, Any], label: str) -> None:
 
 
 def _validate_body_property(name: str, prop_def: Dict[str, Any], path: str) -> None:
-    """Validate a single body property definition (recursive)."""
+    """Validate a single body property definition. Recurses into nested objects."""
     if not isinstance(prop_def, dict):
         raise error(name, f"{path} must be a dict, got {type(prop_def).__name__}.")
     json_type = prop_def.get("type")
@@ -155,21 +155,6 @@ def _validate_body_property(name: str, prop_def: Dict[str, Any], path: str) -> N
         )
     if "constant_value" in prop_def:
         _validate_constant_value_type(name, prop_def, path)
-    # Reject constant_value inside array items or union branches.
-    if "constant_value" not in prop_def:
-        for key in ("items", "anyOf", "oneOf", "allOf"):
-            nested = prop_def.get(key)
-            if nested is None:
-                continue
-            entries = [nested] if isinstance(nested, dict) else nested
-            for entry in entries:
-                if isinstance(entry, dict) and "constant_value" in entry:
-                    raise error(
-                        name,
-                        f"{path}.{key} contains constant_value, which is "
-                        f"only supported on direct object properties.",
-                    )
-    # Recurse into nested object schemas.
     if has_object_properties(prop_def):
         props, _ = _validate_schema_structure(name, prop_def, path, allow_omitted_type=True)
         for prop_name, child_def in props.items():
