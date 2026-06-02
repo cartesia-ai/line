@@ -4,6 +4,8 @@ Built-in system tools for LLM agents.
 Provides end_call, send_dtmf, transfer_call, and web_search tools.
 """
 
+import os
+import re
 from dataclasses import dataclass, field
 import logging
 from typing import Annotated, Any, Dict, Literal, Optional
@@ -723,6 +725,394 @@ def agent_as_handoff(
     )
 
 
+def webhook_tool(
+    name: str,
+    description: str,
+    url: str,
+    method: str = "POST",
+    body_schema: Optional[Dict[str, Any]] = None,
+    query_params_schema: Optional[Dict[str, Any]] = None,
+    auth: Optional[Dict[str, str]] = None,
+    headers: Optional[Dict[str, str]] = None,
+    timeout: Optional[float] = None,
+    is_background: bool = True,
+) -> FunctionTool:
+    """Create an HTTP webhook tool that the LLM can call.
+
+    The LLM only sees parameters that do not carry a ``constant_value`` key in the
+    schema. Constants are baked into the request body automatically.
+
+    Args:
+        name: Tool name shown to the LLM.
+        description: Tool description shown to the LLM.
+        url: Request URL.  Supports ``{param}`` templating — each template
+            variable becomes an LLM-visible parameter.
+        method: HTTP method (GET, POST, PUT, PATCH, DELETE, …).
+        body_schema: JSON-schema object describing the request body.
+            Properties with a ``constant_value`` key are hidden from the LLM
+            and baked into every request.
+        query_params_schema: JSON-schema object describing query parameters.
+            All properties are LLM-visible.
+        auth: Header dict with ``${ENV_VAR}`` placeholders resolved from
+            ``os.environ`` at build time (when ``webhook_tool()`` is called).
+        headers: Additional static headers merged with resolved *auth* headers.
+        timeout: Request timeout in seconds (passed to aiohttp).
+        is_background: If True (default) the tool runs as a background
+            loopback tool.
+
+    Returns:
+        A FunctionTool that can be passed to LlmAgent's tools list.
+
+    Example::
+
+        create_ticket = webhook_tool(
+            name="create_ticket",
+            description="Creates a support ticket.",
+            url="https://example.cartesia.ai/api/tickets",
+            method="POST",
+            body_schema={
+                "type": "object",
+                "required": ["subject"],
+                "properties": {
+                    "subject": {
+                        "type": "string",
+                        "description": "Short summary of the issue.",
+                    },
+                    "source": {
+                        "type": "string",
+                        "constant_value": "voice_agent",
+                    },
+                },
+            },
+            auth={"Authorization": "Bearer ${SUPPORT_API_KEY}"},
+        )
+    """
+    from line.llm_agent.tools.utils import ParameterInfo
+
+    _VALID_METHODS = {"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"}
+    # Maps JSON schema types to (python_type_for_params, allowed_constant_types).
+    _TYPE_MAP: Dict[str, tuple] = {
+        "string": (str, str),
+        "integer": (int, int),
+        "number": (float, (int, float)),
+        "boolean": (bool, bool),
+        "array": (list, list),
+        "object": (str, dict),  # param falls back to str; constant must be dict
+    }
+
+    def _err(msg: str) -> ValueError:
+        return ValueError(f"webhook_tool(name={name!r}): {msg}")
+
+    # -- 0. Validate inputs -----------------------------------------------------
+    if not name or not name.strip():
+        raise ValueError("webhook_tool: name must be a non-empty string.")
+    if not description or not description.strip():
+        raise _err("description must be a non-empty string.")
+    if not url or not url.strip():
+        raise _err("url must be a non-empty string.")
+    if method.upper() not in _VALID_METHODS:
+        raise _err(
+            f"method={method!r} is not a valid HTTP method. "
+            f"Expected one of: {', '.join(sorted(_VALID_METHODS))}."
+        )
+
+    # Validate URL template braces are balanced
+    _brace_depth = 0
+    for ch in url:
+        if ch == "{":
+            _brace_depth += 1
+            if _brace_depth > 1:
+                raise _err(f"url has nested braces, which is not supported: {url!r}")
+        elif ch == "}":
+            _brace_depth -= 1
+            if _brace_depth < 0:
+                raise _err(f"url has unmatched closing brace: {url!r}")
+    if _brace_depth != 0:
+        raise _err(f"url has unmatched opening brace: {url!r}")
+
+    def _validate_schema(schema: Dict[str, Any], label: str) -> None:
+        """Validate a body_schema or query_params_schema dict."""
+        if not isinstance(schema, dict):
+            raise _err(f"{label} must be a dict, got {type(schema).__name__}.")
+        schema_type = schema.get("type")
+        if schema_type != "object":
+            raise _err(
+                f"{label} must have \"type\": \"object\", "
+                f"got \"type\": {schema_type!r}."
+            )
+        props = schema.get("properties")
+        if props is None:
+            raise _err(f"{label} must have a \"properties\" key.")
+        if not isinstance(props, dict):
+            raise _err(
+                f"{label}[\"properties\"] must be a dict, "
+                f"got {type(props).__name__}."
+            )
+        required = schema.get("required", [])
+        if not isinstance(required, list):
+            raise _err(
+                f"{label}[\"required\"] must be a list, "
+                f"got {type(required).__name__}."
+            )
+        # All required fields must exist in properties (accounting for constants)
+        all_prop_names = set(props.keys())
+        unknown_required = set(required) - all_prop_names
+        if unknown_required:
+            raise _err(
+                f"{label}[\"required\"] lists fields not in properties: "
+                f"{unknown_required}."
+            )
+        # Validate each property
+        for prop_name, prop_def in props.items():
+            _validate_property(prop_def, f"{label}.properties.{prop_name}")
+
+    def _validate_property(prop_def: Dict[str, Any], path: str) -> None:
+        """Validate a single property definition."""
+        if not isinstance(prop_def, dict):
+            raise _err(f"{path} must be a dict, got {type(prop_def).__name__}.")
+        json_type = prop_def.get("type")
+        if json_type is not None and json_type not in _TYPE_MAP:
+            raise _err(
+                f"{path} has unknown type {json_type!r}. "
+                f"Expected one of: {', '.join(sorted(_TYPE_MAP))}."
+            )
+        # Validate constant_value matches declared type
+        if "constant_value" in prop_def and json_type is not None:
+            cv = prop_def["constant_value"]
+            _, allowed = _TYPE_MAP[json_type]
+            if not isinstance(cv, allowed):
+                raise _err(
+                    f"{path} declares type={json_type!r} but "
+                    f"constant_value={cv!r} is {type(cv).__name__}."
+                )
+        # Recurse into nested objects
+        if prop_def.get("type") == "object" and "properties" in prop_def:
+            _validate_schema(prop_def, path)
+
+    if body_schema is not None:
+        _validate_schema(body_schema, "body_schema")
+    if query_params_schema is not None:
+        _validate_schema(query_params_schema, "query_params_schema")
+
+    if timeout is not None and timeout <= 0:
+        raise _err(f"timeout must be positive, got {timeout}.")
+
+    # -- 1. Resolve auth headers ------------------------------------------------
+    resolved_headers: Dict[str, str] = {}
+
+    def _resolve_env(value: str) -> str:
+        def _replace(m: re.Match) -> str:
+            var = m.group(1)
+            try:
+                return os.environ[var]
+            except KeyError:
+                raise ValueError(
+                    f"webhook_tool(name={name!r}): environment variable "
+                    f"${{{var}}} required by auth is not set."
+                ) from None
+
+        return re.sub(r"\$\{(\w+)\}", _replace, value)
+
+    if auth:
+        for key, value in auth.items():
+            resolved_headers[key] = _resolve_env(value)
+    if headers:
+        collision = set(resolved_headers) & set(headers)
+        if collision:
+            raise ValueError(
+                f"webhook_tool(name={name!r}): header(s) {collision} appear in "
+                f"both auth and headers. Use one or the other for each key."
+            )
+        resolved_headers.update(headers)
+
+    # -- 2. Parse URL template variables ----------------------------------------
+    url_params: list[str] = re.findall(r"\{(\w+)\}", url)
+
+    # -- 3. Parse body_schema ---------------------------------------------------
+    #
+    # Recursively strip constant_value properties at any nesting depth.
+    # Returns (cleaned_properties, constants) where cleaned_properties is the
+    # schema with constant fields removed and constants is a
+    # nested dict of values to bake into the request body at call time.
+
+    def _strip_constants(
+        properties: Dict[str, Any], required: list[str]
+    ) -> tuple[Dict[str, Any], list[str], Dict[str, Any]]:
+        """Walk properties, returning (visible_props, visible_required, constants)."""
+        visible: Dict[str, Any] = {}
+        constants: Dict[str, Any] = {}
+        for prop_name, prop_def in properties.items():
+            if "constant_value" in prop_def:
+                constants[prop_name] = prop_def["constant_value"]
+            elif prop_def.get("type") == "object" and "properties" in prop_def:
+                # Recurse into nested objects.
+                nested_req = list(prop_def.get("required", []))
+                child_vis, child_req, child_const = _strip_constants(
+                    prop_def["properties"], nested_req
+                )
+                if child_const:
+                    constants[prop_name] = child_const
+                if child_vis:
+                    cleaned = dict(prop_def)
+                    cleaned["properties"] = child_vis
+                    if child_req:
+                        cleaned["required"] = child_req
+                    else:
+                        cleaned.pop("required", None)
+                    visible[prop_name] = cleaned
+                # If no visible children remain, the whole object is constant-only
+                # — don't add it to visible.
+            else:
+                visible[prop_name] = prop_def
+        visible_required = [r for r in required if r not in constants]
+        return visible, visible_required, constants
+
+    body_properties: Dict[str, Any] = {}
+    body_required: list[str] = []
+    constant_values: Dict[str, Any] = {}
+
+    if body_schema:
+        body_properties, body_required, constant_values = _strip_constants(
+            body_schema.get("properties", {}),
+            list(body_schema.get("required", [])),
+        )
+
+    # -- 4. Parse query_params_schema -------------------------------------------
+    query_properties: Dict[str, Any] = {}
+    query_required: list[str] = []
+
+    if query_params_schema:
+        query_required = list(query_params_schema.get("required", []))
+        for prop_name, prop_def in query_params_schema.get("properties", {}).items():
+            query_properties[prop_name] = prop_def
+
+    # -- 5. Build ParameterInfo for all LLM-visible params ----------------------
+    parameters: Dict[str, ParameterInfo] = {}
+
+    # URL template params — always required strings
+    for p in url_params:
+        parameters[p] = ParameterInfo(
+            name=p,
+            type_annotation=str,
+            description=f"URL path parameter '{p}'",
+            required=True,
+        )
+
+    def _param_info(prop_name: str, prop_def: Dict[str, Any], required_list: list[str]) -> ParameterInfo:
+        json_type = prop_def.get("type", "string")
+        py_type = _TYPE_MAP[json_type][0] if json_type in _TYPE_MAP else str
+        desc = prop_def.get("description", "")
+        enum = prop_def.get("enum")
+        return ParameterInfo(
+            name=prop_name,
+            type_annotation=py_type,
+            description=desc,
+            required=prop_name in required_list,
+            enum=enum,
+        )
+
+    for prop_name, prop_def in body_properties.items():
+        parameters[prop_name] = _param_info(prop_name, prop_def, body_required)
+
+    for prop_name, prop_def in query_properties.items():
+        parameters[prop_name] = _param_info(prop_name, prop_def, query_required)
+
+    # Validate no parameter name collisions across sources
+    _all_sources = [
+        ("url", set(url_params)),
+        ("body_schema", set(body_properties)),
+        ("query_params_schema", set(query_properties)),
+    ]
+    _seen_names: Dict[str, str] = {}
+    for source_label, names in _all_sources:
+        for n in names:
+            if n in _seen_names:
+                raise ValueError(
+                    f"webhook_tool(name={name!r}): parameter {n!r} appears in "
+                    f"both {_seen_names[n]} and {source_label}."
+                )
+            _seen_names[n] = source_label
+
+    # -- 6. Build the async implementation --------------------------------------
+    # Capture references for the closure.
+    _url_template = url
+    _method = method.upper()
+    _constant_values = constant_values
+    _body_prop_names = set(body_properties)
+    _query_prop_names = set(query_properties)
+    _url_param_names = set(url_params)
+    _resolved_headers = resolved_headers
+    _timeout = timeout
+
+    _MAX_RESPONSE_CHARS = 4096
+
+    def _deep_merge(base: Dict[str, Any], overlay: Dict[str, Any]) -> Dict[str, Any]:
+        """Merge *overlay* into *base*, recursing into nested dicts."""
+        merged = dict(base)
+        for k, v in overlay.items():
+            if k in merged and isinstance(merged[k], dict) and isinstance(v, dict):
+                merged[k] = _deep_merge(merged[k], v)
+            else:
+                merged[k] = v
+        return merged
+
+    async def _webhook_impl(ctx: ToolEnv, **kwargs: Any) -> str:
+        import asyncio
+
+        import aiohttp
+
+        # Route kwargs to the right destination.
+        final_url = _url_template
+        query_params: Dict[str, Any] = {}
+        body: Dict[str, Any] = {}
+
+        from urllib.parse import quote
+
+        for k, v in kwargs.items():
+            if k in _url_param_names:
+                final_url = final_url.replace(f"{{{k}}}", quote(str(v), safe=""))
+            elif k in _query_prop_names:
+                query_params[k] = v
+            elif k in _body_prop_names:
+                body[k] = v
+
+        # Deep-merge constants into body — constants win over LLM values.
+        if _constant_values:
+            body = _deep_merge(body, _constant_values)
+
+        req_kwargs: Dict[str, Any] = {
+            "method": _method,
+            "url": final_url,
+            "headers": _resolved_headers or None,
+        }
+        if body:
+            req_kwargs["json"] = body
+        if query_params:
+            req_kwargs["params"] = query_params
+        if _timeout is not None:
+            req_kwargs["timeout"] = aiohttp.ClientTimeout(total=_timeout)
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.request(**req_kwargs) as resp:
+                    text = await resp.text()
+                    if len(text) > _MAX_RESPONSE_CHARS:
+                        text = text[:_MAX_RESPONSE_CHARS] + "... (truncated)"
+                    return f"{resp.status} {text}"
+        except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+            return f"error: {type(exc).__name__}: {exc}"
+
+    # -- 7. Construct FunctionTool directly -------------------------------------
+    return FunctionTool(
+        name=name,
+        description=description,
+        func=_webhook_impl,
+        parameters=parameters,
+        tool_type=ToolType.GENERAL,
+        is_background=is_background,
+    )
+
+
 __all__ = [
     "DtmfButton",
     "EndCallTool",
@@ -735,4 +1125,5 @@ __all__ = [
     "send_dtmf",
     "transfer_call",
     "agent_as_handoff",
+    "webhook_tool",
 ]

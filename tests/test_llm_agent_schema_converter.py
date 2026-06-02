@@ -303,3 +303,133 @@ class TestFunctionToolWithTypedDict:
         # Verify additionalProperties is not set at top level
         params = schema["function"]["parameters"]
         assert "additionalProperties" not in params
+
+
+# =============================================================================
+# Tests: webhook_tool schema conversion
+# =============================================================================
+
+
+class TestWebhookToolSchema:
+    """Verify webhook_tool FunctionTool converts to valid provider schemas."""
+
+    @pytest.fixture
+    def ticket_tool(self, monkeypatch):
+        from line.llm_agent.tools.system import webhook_tool
+
+        monkeypatch.setenv("SUPPORT_API_KEY", "test-key")
+        return webhook_tool(
+            name="create_ticket",
+            description="Creates a support ticket.",
+            url="https://example.com/api/tickets",
+            method="POST",
+            body_schema={
+                "type": "object",
+                "required": ["subject"],
+                "properties": {
+                    "subject": {"type": "string", "description": "Short summary."},
+                    "source": {"type": "string", "constant_value": "voice_agent"},
+                },
+            },
+            auth={"Authorization": "Bearer ${SUPPORT_API_KEY}"},
+        )
+
+    @pytest.fixture
+    def multi_param_tool(self):
+        from line.llm_agent.tools.system import webhook_tool
+
+        return webhook_tool(
+            name="update_order",
+            description="Update an order.",
+            url="https://example.com/orders/{order_id}",
+            method="PATCH",
+            body_schema={
+                "type": "object",
+                "required": ["status"],
+                "properties": {
+                    "status": {"type": "string", "description": "New status."},
+                    "note": {"type": "string", "description": "Optional note."},
+                },
+            },
+            query_params_schema={
+                "type": "object",
+                "required": [],
+                "properties": {
+                    "notify": {"type": "boolean", "description": "Send notification."},
+                },
+            },
+        )
+
+    def test_litellm_format_structure(self, ticket_tool):
+        schema = function_tool_to_litellm(ticket_tool)
+        assert schema["type"] == "function"
+        fn = schema["function"]
+        assert fn["name"] == "create_ticket"
+        assert fn["description"] == "Creates a support ticket."
+        assert "parameters" in fn
+
+    def test_litellm_constant_value_excluded(self, ticket_tool):
+        schema = function_tool_to_litellm(ticket_tool)
+        props = schema["function"]["parameters"]["properties"]
+        assert "subject" in props
+        assert "source" not in props
+
+    def test_litellm_required_correct(self, ticket_tool):
+        schema = function_tool_to_litellm(ticket_tool)
+        params = schema["function"]["parameters"]
+        assert params["required"] == ["subject"]
+
+    def test_litellm_strict_all_required(self, ticket_tool):
+        schema = function_tool_to_litellm(ticket_tool, strict=True)
+        fn = schema["function"]
+        # All params are required → strict should be enabled
+        assert fn.get("strict") is True
+        assert fn["parameters"].get("additionalProperties") is False
+
+    def test_litellm_strict_disabled_with_optional(self, multi_param_tool):
+        schema = function_tool_to_litellm(multi_param_tool, strict=True)
+        fn = schema["function"]
+        # Has optional params (note, notify) → strict auto-disabled
+        assert fn.get("strict") is not True
+
+    def test_openai_responses_api_format(self, ticket_tool):
+        from line.llm_agent.schema_converter import function_tool_to_openai
+
+        schema = function_tool_to_openai(ticket_tool, responses_api=True)
+        # Responses API: type/name/description at top level
+        assert schema["type"] == "function"
+        assert schema["name"] == "create_ticket"
+        assert "parameters" in schema
+        assert "source" not in schema["parameters"]["properties"]
+
+    def test_openai_chat_completions_format(self, ticket_tool):
+        from line.llm_agent.schema_converter import function_tool_to_openai
+
+        schema = function_tool_to_openai(ticket_tool, responses_api=False)
+        # Chat Completions: nested under "function" key
+        assert schema["type"] == "function"
+        assert "function" in schema
+        assert schema["function"]["name"] == "create_ticket"
+        assert "source" not in schema["function"]["parameters"]["properties"]
+
+    def test_multi_source_params_all_present(self, multi_param_tool):
+        schema = function_tool_to_litellm(multi_param_tool)
+        props = schema["function"]["parameters"]["properties"]
+        # URL template, body, and query params all present
+        assert "order_id" in props
+        assert "status" in props
+        assert "note" in props
+        assert "notify" in props
+
+    def test_param_types_preserved(self, multi_param_tool):
+        schema = function_tool_to_litellm(multi_param_tool)
+        props = schema["function"]["parameters"]["properties"]
+        assert props["order_id"]["type"] == "string"
+        assert props["status"]["type"] == "string"
+        assert props["notify"]["type"] == "boolean"
+
+    def test_param_descriptions_preserved(self, multi_param_tool):
+        schema = function_tool_to_litellm(multi_param_tool)
+        props = schema["function"]["parameters"]["properties"]
+        assert props["status"]["description"] == "New status."
+        assert props["notify"]["description"] == "Send notification."
