@@ -907,6 +907,24 @@ def test_webhook_tool_query_param_rejects_non_scalar_types(anyio_backend, param_
         )
 
 
+def test_webhook_tool_query_param_rejects_object_without_explicit_type(anyio_backend):
+    """Object-shaped query params with omitted type are also rejected."""
+    with pytest.raises(ValueError, match="not supported in query_params_schema"):
+        webhook_tool(
+            name="t",
+            description="d",
+            url="https://example.com",
+            query_params_schema={
+                "type": "object",
+                "properties": {
+                    "filter": {
+                        "properties": {"status": {"type": "string"}},
+                    },
+                },
+            },
+        )
+
+
 def test_webhook_tool_negative_timeout_raises(anyio_backend):
     with pytest.raises(ValueError, match="timeout must be positive"):
         webhook_tool(name="t", description="d", url="https://example.com", timeout=-1.0)
@@ -1091,8 +1109,8 @@ def test_webhook_tool_query_params_schema(anyio_backend):
 
 
 def test_webhook_tool_query_schema_constant_in_anyof_rejected(anyio_backend):
-    """constant_value inside anyOf in query_params_schema is rejected at build time."""
-    with pytest.raises(ValueError, match="anyOf.*constant_value.*only supported"):
+    """anyOf in query_params_schema is rejected — query params must be scalar."""
+    with pytest.raises(ValueError, match="nested structure.*not supported in query_params_schema"):
         webhook_tool(
             name="t",
             description="d",

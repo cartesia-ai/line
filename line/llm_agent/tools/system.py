@@ -815,9 +815,9 @@ def webhook_tool(
     path_params = webhook_tool_utils.parse_path_params(name, url)
 
     if request_body_schema is not None:
-        webhook_tool_utils.validate_schema(name, request_body_schema, "request_body_schema")
+        webhook_tool_utils.validate_body_schema(name, request_body_schema, "request_body_schema")
     if query_params_schema is not None:
-        webhook_tool_utils.validate_schema(name, query_params_schema, "query_params_schema", is_query=True)
+        webhook_tool_utils.validate_query_schema(name, query_params_schema, "query_params_schema")
     if timeout is not None and timeout <= 0:
         raise _err(f"timeout must be positive, got {timeout}.")
 

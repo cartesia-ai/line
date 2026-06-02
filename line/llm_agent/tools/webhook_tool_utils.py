@@ -21,6 +21,8 @@ TYPE_MAP: Dict[str, tuple] = {
 
 VALID_METHODS = {"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"}
 
+_QUERY_SCALAR_TYPES = {"string", "integer", "number", "boolean"}
+
 
 def error(name: str, msg: str) -> ValueError:
     return ValueError(f"webhook_tool(name={name!r}): {msg}")
@@ -79,19 +81,14 @@ def parse_path_params(name: str, url: str) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# Schema validation
+# Schema validation — shared structure checks
 # ---------------------------------------------------------------------------
 
 
-def validate_schema(
-    name: str,
-    schema: Dict[str, Any],
-    label: str,
-    *,
-    allow_omitted_type: bool = False,
-    is_query: bool = False,
-) -> None:
-    """Validate a body_schema or query_params_schema dict."""
+def _validate_schema_structure(
+    name: str, schema: Dict[str, Any], label: str, *, allow_omitted_type: bool = False
+) -> tuple[Dict[str, Any], list[str]]:
+    """Validate top-level schema shape. Returns (properties, required)."""
     if not isinstance(schema, dict):
         raise error(name, f"{label} must be a dict, got {type(schema).__name__}.")
     schema_type = schema.get("type")
@@ -105,17 +102,47 @@ def validate_schema(
     required = schema.get("required", [])
     if not isinstance(required, list):
         raise error(name, f'{label}["required"] must be a list, got {type(required).__name__}.')
-    unknown_required = set(required) - set(props)
-    if unknown_required:
-        raise error(name, f'{label}["required"] lists fields not in properties: {unknown_required}.')
+    unknown = set(required) - set(props)
+    if unknown:
+        raise error(name, f'{label}["required"] lists fields not in properties: {unknown}.')
+    return props, required
+
+
+def _validate_constant_value_type(name: str, prop_def: Dict[str, Any], path: str) -> None:
+    """Check that constant_value matches the declared JSON schema type."""
+    json_type = prop_def.get("type")
+    cv = prop_def["constant_value"]
+    if json_type is None:
+        return
+    if json_type in ("integer", "number"):
+        valid = isinstance(cv, (int, float)) and not isinstance(cv, bool)
+        if json_type == "integer":
+            valid = type(cv) is int
+    else:
+        _, allowed = TYPE_MAP[json_type]
+        valid = isinstance(cv, allowed)
+    if not valid:
+        raise error(
+            name,
+            f"{path} declares type={json_type!r} but "
+            f"constant_value={cv!r} is {type(cv).__name__}.",
+        )
+
+
+# ---------------------------------------------------------------------------
+# Body schema validation — supports nesting, objects, arrays
+# ---------------------------------------------------------------------------
+
+
+def validate_body_schema(name: str, schema: Dict[str, Any], label: str) -> None:
+    """Validate a request_body_schema dict."""
+    props, _ = _validate_schema_structure(name, schema, label)
     for prop_name, prop_def in props.items():
-        _validate_property(name, prop_def, f"{label}.properties.{prop_name}", is_query=is_query)
+        _validate_body_property(name, prop_def, f"{label}.properties.{prop_name}")
 
 
-def _validate_property(
-    name: str, prop_def: Dict[str, Any], path: str, *, is_query: bool
-) -> None:
-    """Validate a single property definition."""
+def _validate_body_property(name: str, prop_def: Dict[str, Any], path: str) -> None:
+    """Validate a single body property definition (recursive)."""
     if not isinstance(prop_def, dict):
         raise error(name, f"{path} must be a dict, got {type(prop_def).__name__}.")
     json_type = prop_def.get("type")
@@ -125,40 +152,8 @@ def _validate_property(
             f"{path} has unknown type {json_type!r}. "
             f"Expected one of: {', '.join(sorted(TYPE_MAP))}.",
         )
-
-    # Query params must be scalars — objects and arrays can't be serialized
-    # to query strings.
-    if is_query and json_type in ("object", "array"):
-        raise error(
-            name,
-            f"{path} has type={json_type!r}, which is not supported in "
-            f"query_params_schema. Query parameters must be scalar "
-            f"(string, integer, number, or boolean).",
-        )
-
-    # Validate constant_value type. bool is a subclass of int in Python,
-    # but JSON schema treats them separately.
     if "constant_value" in prop_def:
-        cv = prop_def["constant_value"]
-        if is_query and (cv is None or isinstance(cv, (dict, list))):
-            raise error(
-                name, f"{path}.constant_value must be a scalar string, number, or boolean."
-            )
-        if json_type is not None:
-            if json_type in ("integer", "number"):
-                valid = isinstance(cv, (int, float)) and not isinstance(cv, bool)
-                if json_type == "integer":
-                    valid = type(cv) is int
-            else:
-                _, allowed = TYPE_MAP[json_type]
-                valid = isinstance(cv, allowed)
-            if not valid:
-                raise error(
-                    name,
-                    f"{path} declares type={json_type!r} but "
-                    f"constant_value={cv!r} is {type(cv).__name__}.",
-                )
-
+        _validate_constant_value_type(name, prop_def, path)
     # Reject constant_value inside array items or union branches.
     if "constant_value" not in prop_def:
         for key in ("items", "anyOf", "oneOf", "allOf"):
@@ -173,10 +168,48 @@ def _validate_property(
                         f"{path}.{key} contains constant_value, which is "
                         f"only supported on direct object properties.",
                     )
-
     # Recurse into nested object schemas.
     if has_object_properties(prop_def):
-        validate_schema(name, prop_def, path, allow_omitted_type=True, is_query=is_query)
+        props, _ = _validate_schema_structure(name, prop_def, path, allow_omitted_type=True)
+        for prop_name, child_def in props.items():
+            _validate_body_property(name, child_def, f"{path}.properties.{prop_name}")
+
+
+# ---------------------------------------------------------------------------
+# Query schema validation — flat scalars only
+# ---------------------------------------------------------------------------
+
+
+def validate_query_schema(name: str, schema: Dict[str, Any], label: str) -> None:
+    """Validate a query_params_schema dict. Properties must be scalar."""
+    props, _ = _validate_schema_structure(name, schema, label)
+    for prop_name, prop_def in props.items():
+        path = f"{label}.properties.{prop_name}"
+        if not isinstance(prop_def, dict):
+            raise error(name, f"{path} must be a dict, got {type(prop_def).__name__}.")
+        json_type = prop_def.get("type")
+        # Must be a scalar type (or omitted for constant_value-only fields).
+        if json_type is not None and json_type not in _QUERY_SCALAR_TYPES:
+            raise error(
+                name,
+                f"{path} has type={json_type!r}, which is not supported in "
+                f"query_params_schema. Query parameters must be scalar "
+                f"(string, integer, number, or boolean).",
+            )
+        # No nested or compound structures allowed.
+        if any(k in prop_def for k in ("properties", "items", "anyOf", "oneOf", "allOf")):
+            raise error(
+                name,
+                f"{path} contains nested structure, which is not supported in "
+                f"query_params_schema. Query parameters must be scalar.",
+            )
+        if "constant_value" in prop_def:
+            cv = prop_def["constant_value"]
+            if cv is None or isinstance(cv, (dict, list)):
+                raise error(
+                    name, f"{path}.constant_value must be a scalar string, number, or boolean."
+                )
+            _validate_constant_value_type(name, prop_def, path)
 
 
 # ---------------------------------------------------------------------------
