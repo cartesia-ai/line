@@ -841,6 +841,46 @@ def test_webhook_tool_nested_schema_validation(anyio_backend):
         )
 
 
+def test_webhook_tool_constant_value_in_array_items_raises(anyio_backend):
+    """constant_value inside array items is rejected at build time."""
+    with pytest.raises(ValueError, match="items.*constant_value.*only supported on direct object"):
+        webhook_tool(
+            name="t",
+            description="d",
+            url="https://example.com",
+            body_schema={
+                "type": "object",
+                "properties": {
+                    "tags": {
+                        "type": "array",
+                        "items": {"type": "string", "constant_value": "urgent"},
+                    },
+                },
+            },
+        )
+
+
+def test_webhook_tool_constant_value_in_anyof_raises(anyio_backend):
+    """constant_value inside anyOf branches is rejected at build time."""
+    with pytest.raises(ValueError, match="anyOf.*constant_value.*only supported on direct object"):
+        webhook_tool(
+            name="t",
+            description="d",
+            url="https://example.com",
+            body_schema={
+                "type": "object",
+                "properties": {
+                    "value": {
+                        "anyOf": [
+                            {"type": "string", "constant_value": "fixed"},
+                            {"type": "integer"},
+                        ],
+                    },
+                },
+            },
+        )
+
+
 def test_webhook_tool_query_params_schema_validation(anyio_backend):
     """query_params_schema gets the same validation as body_schema."""
     with pytest.raises(ValueError, match='query_params_schema.*"type": "object"'):
@@ -1035,36 +1075,27 @@ def test_webhook_tool_query_params_schema(anyio_backend):
     assert tool.parameters["q"].description == "Search query"
 
 
-def test_webhook_tool_query_schema_does_not_leak_constant_value(anyio_backend):
-    from line.llm_agent.schema_converter import function_tool_to_litellm
-
-    tool = webhook_tool(
-        name="t",
-        description="d",
-        url="https://example.com/search",
-        method="GET",
-        query_params_schema={
-            "type": "object",
-            "required": ["source", "mode"],
-            "properties": {
-                "source": {"type": "string", "constant_value": "voice_agent"},
-                "mode": {
-                    "anyOf": [
-                        {"type": "string", "constant_value": "standard"},
-                        {"type": "integer"},
-                    ],
+def test_webhook_tool_query_schema_constant_in_anyof_rejected(anyio_backend):
+    """constant_value inside anyOf in query_params_schema is rejected at build time."""
+    with pytest.raises(ValueError, match="anyOf.*constant_value.*only supported"):
+        webhook_tool(
+            name="t",
+            description="d",
+            url="https://example.com/search",
+            method="GET",
+            query_params_schema={
+                "type": "object",
+                "required": ["mode"],
+                "properties": {
+                    "mode": {
+                        "anyOf": [
+                            {"type": "string", "constant_value": "standard"},
+                            {"type": "integer"},
+                        ],
+                    },
                 },
             },
-        },
-    )
-
-    schema = function_tool_to_litellm(tool, strict=False)
-    properties = schema["function"]["parameters"]["properties"]
-    mode_schema = properties["mode"]
-    required = schema["function"]["parameters"]["required"]
-    assert "source" not in properties
-    assert required == ["mode"]
-    assert mode_schema == {"anyOf": [{"type": "string"}, {"type": "integer"}]}
+        )
 
 
 def test_webhook_tool_combined_params(anyio_backend):

@@ -916,6 +916,21 @@ def webhook_tool(
                 raise _err(
                     f"{path} declares type={json_type!r} but constant_value={cv!r} is {type(cv).__name__}."
                 )
+        # Reject constant_value inside array items or union branches — only
+        # direct object properties are supported (where _strip_constants can
+        # extract and inject the value at runtime).
+        if "constant_value" not in prop_def:
+            for key in ("items", "anyOf", "oneOf", "allOf"):
+                nested = prop_def.get(key)
+                if nested is None:
+                    continue
+                entries = [nested] if isinstance(nested, dict) else nested
+                for entry in entries:
+                    if isinstance(entry, dict) and "constant_value" in entry:
+                        raise _err(
+                            f"{path}.{key} contains constant_value, which is "
+                            f"only supported on direct object properties."
+                        )
         # Recurse into nested object schemas. JSON Schema allows "properties"
         # without an explicit "type", but webhook constants still need hiding.
         if _has_object_properties(prop_def):
