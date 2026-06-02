@@ -4,11 +4,11 @@ Built-in system tools for LLM agents.
 Provides end_call, send_dtmf, transfer_call, and web_search tools.
 """
 
+from dataclasses import dataclass, field
 import json
+import logging
 import os
 import re
-from dataclasses import dataclass, field
-import logging
 from typing import Annotated, Any, Dict, Literal, Optional
 
 from line.agent import Agent, call_agent
@@ -45,9 +45,7 @@ def _parse_webhook_url_params(name: str, url: str) -> list[str]:
         if ch == "{":
             brace_depth += 1
             if brace_depth > 1:
-                raise _webhook_tool_error(
-                    name, f"url has nested braces, which is not supported: {url!r}"
-                )
+                raise _webhook_tool_error(name, f"url has nested braces, which is not supported: {url!r}")
         elif ch == "}":
             brace_depth -= 1
             if brace_depth < 0:
@@ -870,40 +868,26 @@ def webhook_tool(
         )
     url_params = _parse_webhook_url_params(name, url)
 
-    def _validate_schema(
-        schema: Dict[str, Any], label: str, *, allow_omitted_type: bool = False
-    ) -> None:
+    def _validate_schema(schema: Dict[str, Any], label: str, *, allow_omitted_type: bool = False) -> None:
         """Validate a body_schema or query_params_schema dict."""
         if not isinstance(schema, dict):
             raise _err(f"{label} must be a dict, got {type(schema).__name__}.")
         schema_type = schema.get("type")
         if schema_type != "object" and not (allow_omitted_type and schema_type is None):
-            raise _err(
-                f"{label} must have \"type\": \"object\", "
-                f"got \"type\": {schema_type!r}."
-            )
+            raise _err(f'{label} must have "type": "object", got "type": {schema_type!r}.')
         props = schema.get("properties")
         if props is None:
-            raise _err(f"{label} must have a \"properties\" key.")
+            raise _err(f'{label} must have a "properties" key.')
         if not isinstance(props, dict):
-            raise _err(
-                f"{label}[\"properties\"] must be a dict, "
-                f"got {type(props).__name__}."
-            )
+            raise _err(f'{label}["properties"] must be a dict, got {type(props).__name__}.')
         required = schema.get("required", [])
         if not isinstance(required, list):
-            raise _err(
-                f"{label}[\"required\"] must be a list, "
-                f"got {type(required).__name__}."
-            )
+            raise _err(f'{label}["required"] must be a list, got {type(required).__name__}.')
         # All required fields must exist in properties (accounting for constants)
         all_prop_names = set(props.keys())
         unknown_required = set(required) - all_prop_names
         if unknown_required:
-            raise _err(
-                f"{label}[\"required\"] lists fields not in properties: "
-                f"{unknown_required}."
-            )
+            raise _err(f'{label}["required"] lists fields not in properties: {unknown_required}.')
         # Validate each property
         for prop_name, prop_def in props.items():
             _validate_property(prop_def, f"{label}.properties.{prop_name}")
@@ -915,8 +899,7 @@ def webhook_tool(
         json_type = prop_def.get("type")
         if json_type is not None and json_type not in _TYPE_MAP:
             raise _err(
-                f"{path} has unknown type {json_type!r}. "
-                f"Expected one of: {', '.join(sorted(_TYPE_MAP))}."
+                f"{path} has unknown type {json_type!r}. Expected one of: {', '.join(sorted(_TYPE_MAP))}."
             )
         # Validate constant_value matches declared type. bool is a subclass of
         # int in Python, but JSON schema treats booleans and numbers separately.
@@ -931,8 +914,7 @@ def webhook_tool(
                 valid_constant = isinstance(cv, allowed)
             if not valid_constant:
                 raise _err(
-                    f"{path} declares type={json_type!r} but "
-                    f"constant_value={cv!r} is {type(cv).__name__}."
+                    f"{path} declares type={json_type!r} but constant_value={cv!r} is {type(cv).__name__}."
                 )
         # Recurse into nested object schemas. JSON Schema allows "properties"
         # without an explicit "type", but webhook constants still need hiding.
@@ -994,9 +976,7 @@ def webhook_tool(
             elif _has_object_properties(prop_def):
                 # Recurse into nested objects.
                 nested_req = list(prop_def.get("required", []))
-                child_vis, child_req, child_const = _strip_constants(
-                    prop_def["properties"], nested_req
-                )
+                child_vis, child_req, child_const = _strip_constants(prop_def["properties"], nested_req)
                 if child_const:
                     constants[prop_name] = child_const
                 if child_vis:
@@ -1076,12 +1056,8 @@ def webhook_tool(
             return [_llm_schema(item) for item in value]
         return value
 
-    def _param_info(
-        prop_name: str, prop_def: Dict[str, Any], required_list: list[str]
-    ) -> ParameterInfo:
-        json_type = (
-            "object" if _has_object_properties(prop_def) else prop_def.get("type", "string")
-        )
+    def _param_info(prop_name: str, prop_def: Dict[str, Any], required_list: list[str]) -> ParameterInfo:
+        json_type = "object" if _has_object_properties(prop_def) else prop_def.get("type", "string")
         py_type = _TYPE_MAP[json_type][0] if json_type in _TYPE_MAP else str
         desc = prop_def.get("description", "")
         enum = prop_def.get("enum")
@@ -1150,18 +1126,15 @@ def webhook_tool(
         query_params: Dict[str, Any] = {}
         body: Dict[str, Any] = {}
 
-        missing_url_params = [
-            p for p in url_params if p not in kwargs or kwargs[p] is None
-        ]
+        missing_url_params = [p for p in url_params if p not in kwargs or kwargs[p] is None]
         if missing_url_params:
-            return json.dumps({
-                "ok": False,
-                "status": None,
-                "error": (
-                    "Missing required URL path parameter(s): "
-                    f"{', '.join(missing_url_params)}."
-                ),
-            })
+            return json.dumps(
+                {
+                    "ok": False,
+                    "status": None,
+                    "error": (f"Missing required URL path parameter(s): {', '.join(missing_url_params)}."),
+                }
+            )
 
         from urllib.parse import quote
 
@@ -1190,8 +1163,7 @@ def webhook_tool(
         if query_params:
             # aiohttp params only accepts str/int/float values, not bool.
             req_kwargs["params"] = {
-                k: str(v).lower() if isinstance(v, bool) else v
-                for k, v in query_params.items()
+                k: str(v).lower() if isinstance(v, bool) else v for k, v in query_params.items()
             }
         if _timeout is not None:
             req_kwargs["timeout"] = aiohttp.ClientTimeout(total=_timeout)
@@ -1212,18 +1184,22 @@ def webhook_tool(
                         result["error"] = text
                     return json.dumps(result)
         except aiohttp.ClientError as exc:
-            return json.dumps({
-                "ok": False,
-                "status": None,
-                "error": f"Request failed: {type(exc).__name__}: {exc}",
-            })
+            return json.dumps(
+                {
+                    "ok": False,
+                    "status": None,
+                    "error": f"Request failed: {type(exc).__name__}: {exc}",
+                }
+            )
         except asyncio.TimeoutError:
             detail = f" after {_timeout}s" if _timeout is not None else ""
-            return json.dumps({
-                "ok": False,
-                "status": None,
-                "error": f"Request timed out{detail}.",
-            })
+            return json.dumps(
+                {
+                    "ok": False,
+                    "status": None,
+                    "error": f"Request timed out{detail}.",
+                }
+            )
 
     # -- 6. Construct FunctionTool directly -------------------------------------
     return FunctionTool(

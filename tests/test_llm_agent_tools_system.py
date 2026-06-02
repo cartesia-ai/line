@@ -653,9 +653,7 @@ def test_webhook_tool_invalid_url_placeholder_name_raises(anyio_backend, placeho
         )
 
 
-def test_webhook_tool_invalid_url_placeholder_raises_before_auth_env(
-    anyio_backend, monkeypatch
-):
+def test_webhook_tool_invalid_url_placeholder_raises_before_auth_env(anyio_backend, monkeypatch):
     monkeypatch.delenv("MISSING_AUTH_ENV", raising=False)
 
     with pytest.raises(ValueError, match="url template variable"):
@@ -789,9 +787,7 @@ def test_webhook_tool_query_integer_constant_value_rejects_bool(anyio_backend):
 
 
 @pytest.mark.parametrize("constant_value", [{"x": 1}, ["x"], None])
-def test_webhook_tool_query_constant_value_rejects_non_scalar(
-    constant_value, anyio_backend
-):
+def test_webhook_tool_query_constant_value_rejects_non_scalar(constant_value, anyio_backend):
     with pytest.raises(
         ValueError,
         match="query_params_schema.*constant_value must be a scalar",
@@ -847,7 +843,7 @@ def test_webhook_tool_nested_schema_validation(anyio_backend):
 
 def test_webhook_tool_query_params_schema_validation(anyio_backend):
     """query_params_schema gets the same validation as body_schema."""
-    with pytest.raises(ValueError, match="query_params_schema.*\"type\": \"object\""):
+    with pytest.raises(ValueError, match='query_params_schema.*"type": "object"'):
         webhook_tool(
             name="t",
             description="d",
@@ -859,7 +855,6 @@ def test_webhook_tool_query_params_schema_validation(anyio_backend):
 def test_webhook_tool_negative_timeout_raises(anyio_backend):
     with pytest.raises(ValueError, match="timeout must be positive"):
         webhook_tool(name="t", description="d", url="https://example.com", timeout=-1.0)
-
 
 
 def test_webhook_tool_property_not_dict_raises(anyio_backend):
@@ -878,6 +873,7 @@ def test_webhook_tool_property_not_dict_raises(anyio_backend):
 # =============================================================================
 # Tests: webhook_tool — behavior
 # =============================================================================
+
 
 def _fake_aiohttp(monkeypatch, *, status=200, body="ok", capture=None):
     """Patch aiohttp.ClientSession to return a canned response.
@@ -1184,9 +1180,7 @@ async def test_webhook_tool_http_error_handling(mock_ctx, anyio_backend, monkeyp
     assert "ClientConnectionError" in parsed["error"]
 
 
-async def test_webhook_tool_timeout_without_configured_value(
-    mock_ctx, anyio_backend, monkeypatch
-):
+async def test_webhook_tool_timeout_without_configured_value(mock_ctx, anyio_backend, monkeypatch):
     """Timeout errors omit the duration when no timeout was configured."""
     import asyncio
 

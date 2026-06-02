@@ -302,8 +302,7 @@ def _build_function_tool_payload(tool: FunctionTool, *, strict: bool = True) -> 
     # This must be computed BEFORE calling build_parameters_schema so that
     # strict validation does not raise for tools that will use non-strict mode.
     has_optional = any(
-        not p.required
-        or (p.json_schema is not None and _json_schema_has_optional_properties(p.json_schema))
+        not p.required or (p.json_schema is not None and _json_schema_has_optional_properties(p.json_schema))
         for p in tool.parameters.values()
     )
     use_strict = strict and not has_optional

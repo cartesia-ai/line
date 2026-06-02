@@ -9,13 +9,13 @@ Usage:
     uv run python -m pytest tests/integration_test_webhook.py -v
 """
 
-import json
-import time
-import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
+import json
+import threading
+import time
 from typing import Any, Dict, List
-from urllib.parse import parse_qs
 from unittest.mock import MagicMock
+from urllib.parse import parse_qs
 
 import pytest
 
@@ -43,13 +43,15 @@ class _RequestLog:
         self.requests: List[Dict[str, Any]] = []
 
     def record(self, method: str, path: str, headers: dict, body: Any, query: str):
-        self.requests.append({
-            "method": method,
-            "path": path,
-            "headers": dict(headers),
-            "body": body,
-            "query": query,
-        })
+        self.requests.append(
+            {
+                "method": method,
+                "path": path,
+                "headers": dict(headers),
+                "body": body,
+                "query": query,
+            }
+        )
 
     @property
     def last(self) -> Dict[str, Any]:
@@ -98,11 +100,14 @@ def _make_handler(log: _RequestLog):
                 return
 
             # Default — 201 with receipt
-            self._respond(201, {
-                "ticket_id": "TKT-00001",
-                "status": "created",
-                "received_body": body,
-            })
+            self._respond(
+                201,
+                {
+                    "ticket_id": "TKT-00001",
+                    "status": "created",
+                    "received_body": body,
+                },
+            )
 
         def _respond(self, status: int, body: Any):
             payload = json.dumps(body).encode()
@@ -329,9 +334,7 @@ async def test_url_template_params(server, ctx, anyio_backend):
         {"org_id": None, "subject": "Issue"},
     ],
 )
-async def test_missing_url_template_param_fails_before_request(
-    server, ctx, anyio_backend, tool_kwargs
-):
+async def test_missing_url_template_param_fails_before_request(server, ctx, anyio_backend, tool_kwargs):
     """Missing or null URL template variables fail without sending a request."""
     tool = webhook_tool(
         name="t",

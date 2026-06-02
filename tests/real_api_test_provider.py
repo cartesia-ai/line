@@ -903,9 +903,7 @@ async def test_webhook_tool_calling(model: str, api_key: str, backend: Optional[
     assert not leaked, f"LLM should not see constant fields, but args contained: {leaked}"
 
     # Verify the LLM chose the right enum value
-    assert tool_args.get("priority") == "high", (
-        f"Expected priority='high', got {tool_args.get('priority')!r}"
-    )
+    assert tool_args.get("priority") == "high", f"Expected priority='high', got {tool_args.get('priority')!r}"
     # Verify integer parameter
     assert isinstance(tool_args.get("quantity"), int), (
         f"Expected integer quantity, got {type(tool_args.get('quantity')).__name__}"
@@ -915,8 +913,10 @@ async def test_webhook_tool_calling(model: str, api_key: str, backend: Optional[
         f"Expected list tags, got {type(tool_args.get('tags')).__name__}"
     )
 
-    print(f"  ✓ LLM args validated: priority={tool_args['priority']!r}, "
-          f"quantity={tool_args['quantity']}, tags={tool_args['tags']}")
+    print(
+        f"  ✓ LLM args validated: priority={tool_args['priority']!r}, "
+        f"quantity={tool_args['quantity']}, tags={tool_args['tags']}"
+    )
 
     # 3. URL template resolved
     assert "/acme/" in captured_request.get("url", ""), (
@@ -949,10 +949,7 @@ async def test_webhook_tool_calling(model: str, api_key: str, backend: Optional[
         if fact not in text_lower:
             missing.append(fact)
     if missing:
-        raise AssertionError(
-            f"LLM response is missing expected facts: {missing}\n"
-            f"Full response: {full_text}"
-        )
+        raise AssertionError(f"LLM response is missing expected facts: {missing}\nFull response: {full_text}")
 
     print("✓ webhook_tool test passed:")
     print("  - LLM filled subject, priority (enum), quantity (int), tags (array)")
