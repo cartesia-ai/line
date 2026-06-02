@@ -323,7 +323,7 @@ class TestWebhookToolSchema:
             description="Creates a support ticket.",
             url="https://example.com/api/tickets",
             method="POST",
-            body_schema={
+            request_body_schema={
                 "type": "object",
                 "required": ["subject"],
                 "properties": {
@@ -343,7 +343,7 @@ class TestWebhookToolSchema:
             description="Update an order.",
             url="https://example.com/orders/{order_id}",
             method="PATCH",
-            body_schema={
+            request_body_schema={
                 "type": "object",
                 "required": ["status"],
                 "properties": {
@@ -382,7 +382,7 @@ class TestWebhookToolSchema:
             description="Create a ticket.",
             url="https://example.com/api/tickets",
             method="POST",
-            body_schema={
+            request_body_schema={
                 "type": "object",
                 "required": ["ticket"],
                 "properties": {

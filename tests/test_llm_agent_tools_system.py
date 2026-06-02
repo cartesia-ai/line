@@ -671,7 +671,7 @@ def test_webhook_tool_body_schema_not_object_type_raises(anyio_backend):
             name="t",
             description="d",
             url="https://example.com",
-            body_schema={"type": "array", "items": {"type": "string"}},
+            request_body_schema={"type": "array", "items": {"type": "string"}},
         )
 
 
@@ -681,7 +681,7 @@ def test_webhook_tool_body_schema_missing_properties_raises(anyio_backend):
             name="t",
             description="d",
             url="https://example.com",
-            body_schema={"type": "object"},
+            request_body_schema={"type": "object"},
         )
 
 
@@ -691,7 +691,7 @@ def test_webhook_tool_body_schema_required_not_list_raises(anyio_backend):
             name="t",
             description="d",
             url="https://example.com",
-            body_schema={
+            request_body_schema={
                 "type": "object",
                 "required": "name",
                 "properties": {"name": {"type": "string"}},
@@ -705,7 +705,7 @@ def test_webhook_tool_body_schema_required_unknown_field_raises(anyio_backend):
             name="t",
             description="d",
             url="https://example.com",
-            body_schema={
+            request_body_schema={
                 "type": "object",
                 "required": ["name", "ghost"],
                 "properties": {"name": {"type": "string"}},
@@ -719,7 +719,7 @@ def test_webhook_tool_property_unknown_type_raises(anyio_backend):
             name="t",
             description="d",
             url="https://example.com",
-            body_schema={
+            request_body_schema={
                 "type": "object",
                 "properties": {"x": {"type": "timestamp"}},
             },
@@ -732,7 +732,7 @@ def test_webhook_tool_constant_value_type_mismatch_raises(anyio_backend):
             name="t",
             description="d",
             url="https://example.com",
-            body_schema={
+            request_body_schema={
                 "type": "object",
                 "properties": {
                     "count": {"type": "integer", "constant_value": "not_a_number"},
@@ -747,7 +747,7 @@ def test_webhook_tool_integer_constant_value_rejects_bool(anyio_backend):
             name="t",
             description="d",
             url="https://example.com",
-            body_schema={
+            request_body_schema={
                 "type": "object",
                 "properties": {
                     "count": {"type": "integer", "constant_value": True},
@@ -762,7 +762,7 @@ def test_webhook_tool_number_constant_value_rejects_bool(anyio_backend):
             name="t",
             description="d",
             url="https://example.com",
-            body_schema={
+            request_body_schema={
                 "type": "object",
                 "properties": {
                     "amount": {"type": "number", "constant_value": False},
@@ -811,7 +811,7 @@ def test_webhook_tool_constant_value_bool_mismatch_raises(anyio_backend):
             name="t",
             description="d",
             url="https://example.com",
-            body_schema={
+            request_body_schema={
                 "type": "object",
                 "properties": {
                     "flag": {"type": "boolean", "constant_value": 1},
@@ -827,7 +827,7 @@ def test_webhook_tool_nested_schema_validation(anyio_backend):
             name="t",
             description="d",
             url="https://example.com",
-            body_schema={
+            request_body_schema={
                 "type": "object",
                 "properties": {
                     "outer": {
@@ -848,7 +848,7 @@ def test_webhook_tool_constant_value_in_array_items_raises(anyio_backend):
             name="t",
             description="d",
             url="https://example.com",
-            body_schema={
+            request_body_schema={
                 "type": "object",
                 "properties": {
                     "tags": {
@@ -867,7 +867,7 @@ def test_webhook_tool_constant_value_in_anyof_raises(anyio_backend):
             name="t",
             description="d",
             url="https://example.com",
-            body_schema={
+            request_body_schema={
                 "type": "object",
                 "properties": {
                     "value": {
@@ -903,7 +903,7 @@ def test_webhook_tool_property_not_dict_raises(anyio_backend):
             name="t",
             description="d",
             url="https://example.com",
-            body_schema={
+            request_body_schema={
                 "type": "object",
                 "properties": {"x": "string"},
             },
@@ -965,7 +965,7 @@ def test_webhook_tool_returns_function_tool(anyio_backend, monkeypatch):
         name="create_ticket",
         description="Creates a ticket.",
         url="https://example.com/api/tickets",
-        body_schema=_TICKET_BODY_SCHEMA,
+        request_body_schema=_TICKET_BODY_SCHEMA,
         auth={"Authorization": "Bearer ${SUPPORT_API_KEY}"},
     )
     assert isinstance(tool, FunctionTool)
@@ -982,7 +982,7 @@ def test_webhook_tool_parameter_types(anyio_backend):
         name="t",
         description="d",
         url="https://example.com",
-        body_schema={
+        request_body_schema={
             "type": "object",
             "required": ["s", "i", "n", "b", "a"],
             "properties": {
@@ -1006,7 +1006,7 @@ def test_webhook_tool_required_and_optional(anyio_backend):
         name="t",
         description="d",
         url="https://example.com",
-        body_schema={
+        request_body_schema={
             "type": "object",
             "required": ["a"],
             "properties": {
@@ -1104,7 +1104,7 @@ def test_webhook_tool_combined_params(anyio_backend):
         name="t",
         description="d",
         url="https://example.com/{tenant_id}/tickets",
-        body_schema={
+        request_body_schema={
             "type": "object",
             "required": ["subject"],
             "properties": {
@@ -1148,7 +1148,7 @@ async def test_webhook_tool_http_call(mock_ctx, anyio_backend, monkeypatch):
         description="Creates a ticket.",
         url="https://example.com/api/{tenant}/tickets",
         method="POST",
-        body_schema=_TICKET_BODY_SCHEMA,
+        request_body_schema=_TICKET_BODY_SCHEMA,
         query_params_schema={
             "type": "object",
             "required": ["notify"],
@@ -1259,7 +1259,7 @@ async def test_webhook_tool_unknown_kwargs_ignored(mock_ctx, anyio_backend, monk
         name="t",
         description="d",
         url="https://example.com",
-        body_schema={
+        request_body_schema={
             "type": "object",
             "required": ["a"],
             "properties": {"a": {"type": "string"}},
@@ -1279,7 +1279,7 @@ def test_webhook_tool_param_name_collision_raises(anyio_backend):
             name="t",
             description="d",
             url="https://example.com/{order_id}",
-            body_schema={
+            request_body_schema={
                 "type": "object",
                 "required": ["order_id"],
                 "properties": {"order_id": {"type": "string"}},
@@ -1350,7 +1350,7 @@ def test_webhook_tool_enum_passthrough(anyio_backend):
         name="t",
         description="d",
         url="https://example.com",
-        body_schema={
+        request_body_schema={
             "type": "object",
             "required": ["priority"],
             "properties": {
@@ -1371,7 +1371,7 @@ def test_webhook_tool_nested_constant_value(anyio_backend):
         name="t",
         description="d",
         url="https://example.com",
-        body_schema={
+        request_body_schema={
             "type": "object",
             "required": ["ticket"],
             "properties": {
@@ -1401,7 +1401,7 @@ async def test_webhook_tool_nested_constant_injected(mock_ctx, anyio_backend, mo
         name="t",
         description="d",
         url="https://example.com",
-        body_schema={
+        request_body_schema={
             "type": "object",
             "required": ["ticket"],
             "properties": {
@@ -1434,7 +1434,7 @@ def test_webhook_tool_all_constant_nested_object_hidden(anyio_backend):
         name="t",
         description="d",
         url="https://example.com",
-        body_schema={
+        request_body_schema={
             "type": "object",
             "required": ["name"],
             "properties": {

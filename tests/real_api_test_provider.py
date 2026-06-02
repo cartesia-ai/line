@@ -790,7 +790,7 @@ async def test_webhook_tool_calling(model: str, api_key: str, backend: Optional[
         ),
         url="https://support.internal/api/{tenant_id}/tickets",
         method="POST",
-        body_schema={
+        request_body_schema={
             "type": "object",
             "required": ["subject", "priority", "quantity"],
             "properties": {

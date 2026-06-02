@@ -163,7 +163,7 @@ async def test_post_with_body_and_constants(server, ctx, anyio_backend, monkeypa
         description="Create a ticket.",
         url=f"{server}/api/tickets",
         method="POST",
-        body_schema={
+        request_body_schema={
             "type": "object",
             "required": ["subject"],
             "properties": {
@@ -196,7 +196,7 @@ async def test_nested_constant_values(server, ctx, anyio_backend):
         description="d",
         url=f"{server}/api/tickets",
         method="POST",
-        body_schema={
+        request_body_schema={
             "type": "object",
             "required": ["subject"],
             "properties": {
@@ -228,7 +228,7 @@ async def test_nested_constant_values_without_object_type(server, ctx, anyio_bac
         description="d",
         url=f"{server}/api/tickets",
         method="POST",
-        body_schema={
+        request_body_schema={
             "type": "object",
             "required": ["subject"],
             "properties": {
@@ -261,7 +261,7 @@ async def test_freeform_object_without_properties_remains_visible(server, ctx, a
         description="d",
         url=f"{server}/api/tickets",
         method="POST",
-        body_schema={
+        request_body_schema={
             "type": "object",
             "properties": {
                 "metadata": {"type": "object"},
@@ -284,7 +284,7 @@ async def test_required_mixed_nested_object_remains_required(server, ctx, anyio_
         description="d",
         url=f"{server}/api/tickets",
         method="POST",
-        body_schema={
+        request_body_schema={
             "type": "object",
             "required": ["ticket"],
             "properties": {
@@ -311,7 +311,7 @@ async def test_url_template_params(server, ctx, anyio_backend):
         description="d",
         url=f"{server}/orgs/{{org_id}}/tickets",
         method="POST",
-        body_schema={
+        request_body_schema={
             "type": "object",
             "required": ["subject"],
             "properties": {"subject": {"type": "string"}},
@@ -341,7 +341,7 @@ async def test_missing_url_template_param_fails_before_request(server, ctx, anyi
         description="d",
         url=f"{server}/orgs/{{org_id}}/tickets",
         method="POST",
-        body_schema={
+        request_body_schema={
             "type": "object",
             "required": ["subject"],
             "properties": {"subject": {"type": "string"}},
@@ -426,7 +426,7 @@ async def test_custom_headers(server, ctx, anyio_backend):
         description="d",
         url=f"{server}/api",
         method="POST",
-        body_schema={
+        request_body_schema={
             "type": "object",
             "properties": {"x": {"type": "string"}},
         },
@@ -448,7 +448,7 @@ async def test_put_method(server, ctx, anyio_backend):
         description="d",
         url=f"{server}/api/items/{{item_id}}",
         method="PUT",
-        body_schema={
+        request_body_schema={
             "type": "object",
             "required": ["name"],
             "properties": {"name": {"type": "string"}},
@@ -507,7 +507,7 @@ async def test_small_response_not_truncated(server, ctx, anyio_backend):
         description="d",
         url=f"{server}/api",
         method="POST",
-        body_schema={
+        request_body_schema={
             "type": "object",
             "properties": {"x": {"type": "string"}},
         },
@@ -529,7 +529,7 @@ async def test_server_error_status(server, ctx, anyio_backend):
         description="d",
         url=f"{server}/error/500",
         method="POST",
-        body_schema={
+        request_body_schema={
             "type": "object",
             "properties": {"x": {"type": "string"}},
         },
@@ -568,7 +568,7 @@ async def test_auth_rejected(server, ctx, anyio_backend, monkeypatch):
         description="d",
         url=f"{server}/auth-required/tickets",
         method="POST",
-        body_schema={
+        request_body_schema={
             "type": "object",
             "properties": {"x": {"type": "string"}},
         },
@@ -592,7 +592,7 @@ async def test_auth_accepted(server, ctx, anyio_backend, monkeypatch):
         description="d",
         url=f"{server}/auth-required/tickets",
         method="POST",
-        body_schema={
+        request_body_schema={
             "type": "object",
             "properties": {"x": {"type": "string"}},
         },
@@ -614,7 +614,7 @@ async def test_connection_refused(ctx, anyio_backend):
         description="d",
         url="http://127.0.0.1:1",  # port 1 — nothing is listening
         method="POST",
-        body_schema={
+        request_body_schema={
             "type": "object",
             "properties": {"x": {"type": "string"}},
         },
@@ -655,7 +655,7 @@ async def test_combined_url_body_query_auth_headers(server, ctx, anyio_backend, 
         description="d",
         url=f"{server}/v2/{{tenant}}/tickets",
         method="PATCH",
-        body_schema={
+        request_body_schema={
             "type": "object",
             "required": ["status"],
             "properties": {
