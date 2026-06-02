@@ -546,6 +546,7 @@ class KnowledgeBaseTool:
         "Use when the user asks about facts, policies, products, or other domain "
         "information that may be stored in reference documents. "
         "Pass a focused natural-language query describing what you need to find."
+        "Always let the user know before calling the tool, since it might take some time to return results."
     )
 
     CHUNK_SEPARATOR = "\n\n---\n\n"
