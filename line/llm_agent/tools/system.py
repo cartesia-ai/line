@@ -744,41 +744,40 @@ def webhook_tool(
 ) -> FunctionTool:
     """Create an HTTP webhook tool that the LLM can call.
 
-    The LLM only sees parameters that do not carry a ``constant_value`` key in the
-    schema. Constants are baked into the request automatically.
+    Properties with "constant_value" are hidden from the LLM and injected
+    into every request. All inputs are validated at build time.
+
+    See line/llm_agent/README.md for full schema format, examples, and
+    response format documentation.
 
     Args:
         name: Tool name shown to the LLM.
         description: Tool description shown to the LLM.
-        url: Request URL.  Supports ``{param}`` templating — each template
-            variable becomes an LLM-visible parameter.
-        method: HTTP method (GET, POST, PUT, PATCH, DELETE, …).
-        request_body_schema: JSON-schema object describing the request body.
-            Properties with a ``constant_value`` key are hidden from the LLM
-            and baked into every request.
-        query_params_schema: JSON-schema object describing query parameters.
-            Properties with a ``constant_value`` key are hidden from the LLM
-            and baked into the query string.
-        auth: Header dict with ``${ENV_VAR}`` placeholders resolved from
-            ``os.environ`` at build time (when ``webhook_tool()`` is called).
-        headers: Additional static headers merged with resolved *auth* headers.
-        timeout: Request timeout in seconds (passed to aiohttp).
-        is_background: If True (default) the tool runs in a shielded
-            background task — the LLM can continue processing other tool
-            calls in the same turn and the task survives user interruption.
-            Note: the agent's ``process()`` call still waits for the result
-            before returning. Set to False if the LLM needs the response
-            before generating its reply.
+        url: Request URL. Supports {param} templating.
+        method: HTTP method (default "POST").
+        request_body_schema: JSON Schema dict with "type": "object" and
+            "properties". Properties in "required" must be filled by the
+            LLM; others are optional. Supports nested objects and
+            "constant_value" at any depth.
+        query_params_schema: Same structure, but scalar types only
+            (string, integer, number, boolean).
+        auth: Headers with ${ENV_VAR} placeholders resolved from os.environ.
+        headers: Additional static headers (must not overlap with auth).
+        timeout: Request timeout in seconds.
+        is_background: Run in shielded background task (default True).
 
     Returns:
-        A FunctionTool that can be passed to LlmAgent's tools list.
+        A FunctionTool for use in LlmAgent(tools=[...]).
+
+    Raises:
+        ValueError: On any malformed input (schemas, env vars, collisions).
 
     Example::
 
         create_ticket = webhook_tool(
             name="create_ticket",
             description="Creates a support ticket.",
-            url="https://example.cartesia.ai/api/tickets",
+            url="https://example.cartesia.ai/api/{tenant_id}/tickets",
             method="POST",
             request_body_schema={
                 "type": "object",
