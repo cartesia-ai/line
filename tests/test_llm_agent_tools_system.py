@@ -634,6 +634,15 @@ def test_webhook_tool_empty_url_placeholder_raises(anyio_backend):
         webhook_tool(name="t", description="d", url="https://example.com/{}/tickets")
 
 
+def test_webhook_tool_duplicate_url_placeholder_raises(anyio_backend):
+    with pytest.raises(ValueError, match="appears more than once"):
+        webhook_tool(
+            name="t",
+            description="d",
+            url="https://example.com/{item_id}/related/{item_id}",
+        )
+
+
 @pytest.mark.parametrize("placeholder", ["tenant id", " tenant", "tenant:id", "x" * 65])
 def test_webhook_tool_invalid_url_placeholder_name_raises(anyio_backend, placeholder):
     with pytest.raises(ValueError, match="url template variable"):
@@ -1173,6 +1182,38 @@ async def test_webhook_tool_http_error_handling(mock_ctx, anyio_backend, monkeyp
     assert parsed["ok"] is False
     assert parsed["status"] is None
     assert "ClientConnectionError" in parsed["error"]
+
+
+async def test_webhook_tool_timeout_without_configured_value(
+    mock_ctx, anyio_backend, monkeypatch
+):
+    """Timeout errors omit the duration when no timeout was configured."""
+    import asyncio
+
+    tool = webhook_tool(
+        name="t",
+        description="d",
+        url="https://example.com",
+    )
+
+    class _TimeoutSession:
+        def request(self, **kwargs):
+            raise asyncio.TimeoutError
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            pass
+
+    monkeypatch.setattr("aiohttp.ClientSession", lambda: _TimeoutSession())
+
+    result = await tool.func(mock_ctx)
+
+    parsed = json.loads(result)
+    assert parsed["ok"] is False
+    assert parsed["status"] is None
+    assert parsed["error"] == "Request timed out."
 
 
 async def test_webhook_tool_response_truncation(mock_ctx, anyio_backend, monkeypatch):

@@ -57,6 +57,7 @@ def _parse_webhook_url_params(name: str, url: str) -> list[str]:
         raise _webhook_tool_error(name, f"url has unmatched opening brace: {url!r}")
 
     params = re.findall(r"\{([^{}]*)\}", url)
+    seen_params: set[str] = set()
     for param in params:
         if not _WEBHOOK_URL_PARAM_NAME_RE.fullmatch(param):
             raise _webhook_tool_error(
@@ -64,6 +65,12 @@ def _parse_webhook_url_params(name: str, url: str) -> list[str]:
                 f"url template variable {param!r} is invalid. "
                 "Expected 1-64 characters matching [A-Za-z0-9_.-].",
             )
+        if param in seen_params:
+            raise _webhook_tool_error(
+                name,
+                f"url template variable {param!r} appears more than once.",
+            )
+        seen_params.add(param)
 
     return params
 
@@ -1117,8 +1124,7 @@ def webhook_tool(
     _query_constant_values = query_constant_values
     _body_prop_names = set(body_properties)
     _query_prop_names = set(query_properties)
-    _url_param_order = tuple(dict.fromkeys(url_params))
-    _url_param_names = set(_url_param_order)
+    _url_param_names = set(url_params)
     _resolved_headers = resolved_headers
     _timeout = timeout
 
@@ -1145,7 +1151,7 @@ def webhook_tool(
         body: Dict[str, Any] = {}
 
         missing_url_params = [
-            p for p in _url_param_order if p not in kwargs or kwargs[p] is None
+            p for p in url_params if p not in kwargs or kwargs[p] is None
         ]
         if missing_url_params:
             return json.dumps({
@@ -1212,10 +1218,11 @@ def webhook_tool(
                 "error": f"Request failed: {type(exc).__name__}: {exc}",
             })
         except asyncio.TimeoutError:
+            detail = f" after {_timeout}s" if _timeout is not None else ""
             return json.dumps({
                 "ok": False,
                 "status": None,
-                "error": f"Request timed out after {_timeout}s.",
+                "error": f"Request timed out{detail}.",
             })
 
     # -- 6. Construct FunctionTool directly -------------------------------------
