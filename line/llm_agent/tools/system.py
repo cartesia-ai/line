@@ -4,15 +4,14 @@ Built-in system tools for LLM agents.
 Provides end_call, send_dtmf, transfer_call, and web_search tools.
 """
 
-import aiohttp
 import asyncio
 from dataclasses import dataclass, field
 import json
 import logging
-import os
-import re
 from typing import Annotated, Any, Dict, Literal, Optional
 from urllib.parse import quote as _url_quote
+
+import aiohttp
 
 from line.agent import Agent, call_agent
 from line.events import (
@@ -25,15 +24,16 @@ from line.events import (
     CallStarted,
 )
 from line.knowledge_base import DEFAULT_TOP_K, KnowledgeBaseError, _warn_if_long_timeout
+from line.llm_agent.tools import webhook_tool_utils
 from line.llm_agent.tools.decorators import passthrough_tool
 from line.llm_agent.tools.utils import FunctionTool, ParameterInfo, ToolEnv, ToolType, construct_function_tool
-from line.llm_agent.tools import webhook_tool_utils
 
 # Valid DTMF buttons
 DtmfButton = Literal["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "*", "#"]
 
 # Logger for system tools
 logger = logging.getLogger(__name__)
+
 
 @dataclass
 class UpdateCallConfig:
@@ -797,6 +797,7 @@ def webhook_tool(
             auth={"Authorization": "Bearer ${SUPPORT_API_KEY}"},
         )
     """
+
     def _err(msg: str) -> ValueError:
         return webhook_tool_utils.error(name, msg)
 
@@ -831,8 +832,7 @@ def webhook_tool(
         collision = set(resolved_headers) & set(headers)
         if collision:
             raise _err(
-                f"header(s) {collision} appear in both auth and headers. "
-                f"Use one or the other for each key."
+                f"header(s) {collision} appear in both auth and headers. Use one or the other for each key."
             )
         resolved_headers.update(headers)
 
@@ -862,11 +862,16 @@ def webhook_tool(
 
     for p in path_params:
         parameters[p] = ParameterInfo(
-            name=p, type_annotation=str, description=f"URL path parameter '{p}'", required=True,
+            name=p,
+            type_annotation=str,
+            description=f"URL path parameter '{p}'",
+            required=True,
         )
 
     for prop_name, prop_def in request_body_properties.items():
-        parameters[prop_name] = webhook_tool_utils.build_param_info(prop_name, prop_def, request_body_required)
+        parameters[prop_name] = webhook_tool_utils.build_param_info(
+            prop_name, prop_def, request_body_required
+        )
     for prop_name, prop_def in query_properties.items():
         parameters[prop_name] = webhook_tool_utils.build_param_info(prop_name, prop_def, query_required)
 
@@ -879,9 +884,7 @@ def webhook_tool(
     ]:
         for n in names:
             if n in _seen_names:
-                raise _err(
-                    f"parameter {n!r} appears in both {_seen_names[n]} and {source_label}."
-                )
+                raise _err(f"parameter {n!r} appears in both {_seen_names[n]} and {source_label}.")
             _seen_names[n] = source_label
 
     # -- 4. Build the async implementation --------------------------------------
@@ -899,7 +902,11 @@ def webhook_tool(
         missing = [p for p in path_params if p not in kwargs or kwargs[p] is None]
         if missing:
             return json.dumps(
-                {"ok": False, "status": None, "error": f"Missing required URL path parameter(s): {', '.join(missing)}."}
+                {
+                    "ok": False,
+                    "status": None,
+                    "error": f"Missing required URL path parameter(s): {', '.join(missing)}.",
+                }
             )
 
         for k, v in kwargs.items():
@@ -915,7 +922,11 @@ def webhook_tool(
         if constant_values:
             body = webhook_tool_utils.deep_merge(body, constant_values)
 
-        req_kwargs: Dict[str, Any] = {"method": upper_method, "url": final_url, "headers": resolved_headers or None}
+        req_kwargs: Dict[str, Any] = {
+            "method": upper_method,
+            "url": final_url,
+            "headers": resolved_headers or None,
+        }
         if body:
             req_kwargs["json"] = body
         if query_params:
@@ -935,7 +946,9 @@ def webhook_tool(
                     result["body" if result["ok"] else "error"] = text
                     return json.dumps(result)
         except aiohttp.ClientError as exc:
-            return json.dumps({"ok": False, "status": None, "error": f"Request failed: {type(exc).__name__}: {exc}"})
+            return json.dumps(
+                {"ok": False, "status": None, "error": f"Request failed: {type(exc).__name__}: {exc}"}
+            )
         except asyncio.TimeoutError:
             detail = f" after {timeout}s" if timeout is not None else ""
             return json.dumps({"ok": False, "status": None, "error": f"Request timed out{detail}."})

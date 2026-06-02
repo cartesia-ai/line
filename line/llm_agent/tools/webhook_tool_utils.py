@@ -7,6 +7,8 @@ import os
 import re
 from typing import Any, Dict
 
+from line.llm_agent.tools.utils import ParameterInfo
+
 _URL_PARAM_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 
 # Maps JSON schema types to (python_type_for_params, allowed_constant_types).
@@ -35,6 +37,7 @@ def has_object_properties(schema: Dict[str, Any]) -> bool:
 
 def resolve_env_vars(name: str, value: str) -> str:
     """Replace ``${ENV_VAR}`` placeholders in *value* with ``os.environ`` values."""
+
     def _replace(m: re.Match) -> str:
         var = m.group(1)
         try:
@@ -124,8 +127,7 @@ def _validate_constant_value_type(name: str, prop_def: Dict[str, Any], path: str
     if not valid:
         raise error(
             name,
-            f"{path} declares type={json_type!r} but "
-            f"constant_value={cv!r} is {type(cv).__name__}.",
+            f"{path} declares type={json_type!r} but constant_value={cv!r} is {type(cv).__name__}.",
         )
 
 
@@ -149,8 +151,7 @@ def _validate_body_property(name: str, prop_def: Dict[str, Any], path: str) -> N
     if json_type is not None and json_type not in TYPE_MAP:
         raise error(
             name,
-            f"{path} has unknown type {json_type!r}. "
-            f"Expected one of: {', '.join(sorted(TYPE_MAP))}.",
+            f"{path} has unknown type {json_type!r}. Expected one of: {', '.join(sorted(TYPE_MAP))}.",
         )
     if "constant_value" in prop_def:
         _validate_constant_value_type(name, prop_def, path)
@@ -206,9 +207,7 @@ def validate_query_schema(name: str, schema: Dict[str, Any], label: str) -> None
         if "constant_value" in prop_def:
             cv = prop_def["constant_value"]
             if cv is None or isinstance(cv, (dict, list)):
-                raise error(
-                    name, f"{path}.constant_value must be a scalar string, number, or boolean."
-                )
+                raise error(name, f"{path}.constant_value must be a scalar string, number, or boolean.")
             _validate_constant_value_type(name, prop_def, path)
 
 
@@ -232,9 +231,7 @@ def strip_constants(
             constants[prop_name] = prop_def["constant_value"]
         elif has_object_properties(prop_def):
             nested_req = list(prop_def.get("required", []))
-            child_vis, child_req, child_const = strip_constants(
-                prop_def["properties"], nested_req
-            )
+            child_vis, child_req, child_const = strip_constants(prop_def["properties"], nested_req)
             if child_const:
                 constants[prop_name] = child_const
             if child_vis:
@@ -257,12 +254,8 @@ def strip_constants(
 # ---------------------------------------------------------------------------
 
 
-def build_param_info(
-    prop_name: str, prop_def: Dict[str, Any], required_list: list[str]
-) -> "ParameterInfo":
+def build_param_info(prop_name: str, prop_def: Dict[str, Any], required_list: list[str]) -> ParameterInfo:
     """Build a ParameterInfo from a JSON schema property definition."""
-    from line.llm_agent.tools.utils import ParameterInfo
-
     json_type = "object" if has_object_properties(prop_def) else prop_def.get("type", "string")
     py_type = TYPE_MAP[json_type][0] if json_type in TYPE_MAP else str
     return ParameterInfo(
