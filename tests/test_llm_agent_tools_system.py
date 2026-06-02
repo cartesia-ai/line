@@ -629,6 +629,35 @@ def test_webhook_tool_nested_braces_raises(anyio_backend):
         webhook_tool(name="t", description="d", url="https://example.com/{{id}}")
 
 
+def test_webhook_tool_empty_url_placeholder_raises(anyio_backend):
+    with pytest.raises(ValueError, match="url template variable"):
+        webhook_tool(name="t", description="d", url="https://example.com/{}/tickets")
+
+
+@pytest.mark.parametrize("placeholder", ["tenant id", " tenant", "tenant:id", "x" * 65])
+def test_webhook_tool_invalid_url_placeholder_name_raises(anyio_backend, placeholder):
+    with pytest.raises(ValueError, match="url template variable"):
+        webhook_tool(
+            name="t",
+            description="d",
+            url=f"https://example.com/{{{placeholder}}}/tickets",
+        )
+
+
+def test_webhook_tool_invalid_url_placeholder_raises_before_auth_env(
+    anyio_backend, monkeypatch
+):
+    monkeypatch.delenv("MISSING_AUTH_ENV", raising=False)
+
+    with pytest.raises(ValueError, match="url template variable"):
+        webhook_tool(
+            name="t",
+            description="d",
+            url="https://example.com/{tenant id}/tickets",
+            auth={"Authorization": "Bearer ${MISSING_AUTH_ENV}"},
+        )
+
+
 def test_webhook_tool_body_schema_not_object_type_raises(anyio_backend):
     with pytest.raises(ValueError, match='"type": "object"'):
         webhook_tool(
@@ -1163,6 +1192,22 @@ async def test_webhook_tool_url_params_are_encoded(mock_ctx, anyio_backend, monk
 
     await tool.func(mock_ctx, item_id="has spaces/and slashes")
     assert captured["url"] == "https://example.com/items/has%20spaces%2Fand%20slashes"
+
+
+async def test_webhook_tool_url_params_allow_hyphens(mock_ctx, anyio_backend, monkeypatch):
+    """URL template params can contain non-word characters like hyphens."""
+    tool = webhook_tool(
+        name="t",
+        description="d",
+        url="https://example.com/{tenant-id}/tickets",
+    )
+    captured = {}
+    _fake_aiohttp(monkeypatch, capture=captured)
+
+    assert "tenant-id" in tool.parameters
+
+    await tool.func(mock_ctx, **{"tenant-id": "acme corp"})
+    assert captured["url"] == "https://example.com/acme%20corp/tickets"
 
 
 def test_webhook_tool_enum_passthrough(anyio_backend):

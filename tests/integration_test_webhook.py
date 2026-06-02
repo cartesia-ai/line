@@ -248,6 +248,29 @@ async def test_nested_constant_values_without_object_type(server, ctx, anyio_bac
     assert body["metadata"]["version"] == 2
 
 
+async def test_freeform_object_without_properties_remains_visible(server, ctx, anyio_backend):
+    """Bare object fields remain valid LLM-visible parameters."""
+    tool = webhook_tool(
+        name="t",
+        description="d",
+        url=f"{server}/api/tickets",
+        method="POST",
+        body_schema={
+            "type": "object",
+            "properties": {
+                "metadata": {"type": "object"},
+            },
+        },
+        is_background=False,
+    )
+
+    assert tool.parameters["metadata"].type_annotation is dict
+
+    await tool.func(ctx, metadata={"note": "freeform"})
+
+    assert _log.last["body"]["metadata"]["note"] == "freeform"
+
+
 async def test_required_mixed_nested_object_remains_required(server, ctx, anyio_backend):
     """Required nested objects stay required when they mix visible and constant children."""
     tool = webhook_tool(

@@ -31,6 +31,42 @@ DtmfButton = Literal["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "*", "#"]
 # Logger for system tools
 logger = logging.getLogger(__name__)
 
+_WEBHOOK_URL_PARAM_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
+
+
+def _webhook_tool_error(name: str, msg: str) -> ValueError:
+    return ValueError(f"webhook_tool(name={name!r}): {msg}")
+
+
+def _parse_webhook_url_params(name: str, url: str) -> list[str]:
+    """Return validated URL template parameter names from a webhook URL."""
+    brace_depth = 0
+    for ch in url:
+        if ch == "{":
+            brace_depth += 1
+            if brace_depth > 1:
+                raise _webhook_tool_error(
+                    name, f"url has nested braces, which is not supported: {url!r}"
+                )
+        elif ch == "}":
+            brace_depth -= 1
+            if brace_depth < 0:
+                raise _webhook_tool_error(name, f"url has unmatched closing brace: {url!r}")
+
+    if brace_depth != 0:
+        raise _webhook_tool_error(name, f"url has unmatched opening brace: {url!r}")
+
+    params = re.findall(r"\{([^{}]*)\}", url)
+    for param in params:
+        if not _WEBHOOK_URL_PARAM_NAME_RE.fullmatch(param):
+            raise _webhook_tool_error(
+                name,
+                f"url template variable {param!r} is invalid. "
+                "Expected 1-64 characters matching [A-Za-z0-9_.-].",
+            )
+
+    return params
+
 
 @dataclass
 class UpdateCallConfig:
@@ -806,7 +842,7 @@ def webhook_tool(
     }
 
     def _err(msg: str) -> ValueError:
-        return ValueError(f"webhook_tool(name={name!r}): {msg}")
+        return _webhook_tool_error(name, msg)
 
     def _has_object_properties(schema: Dict[str, Any]) -> bool:
         """Return True for object schemas that declare nested properties."""
@@ -824,20 +860,7 @@ def webhook_tool(
             f"method={method!r} is not a valid HTTP method. "
             f"Expected one of: {', '.join(sorted(_VALID_METHODS))}."
         )
-
-    # Validate URL template braces are balanced
-    _brace_depth = 0
-    for ch in url:
-        if ch == "{":
-            _brace_depth += 1
-            if _brace_depth > 1:
-                raise _err(f"url has nested braces, which is not supported: {url!r}")
-        elif ch == "}":
-            _brace_depth -= 1
-            if _brace_depth < 0:
-                raise _err(f"url has unmatched closing brace: {url!r}")
-    if _brace_depth != 0:
-        raise _err(f"url has unmatched opening brace: {url!r}")
+    url_params = _parse_webhook_url_params(name, url)
 
     def _validate_schema(
         schema: Dict[str, Any], label: str, *, allow_omitted_type: bool = False
@@ -937,10 +960,7 @@ def webhook_tool(
             )
         resolved_headers.update(headers)
 
-    # -- 2. Parse URL template variables ----------------------------------------
-    url_params: list[str] = re.findall(r"\{(\w+)\}", url)
-
-    # -- 3. Parse body_schema ---------------------------------------------------
+    # -- 2. Parse body_schema ---------------------------------------------------
     #
     # Recursively strip constant_value properties at any nesting depth.
     # Returns (cleaned_properties, constants) where cleaned_properties is the
@@ -990,7 +1010,7 @@ def webhook_tool(
             list(body_schema.get("required", [])),
         )
 
-    # -- 4. Parse query_params_schema -------------------------------------------
+    # -- 3. Parse query_params_schema -------------------------------------------
     query_properties: Dict[str, Any] = {}
     query_required: list[str] = []
 
@@ -999,7 +1019,7 @@ def webhook_tool(
         for prop_name, prop_def in query_params_schema.get("properties", {}).items():
             query_properties[prop_name] = prop_def
 
-    # -- 5. Build ParameterInfo for all LLM-visible params ----------------------
+    # -- 4. Build ParameterInfo for all LLM-visible params ----------------------
     parameters: Dict[str, ParameterInfo] = {}
 
     # URL template params — always required strings
@@ -1059,7 +1079,7 @@ def webhook_tool(
                 )
             _seen_names[n] = source_label
 
-    # -- 6. Build the async implementation --------------------------------------
+    # -- 5. Build the async implementation --------------------------------------
     # Capture references for the closure.
     _url_template = url
     _method = method.upper()
@@ -1164,7 +1184,7 @@ def webhook_tool(
                 "error": f"Request timed out after {_timeout}s.",
             })
 
-    # -- 7. Construct FunctionTool directly -------------------------------------
+    # -- 6. Construct FunctionTool directly -------------------------------------
     return FunctionTool(
         name=name,
         description=description,
