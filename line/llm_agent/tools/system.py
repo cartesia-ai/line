@@ -802,7 +802,7 @@ def webhook_tool(
         "number": (float, (int, float)),
         "boolean": (bool, bool),
         "array": (list, list),
-        "object": (str, dict),  # param falls back to str; constant must be dict
+        "object": (dict, dict),
     }
 
     def _err(msg: str) -> ValueError:
@@ -969,7 +969,7 @@ def webhook_tool(
                 # — don't add it to visible.
             else:
                 visible[prop_name] = prop_def
-        visible_required = [r for r in required if r not in constants]
+        visible_required = [r for r in required if r in visible]
         return visible, visible_required, constants
 
     body_properties: Dict[str, Any] = {}
@@ -1003,7 +1003,17 @@ def webhook_tool(
             required=True,
         )
 
-    def _param_info(prop_name: str, prop_def: Dict[str, Any], required_list: list[str]) -> ParameterInfo:
+    def _llm_schema(value: Any) -> Any:
+        """Return a JSON schema safe to expose in provider tool definitions."""
+        if isinstance(value, dict):
+            return {k: _llm_schema(v) for k, v in value.items() if k != "constant_value"}
+        if isinstance(value, list):
+            return [_llm_schema(item) for item in value]
+        return value
+
+    def _param_info(
+        prop_name: str, prop_def: Dict[str, Any], required_list: list[str]
+    ) -> ParameterInfo:
         json_type = prop_def.get("type", "string")
         py_type = _TYPE_MAP[json_type][0] if json_type in _TYPE_MAP else str
         desc = prop_def.get("description", "")
@@ -1014,6 +1024,7 @@ def webhook_tool(
             description=desc,
             required=prop_name in required_list,
             enum=enum,
+            json_schema=_llm_schema(prop_def),
         )
 
     for prop_name, prop_def in body_properties.items():

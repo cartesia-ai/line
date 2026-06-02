@@ -44,6 +44,7 @@ TypedDict Support:
     object shapes.
 """
 
+from copy import deepcopy
 from enum import Enum
 from typing import Any, Literal, Optional, Type, Union, get_args, get_origin, get_type_hints
 
@@ -185,6 +186,72 @@ def python_type_to_json_schema(type_annotation: Type, *, strict: bool = True) ->
     return {"type": "string"}
 
 
+def _json_schema_has_optional_properties(schema: dict[str, Any]) -> bool:
+    """Return True if a JSON schema has optional object properties anywhere."""
+    if not isinstance(schema, dict):
+        return False
+
+    if schema.get("type") == "object":
+        properties = schema.get("properties", {})
+        if isinstance(properties, dict):
+            required = set(schema.get("required", []))
+            if set(properties) - required:
+                return True
+            return any(
+                _json_schema_has_optional_properties(prop_schema)
+                for prop_schema in properties.values()
+                if isinstance(prop_schema, dict)
+            )
+
+    if schema.get("type") == "array":
+        items = schema.get("items")
+        if isinstance(items, dict):
+            return _json_schema_has_optional_properties(items)
+
+    for key in ("anyOf", "oneOf", "allOf"):
+        variants = schema.get(key)
+        if isinstance(variants, list) and any(
+            isinstance(variant, dict) and _json_schema_has_optional_properties(variant)
+            for variant in variants
+        ):
+            return True
+
+    return False
+
+
+def _add_strict_object_constraints(schema: dict[str, Any]) -> None:
+    """Mutate schema so object nodes satisfy strict function-call constraints."""
+    if not isinstance(schema, dict):
+        return
+
+    if schema.get("type") == "object":
+        properties = schema.get("properties", {})
+        if isinstance(properties, dict):
+            schema["additionalProperties"] = False
+            for prop_schema in properties.values():
+                if isinstance(prop_schema, dict):
+                    _add_strict_object_constraints(prop_schema)
+
+    if schema.get("type") == "array":
+        items = schema.get("items")
+        if isinstance(items, dict):
+            _add_strict_object_constraints(items)
+
+    for key in ("anyOf", "oneOf", "allOf"):
+        variants = schema.get(key)
+        if isinstance(variants, list):
+            for variant in variants:
+                if isinstance(variant, dict):
+                    _add_strict_object_constraints(variant)
+
+
+def _json_schema_for_parameter(schema: dict[str, Any], *, strict: bool) -> dict[str, Any]:
+    prop = deepcopy(schema)
+    if strict:
+        _add_strict_object_constraints(prop)
+    return prop
+
+
 def build_parameters_schema(parameters: dict[str, ParameterInfo], *, strict: bool = True) -> dict[str, Any]:
     """
     Build a JSON Schema for function parameters.
@@ -201,7 +268,10 @@ def build_parameters_schema(parameters: dict[str, ParameterInfo], *, strict: boo
     required = []
 
     for name, param in parameters.items():
-        prop = python_type_to_json_schema(param.type_annotation, strict=strict)
+        if param.json_schema is not None:
+            prop = _json_schema_for_parameter(param.json_schema, strict=strict)
+        else:
+            prop = python_type_to_json_schema(param.type_annotation, strict=strict)
 
         if param.description:
             prop["description"] = param.description
@@ -231,7 +301,11 @@ def _build_function_tool_payload(tool: FunctionTool, *, strict: bool = True) -> 
     # mode requires every property to be listed in 'required'.
     # This must be computed BEFORE calling build_parameters_schema so that
     # strict validation does not raise for tools that will use non-strict mode.
-    has_optional = any(not p.required for p in tool.parameters.values())
+    has_optional = any(
+        not p.required
+        or (p.json_schema is not None and _json_schema_has_optional_properties(p.json_schema))
+        for p in tool.parameters.values()
+    )
     use_strict = strict and not has_optional
 
     params_schema = build_parameters_schema(tool.parameters, strict=use_strict)

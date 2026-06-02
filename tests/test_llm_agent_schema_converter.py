@@ -374,6 +374,46 @@ class TestWebhookToolSchema:
         assert "subject" in props
         assert "source" not in props
 
+    def test_litellm_nested_object_constants_preserve_object_schema(self):
+        from line.llm_agent.tools.system import webhook_tool
+
+        tool = webhook_tool(
+            name="create_ticket",
+            description="Create a ticket.",
+            url="https://example.com/api/tickets",
+            method="POST",
+            body_schema={
+                "type": "object",
+                "required": ["ticket"],
+                "properties": {
+                    "ticket": {
+                        "type": "object",
+                        "required": ["subject", "channel"],
+                        "properties": {
+                            "subject": {
+                                "type": "string",
+                                "description": "Ticket summary.",
+                            },
+                            "channel": {
+                                "type": "string",
+                                "constant_value": "voice",
+                            },
+                        },
+                    },
+                },
+            },
+        )
+
+        schema = function_tool_to_litellm(tool)
+        ticket_schema = schema["function"]["parameters"]["properties"]["ticket"]
+
+        assert ticket_schema["type"] == "object"
+        assert ticket_schema["required"] == ["subject"]
+        assert set(ticket_schema["properties"]) == {"subject"}
+        assert ticket_schema["properties"]["subject"]["type"] == "string"
+        assert ticket_schema["properties"]["subject"]["description"] == "Ticket summary."
+        assert ticket_schema["additionalProperties"] is False
+
     def test_litellm_required_correct(self, ticket_tool):
         schema = function_tool_to_litellm(ticket_tool)
         params = schema["function"]["parameters"]

@@ -173,6 +173,7 @@ class ParameterInfo:
     required: bool = True
     default: Any = None
     enum: Optional[List[Any]] = None
+    json_schema: Optional[Dict[str, Any]] = None
 
 
 def _get_tool_name(tool: Any) -> str:

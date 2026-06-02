@@ -215,6 +215,33 @@ async def test_nested_constant_values(server, ctx, anyio_backend):
     assert body["metadata"]["version"] == 2
 
 
+async def test_required_mixed_nested_object_remains_required(server, ctx, anyio_backend):
+    """Required nested objects stay required when they mix visible and constant children."""
+    tool = webhook_tool(
+        name="t",
+        description="d",
+        url=f"{server}/api/tickets",
+        method="POST",
+        body_schema={
+            "type": "object",
+            "required": ["ticket"],
+            "properties": {
+                "ticket": {
+                    "type": "object",
+                    "required": ["subject"],
+                    "properties": {
+                        "subject": {"type": "string"},
+                        "source": {"type": "string", "constant_value": "voice_agent"},
+                    },
+                },
+            },
+        },
+        is_background=False,
+    )
+
+    assert tool.parameters["ticket"].required is True
+
+
 async def test_url_template_params(server, ctx, anyio_backend):
     """URL template variables are interpolated and percent-encoded."""
     tool = webhook_tool(

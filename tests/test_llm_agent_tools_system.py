@@ -935,6 +935,36 @@ def test_webhook_tool_query_params_schema(anyio_backend):
     assert tool.parameters["q"].description == "Search query"
 
 
+def test_webhook_tool_query_schema_does_not_leak_constant_value(anyio_backend):
+    from line.llm_agent.schema_converter import function_tool_to_litellm
+
+    tool = webhook_tool(
+        name="t",
+        description="d",
+        url="https://example.com/search",
+        method="GET",
+        query_params_schema={
+            "type": "object",
+            "properties": {
+                "source": {"type": "string", "constant_value": "voice_agent"},
+                "mode": {
+                    "anyOf": [
+                        {"type": "string", "constant_value": "standard"},
+                        {"type": "integer"},
+                    ],
+                },
+            },
+        },
+    )
+
+    schema = function_tool_to_litellm(tool, strict=False)
+    properties = schema["function"]["parameters"]["properties"]
+    source_schema = properties["source"]
+    mode_schema = properties["mode"]
+    assert source_schema == {"type": "string"}
+    assert mode_schema == {"anyOf": [{"type": "string"}, {"type": "integer"}]}
+
+
 def test_webhook_tool_combined_params(anyio_backend):
     """URL template + body + query params all appear in parameters."""
     tool = webhook_tool(
@@ -1179,6 +1209,11 @@ def test_webhook_tool_nested_constant_value(anyio_backend):
     )
     # ticket is still visible (has non-constant children)
     assert "ticket" in tool.parameters
+    assert tool.parameters["ticket"].required is True
+    assert tool.parameters["ticket"].type_annotation is dict
+    assert tool.parameters["ticket"].json_schema["type"] == "object"
+    assert set(tool.parameters["ticket"].json_schema["properties"]) == {"subject"}
+    assert tool.parameters["ticket"].json_schema["required"] == ["subject"]
 
 
 async def test_webhook_tool_nested_constant_injected(mock_ctx, anyio_backend, monkeypatch):
