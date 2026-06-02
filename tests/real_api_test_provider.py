@@ -924,8 +924,8 @@ async def test_webhook_tool_calling(model: str, api_key: str, backend: Optional[
     )
 
     # 4. Query params sent
-    assert captured_request.get("params", {}).get("dry_run") is False, (
-        f"Expected dry_run=false in query params, got: {captured_request.get('params')}"
+    assert captured_request.get("params", {}).get("dry_run") == "false", (
+        f"Expected dry_run='false' in query params, got: {captured_request.get('params')}"
     )
 
     # 5. Top-level constant injected into body

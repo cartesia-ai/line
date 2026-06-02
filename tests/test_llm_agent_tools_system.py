@@ -892,6 +892,21 @@ def test_webhook_tool_query_params_schema_validation(anyio_backend):
         )
 
 
+@pytest.mark.parametrize("param_type", ["object", "array"])
+def test_webhook_tool_query_param_rejects_non_scalar_types(anyio_backend, param_type):
+    """Query params must be scalar — object and array types are rejected."""
+    with pytest.raises(ValueError, match="not supported in query_params_schema"):
+        webhook_tool(
+            name="t",
+            description="d",
+            url="https://example.com",
+            query_params_schema={
+                "type": "object",
+                "properties": {"x": {"type": param_type}},
+            },
+        )
+
+
 def test_webhook_tool_negative_timeout_raises(anyio_backend):
     with pytest.raises(ValueError, match="timeout must be positive"):
         webhook_tool(name="t", description="d", url="https://example.com", timeout=-1.0)

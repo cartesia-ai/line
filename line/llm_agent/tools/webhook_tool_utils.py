@@ -126,6 +126,16 @@ def _validate_property(
             f"Expected one of: {', '.join(sorted(TYPE_MAP))}.",
         )
 
+    # Query params must be scalars — objects and arrays can't be serialized
+    # to query strings.
+    if is_query and json_type in ("object", "array"):
+        raise error(
+            name,
+            f"{path} has type={json_type!r}, which is not supported in "
+            f"query_params_schema. Query parameters must be scalar "
+            f"(string, integer, number, or boolean).",
+        )
+
     # Validate constant_value type. bool is a subclass of int in Python,
     # but JSON schema treats them separately.
     if "constant_value" in prop_def:
