@@ -4,6 +4,7 @@ Built-in system tools for LLM agents.
 Provides end_call, send_dtmf, transfer_call, and web_search tools.
 """
 
+import json
 import os
 import re
 from dataclasses import dataclass, field
@@ -757,8 +758,12 @@ def webhook_tool(
             ``os.environ`` at build time (when ``webhook_tool()`` is called).
         headers: Additional static headers merged with resolved *auth* headers.
         timeout: Request timeout in seconds (passed to aiohttp).
-        is_background: If True (default) the tool runs as a background
-            loopback tool.
+        is_background: If True (default) the tool runs in a shielded
+            background task — the LLM can continue processing other tool
+            calls in the same turn and the task survives user interruption.
+            Note: the agent's ``process()`` call still waits for the result
+            before returning. Set to False if the LLM needs the response
+            before generating its reply.
 
     Returns:
         A FunctionTool that can be passed to LlmAgent's tools list.
@@ -1088,7 +1093,11 @@ def webhook_tool(
         if body:
             req_kwargs["json"] = body
         if query_params:
-            req_kwargs["params"] = query_params
+            # aiohttp params only accepts str/int/float values, not bool.
+            req_kwargs["params"] = {
+                k: str(v).lower() if isinstance(v, bool) else v
+                for k, v in query_params.items()
+            }
         if _timeout is not None:
             req_kwargs["timeout"] = aiohttp.ClientTimeout(total=_timeout)
 
@@ -1098,9 +1107,27 @@ def webhook_tool(
                     text = await resp.text()
                     if len(text) > _MAX_RESPONSE_CHARS:
                         text = text[:_MAX_RESPONSE_CHARS] + "... (truncated)"
-                    return f"{resp.status} {text}"
-        except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
-            return f"error: {type(exc).__name__}: {exc}"
+                    result: Dict[str, Any] = {
+                        "ok": 200 <= resp.status < 300,
+                        "status": resp.status,
+                    }
+                    if result["ok"]:
+                        result["body"] = text
+                    else:
+                        result["error"] = text
+                    return json.dumps(result)
+        except aiohttp.ClientError as exc:
+            return json.dumps({
+                "ok": False,
+                "status": None,
+                "error": f"Request failed: {type(exc).__name__}: {exc}",
+            })
+        except asyncio.TimeoutError:
+            return json.dumps({
+                "ok": False,
+                "status": None,
+                "error": f"Request timed out after {_timeout}s.",
+            })
 
     # -- 7. Construct FunctionTool directly -------------------------------------
     return FunctionTool(

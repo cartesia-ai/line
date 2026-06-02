@@ -4,6 +4,7 @@ Tests for built-in tools.
 uv run pytest tests/test_llm_agent_tools_system.py -v
 """
 
+import json
 from typing import List, Optional
 from unittest.mock import MagicMock
 
@@ -1008,11 +1009,14 @@ async def test_webhook_tool_http_call(mock_ctx, anyio_backend, monkeypatch):
     assert captured["method"] == "POST"
     assert captured["url"] == "https://example.com/api/acme/tickets"
     assert captured["json"] == {"source": "voice_agent", "subject": "Help me"}
-    assert captured["params"] == {"notify": True}
+    assert captured["params"] == {"notify": "true"}
     assert captured["headers"]["Authorization"] == "Bearer sk-test"
     assert captured["headers"]["X-Custom"] == "value"
     assert captured["timeout"].total == 5.0
-    assert result == '201 {"id": "t-1"}'
+    parsed = json.loads(result)
+    assert parsed["ok"] is True
+    assert parsed["status"] == 201
+    assert '"id": "t-1"' in parsed["body"]
 
 
 async def test_webhook_tool_http_error_handling(mock_ctx, anyio_backend, monkeypatch):
@@ -1038,8 +1042,10 @@ async def test_webhook_tool_http_error_handling(mock_ctx, anyio_backend, monkeyp
     monkeypatch.setattr("aiohttp.ClientSession", lambda: _ErrorSession())
 
     result = await tool.func(mock_ctx)
-    assert result.startswith("error:")
-    assert "ClientConnectionError" in result
+    parsed = json.loads(result)
+    assert parsed["ok"] is False
+    assert parsed["status"] is None
+    assert "ClientConnectionError" in parsed["error"]
 
 
 async def test_webhook_tool_response_truncation(mock_ctx, anyio_backend, monkeypatch):
@@ -1048,8 +1054,10 @@ async def test_webhook_tool_response_truncation(mock_ctx, anyio_backend, monkeyp
     _fake_aiohttp(monkeypatch, body="x" * 10_000)
 
     result = await tool.func(mock_ctx)
-    assert result.endswith("... (truncated)")
-    assert len(result) < 10_000
+    parsed = json.loads(result)
+    assert parsed["ok"] is True
+    assert parsed["body"].endswith("... (truncated)")
+    assert len(parsed["body"]) < 5000
 
 
 async def test_webhook_tool_unknown_kwargs_ignored(mock_ctx, anyio_backend, monkeypatch):
@@ -1107,7 +1115,10 @@ async def test_webhook_tool_get_request_no_body(mock_ctx, anyio_backend, monkeyp
     assert captured["method"] == "GET"
     assert captured["params"] == {"order_id": "ORD-123"}
     assert "json" not in captured
-    assert result == '200 {"status": "shipped"}'
+    parsed = json.loads(result)
+    assert parsed["ok"] is True
+    assert parsed["status"] == 200
+    assert "shipped" in parsed["body"]
 
 
 async def test_webhook_tool_url_params_are_encoded(mock_ctx, anyio_backend, monkeypatch):
