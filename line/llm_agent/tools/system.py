@@ -808,6 +808,10 @@ def webhook_tool(
     def _err(msg: str) -> ValueError:
         return ValueError(f"webhook_tool(name={name!r}): {msg}")
 
+    def _has_object_properties(schema: Dict[str, Any]) -> bool:
+        """Return True for object schemas that declare nested properties."""
+        return "properties" in schema and schema.get("type") in (None, "object")
+
     # -- 0. Validate inputs -----------------------------------------------------
     if not name or not name.strip():
         raise ValueError("webhook_tool: name must be a non-empty string.")
@@ -835,12 +839,14 @@ def webhook_tool(
     if _brace_depth != 0:
         raise _err(f"url has unmatched opening brace: {url!r}")
 
-    def _validate_schema(schema: Dict[str, Any], label: str) -> None:
+    def _validate_schema(
+        schema: Dict[str, Any], label: str, *, allow_omitted_type: bool = False
+    ) -> None:
         """Validate a body_schema or query_params_schema dict."""
         if not isinstance(schema, dict):
             raise _err(f"{label} must be a dict, got {type(schema).__name__}.")
         schema_type = schema.get("type")
-        if schema_type != "object":
+        if schema_type != "object" and not (allow_omitted_type and schema_type is None):
             raise _err(
                 f"{label} must have \"type\": \"object\", "
                 f"got \"type\": {schema_type!r}."
@@ -890,9 +896,10 @@ def webhook_tool(
                     f"{path} declares type={json_type!r} but "
                     f"constant_value={cv!r} is {type(cv).__name__}."
                 )
-        # Recurse into nested objects
-        if prop_def.get("type") == "object" and "properties" in prop_def:
-            _validate_schema(prop_def, path)
+        # Recurse into nested object schemas. JSON Schema allows "properties"
+        # without an explicit "type", but webhook constants still need hiding.
+        if _has_object_properties(prop_def):
+            _validate_schema(prop_def, path, allow_omitted_type=True)
 
     if body_schema is not None:
         _validate_schema(body_schema, "body_schema")
@@ -949,7 +956,7 @@ def webhook_tool(
         for prop_name, prop_def in properties.items():
             if "constant_value" in prop_def:
                 constants[prop_name] = prop_def["constant_value"]
-            elif prop_def.get("type") == "object" and "properties" in prop_def:
+            elif _has_object_properties(prop_def):
                 # Recurse into nested objects.
                 nested_req = list(prop_def.get("required", []))
                 child_vis, child_req, child_const = _strip_constants(
@@ -959,6 +966,7 @@ def webhook_tool(
                     constants[prop_name] = child_const
                 if child_vis:
                     cleaned = dict(prop_def)
+                    cleaned.setdefault("type", "object")
                     cleaned["properties"] = child_vis
                     if child_req:
                         cleaned["required"] = child_req
@@ -1014,7 +1022,9 @@ def webhook_tool(
     def _param_info(
         prop_name: str, prop_def: Dict[str, Any], required_list: list[str]
     ) -> ParameterInfo:
-        json_type = prop_def.get("type", "string")
+        json_type = (
+            "object" if _has_object_properties(prop_def) else prop_def.get("type", "string")
+        )
         py_type = _TYPE_MAP[json_type][0] if json_type in _TYPE_MAP else str
         desc = prop_def.get("description", "")
         enum = prop_def.get("enum")
@@ -1056,7 +1066,8 @@ def webhook_tool(
     _constant_values = constant_values
     _body_prop_names = set(body_properties)
     _query_prop_names = set(query_properties)
-    _url_param_names = set(url_params)
+    _url_param_order = tuple(dict.fromkeys(url_params))
+    _url_param_names = set(_url_param_order)
     _resolved_headers = resolved_headers
     _timeout = timeout
 
@@ -1081,6 +1092,19 @@ def webhook_tool(
         final_url = _url_template
         query_params: Dict[str, Any] = {}
         body: Dict[str, Any] = {}
+
+        missing_url_params = [
+            p for p in _url_param_order if p not in kwargs or kwargs[p] is None
+        ]
+        if missing_url_params:
+            return json.dumps({
+                "ok": False,
+                "status": None,
+                "error": (
+                    "Missing required URL path parameter(s): "
+                    f"{', '.join(missing_url_params)}."
+                ),
+            })
 
         from urllib.parse import quote
 

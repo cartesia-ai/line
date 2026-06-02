@@ -215,6 +215,39 @@ async def test_nested_constant_values(server, ctx, anyio_backend):
     assert body["metadata"]["version"] == 2
 
 
+async def test_nested_constant_values_without_object_type(server, ctx, anyio_backend):
+    """Object-like schemas still hide and inject constants when type is omitted."""
+    tool = webhook_tool(
+        name="t",
+        description="d",
+        url=f"{server}/api/tickets",
+        method="POST",
+        body_schema={
+            "type": "object",
+            "required": ["subject"],
+            "properties": {
+                "subject": {"type": "string"},
+                "metadata": {
+                    "properties": {
+                        "channel": {"type": "string", "constant_value": "phone"},
+                        "version": {"type": "integer", "constant_value": 2},
+                    },
+                },
+            },
+        },
+        is_background=False,
+    )
+
+    assert "metadata" not in tool.parameters
+
+    await tool.func(ctx, subject="Test")
+
+    body = _log.last["body"]
+    assert body["subject"] == "Test"
+    assert body["metadata"]["channel"] == "phone"
+    assert body["metadata"]["version"] == 2
+
+
 async def test_required_mixed_nested_object_remains_required(server, ctx, anyio_backend):
     """Required nested objects stay required when they mix visible and constant children."""
     tool = webhook_tool(
@@ -263,6 +296,38 @@ async def test_url_template_params(server, ctx, anyio_backend):
     # spaces should be percent-encoded
     assert req["path"] == "/orgs/acme%20corp/tickets"
     assert req["body"]["subject"] == "Issue"
+
+
+@pytest.mark.parametrize(
+    "tool_kwargs",
+    [
+        {"subject": "Issue"},
+        {"org_id": None, "subject": "Issue"},
+    ],
+)
+async def test_missing_url_template_param_fails_before_request(
+    server, ctx, anyio_backend, tool_kwargs
+):
+    """Missing or null URL template variables fail without sending a request."""
+    tool = webhook_tool(
+        name="t",
+        description="d",
+        url=f"{server}/orgs/{{org_id}}/tickets",
+        method="POST",
+        body_schema={
+            "type": "object",
+            "required": ["subject"],
+            "properties": {"subject": {"type": "string"}},
+        },
+        is_background=False,
+    )
+
+    result = json.loads(await tool.func(ctx, **tool_kwargs))
+
+    assert result["ok"] is False
+    assert result["status"] is None
+    assert "Missing required URL path parameter(s): org_id" in result["error"]
+    assert _log.requests == []
 
 
 async def test_query_params(server, ctx, anyio_backend):
