@@ -1,5 +1,7 @@
 # Cartesia Line SDK
 
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/cartesia-ai/line)
+
 Build intelligent, low-latency voice agents with Line.
 
 Line brings voice to your text agents with Cartesia's state-of-the-art speech models. We handle audio orchestration, deployment, and observability so you can focus on your agent's reasoning.
