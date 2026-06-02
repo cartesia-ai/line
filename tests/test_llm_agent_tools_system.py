@@ -734,6 +734,72 @@ def test_webhook_tool_constant_value_type_mismatch_raises(anyio_backend):
         )
 
 
+def test_webhook_tool_integer_constant_value_rejects_bool(anyio_backend):
+    with pytest.raises(ValueError, match="type='integer'.*constant_value=True is bool"):
+        webhook_tool(
+            name="t",
+            description="d",
+            url="https://example.com",
+            body_schema={
+                "type": "object",
+                "properties": {
+                    "count": {"type": "integer", "constant_value": True},
+                },
+            },
+        )
+
+
+def test_webhook_tool_number_constant_value_rejects_bool(anyio_backend):
+    with pytest.raises(ValueError, match="type='number'.*constant_value=False is bool"):
+        webhook_tool(
+            name="t",
+            description="d",
+            url="https://example.com",
+            body_schema={
+                "type": "object",
+                "properties": {
+                    "amount": {"type": "number", "constant_value": False},
+                },
+            },
+        )
+
+
+def test_webhook_tool_query_integer_constant_value_rejects_bool(anyio_backend):
+    with pytest.raises(ValueError, match="type='integer'.*constant_value=True is bool"):
+        webhook_tool(
+            name="t",
+            description="d",
+            url="https://example.com",
+            query_params_schema={
+                "type": "object",
+                "properties": {
+                    "count": {"type": "integer", "constant_value": True},
+                },
+            },
+        )
+
+
+@pytest.mark.parametrize("constant_value", [{"x": 1}, ["x"], None])
+def test_webhook_tool_query_constant_value_rejects_non_scalar(
+    constant_value, anyio_backend
+):
+    with pytest.raises(
+        ValueError,
+        match="query_params_schema.*constant_value must be a scalar",
+    ):
+        webhook_tool(
+            name="t",
+            description="d",
+            url="https://example.com",
+            query_params_schema={
+                "type": "object",
+                "properties": {
+                    "fixed": {"constant_value": constant_value},
+                },
+            },
+        )
+
+
 def test_webhook_tool_constant_value_bool_mismatch_raises(anyio_backend):
     with pytest.raises(ValueError, match="constant_value.*is int"):
         webhook_tool(
@@ -974,6 +1040,7 @@ def test_webhook_tool_query_schema_does_not_leak_constant_value(anyio_backend):
         method="GET",
         query_params_schema={
             "type": "object",
+            "required": ["source", "mode"],
             "properties": {
                 "source": {"type": "string", "constant_value": "voice_agent"},
                 "mode": {
@@ -988,9 +1055,10 @@ def test_webhook_tool_query_schema_does_not_leak_constant_value(anyio_backend):
 
     schema = function_tool_to_litellm(tool, strict=False)
     properties = schema["function"]["parameters"]["properties"]
-    source_schema = properties["source"]
     mode_schema = properties["mode"]
-    assert source_schema == {"type": "string"}
+    required = schema["function"]["parameters"]["required"]
+    assert "source" not in properties
+    assert required == ["mode"]
     assert mode_schema == {"anyOf": [{"type": "string"}, {"type": "integer"}]}
 
 

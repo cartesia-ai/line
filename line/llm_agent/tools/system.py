@@ -777,7 +777,7 @@ def webhook_tool(
     """Create an HTTP webhook tool that the LLM can call.
 
     The LLM only sees parameters that do not carry a ``constant_value`` key in the
-    schema. Constants are baked into the request body automatically.
+    schema. Constants are baked into the request automatically.
 
     Args:
         name: Tool name shown to the LLM.
@@ -789,7 +789,8 @@ def webhook_tool(
             Properties with a ``constant_value`` key are hidden from the LLM
             and baked into every request.
         query_params_schema: JSON-schema object describing query parameters.
-            All properties are LLM-visible.
+            Properties with a ``constant_value`` key are hidden from the LLM
+            and baked into the query string.
         auth: Header dict with ``${ENV_VAR}`` placeholders resolved from
             ``os.environ`` at build time (when ``webhook_tool()`` is called).
         headers: Additional static headers merged with resolved *auth* headers.
@@ -910,11 +911,18 @@ def webhook_tool(
                 f"{path} has unknown type {json_type!r}. "
                 f"Expected one of: {', '.join(sorted(_TYPE_MAP))}."
             )
-        # Validate constant_value matches declared type
+        # Validate constant_value matches declared type. bool is a subclass of
+        # int in Python, but JSON schema treats booleans and numbers separately.
         if "constant_value" in prop_def and json_type is not None:
             cv = prop_def["constant_value"]
             _, allowed = _TYPE_MAP[json_type]
-            if not isinstance(cv, allowed):
+            if json_type == "integer":
+                valid_constant = type(cv) is int
+            elif json_type == "number":
+                valid_constant = isinstance(cv, (int, float)) and not isinstance(cv, bool)
+            else:
+                valid_constant = isinstance(cv, allowed)
+            if not valid_constant:
                 raise _err(
                     f"{path} declares type={json_type!r} but "
                     f"constant_value={cv!r} is {type(cv).__name__}."
@@ -1000,6 +1008,26 @@ def webhook_tool(
         visible_required = [r for r in required if r in visible]
         return visible, visible_required, constants
 
+    def _strip_query_constants(
+        properties: Dict[str, Any], required: list[str]
+    ) -> tuple[Dict[str, Any], list[str], Dict[str, Any]]:
+        """Strip top-level scalar constants from flat query parameters."""
+        visible: Dict[str, Any] = {}
+        constants: Dict[str, Any] = {}
+        for prop_name, prop_def in properties.items():
+            if "constant_value" in prop_def:
+                value = prop_def["constant_value"]
+                if value is None or isinstance(value, (dict, list)):
+                    raise _err(
+                        f"query_params_schema.properties.{prop_name}.constant_value "
+                        "must be a scalar string, number, or boolean."
+                    )
+                constants[prop_name] = value
+            else:
+                visible[prop_name] = prop_def
+        visible_required = [r for r in required if r in visible]
+        return visible, visible_required, constants
+
     body_properties: Dict[str, Any] = {}
     body_required: list[str] = []
     constant_values: Dict[str, Any] = {}
@@ -1013,11 +1041,13 @@ def webhook_tool(
     # -- 3. Parse query_params_schema -------------------------------------------
     query_properties: Dict[str, Any] = {}
     query_required: list[str] = []
+    query_constant_values: Dict[str, Any] = {}
 
     if query_params_schema:
-        query_required = list(query_params_schema.get("required", []))
-        for prop_name, prop_def in query_params_schema.get("properties", {}).items():
-            query_properties[prop_name] = prop_def
+        query_properties, query_required, query_constant_values = _strip_query_constants(
+            query_params_schema.get("properties", {}),
+            list(query_params_schema.get("required", [])),
+        )
 
     # -- 4. Build ParameterInfo for all LLM-visible params ----------------------
     parameters: Dict[str, ParameterInfo] = {}
@@ -1084,6 +1114,7 @@ def webhook_tool(
     _url_template = url
     _method = method.upper()
     _constant_values = constant_values
+    _query_constant_values = query_constant_values
     _body_prop_names = set(body_properties)
     _query_prop_names = set(query_properties)
     _url_param_order = tuple(dict.fromkeys(url_params))
@@ -1135,6 +1166,9 @@ def webhook_tool(
                 query_params[k] = v
             elif k in _body_prop_names:
                 body[k] = v
+
+        if _query_constant_values:
+            query_params.update(_query_constant_values)
 
         # Deep-merge constants into body — constants win over LLM values.
         if _constant_values:

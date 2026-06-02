@@ -14,6 +14,7 @@ import time
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Any, Dict, List
+from urllib.parse import parse_qs
 from unittest.mock import MagicMock
 
 import pytest
@@ -380,6 +381,39 @@ async def test_query_params(server, ctx, anyio_backend):
     assert "q=hello" in req["query"]
     assert "limit=5" in req["query"]
     assert "verbose=true" in req["query"]
+
+
+async def test_query_params_with_constants(server, ctx, anyio_backend):
+    """constant_value query params are hidden from the LLM and still sent."""
+    tool = webhook_tool(
+        name="t",
+        description="d",
+        url=f"{server}/search",
+        method="GET",
+        query_params_schema={
+            "type": "object",
+            "required": ["q", "api_key"],
+            "properties": {
+                "q": {"type": "string"},
+                "api_key": {"type": "string", "constant_value": "public-token"},
+                "include_archived": {"type": "boolean", "constant_value": False},
+            },
+        },
+        is_background=False,
+    )
+
+    assert "api_key" not in tool.parameters
+    assert "include_archived" not in tool.parameters
+
+    await tool.func(ctx, q="hello world")
+
+    req = _log.last
+    assert req["method"] == "GET"
+    assert req["body"] is None
+    parsed_query = parse_qs(req["query"])
+    assert parsed_query["q"] == ["hello world"]
+    assert parsed_query["api_key"] == ["public-token"]
+    assert parsed_query["include_archived"] == ["false"]
 
 
 async def test_custom_headers(server, ctx, anyio_backend):
