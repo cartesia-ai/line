@@ -53,6 +53,14 @@ from typing import Annotated, Any, Literal, Optional, Type, Union, get_args, get
 
 from line.llm_agent.tools.utils import FunctionTool, ParameterInfo
 
+_BASIC_TYPE_SCHEMAS: dict[type, dict[str, str]] = {
+    str: {"type": "string"},
+    int: {"type": "integer"},
+    float: {"type": "number"},
+    bool: {"type": "boolean"},
+    list: {"type": "array"},
+}
+
 
 def _is_typeddict(tp: Type) -> bool:
     """Check if a type is a TypedDict.
@@ -126,17 +134,9 @@ def python_type_to_json_schema(type_annotation: Type, *, strict: bool = True) ->
     if type_annotation is type(None):
         return {"type": "null"}
 
-    # Handle basic types
-    type_map = {
-        str: {"type": "string"},
-        int: {"type": "integer"},
-        float: {"type": "number"},
-        bool: {"type": "boolean"},
-        list: {"type": "array"},
-    }
-
-    if type_annotation in type_map:
-        return type_map[type_annotation]
+    # Handle basic types — return a copy since callers may mutate (e.g. add "description")
+    if type_annotation in _BASIC_TYPE_SCHEMAS:
+        return dict(_BASIC_TYPE_SCHEMAS[type_annotation])
 
     # Handle plain dict - error in strict mode since it cannot satisfy OpenAI strict rules
     if type_annotation is dict:

@@ -213,15 +213,32 @@ create_ticket = http_server_tool(
 
 The LLM sees `tenant_id` (from URL), `subject` (required), and `priority` (optional — not in `required`). It never sees `source` or the API key.
 
+**Path parameters** are inferred from `{param}` in the URL as required strings. Use `path_params_schema` for custom descriptions or types:
+
+```python
+update_item = http_server_tool(
+    name="update_item",
+    description="Update an item.",
+    url="https://api.example.com/items/{item_id}",
+    method="PATCH",
+    path_params_schema={
+        "item_id": {"type": "integer", "description": "Numeric item ID."},
+    },
+    request_body_schema={...},
+)
+```
+
 **Parameters:**
 
 | Parameter | Description |
 |-----------|-------------|
-| `url` | Supports `{param}` templating — each variable becomes a required string parameter |
+| `url` | Supports `{param}` templating — each variable becomes a required path parameter |
+| `path_params_schema` | Optional dict mapping `{param}` names to `{"type": ..., "description": ...}`. If omitted, path params default to required strings |
 | `request_body_schema` | JSON body schema (see schema format below) |
 | `query_params_schema` | Query string schema — same format but scalars only (no objects/arrays) |
 | `auth` | Headers with `${ENV_VAR}` placeholders resolved from `os.environ` at build time |
 | `headers` | Additional static headers (must not overlap with `auth` keys) |
+| `content_type` | `"application/json"` (default) or `"application/x-www-form-urlencoded"` |
 | `timeout` | Request timeout in seconds (must be positive) |
 | `is_background` | Run in shielded background task (default `True`) |
 

@@ -137,6 +137,65 @@ agent = LlmAgent(
 | `transfer_call` | Transfers to a phone number (E.164 format) |
 | `web_search` | Searches the web (native LLM search or DuckDuckGo fallback) |
 | `knowledge_base` | Looks up information from the agent's knowledge base via natural-language query. Call `knowledge_base(filters={...}, top_k=10)` to pre-filter retrievals or override `top_k` |
+| `webhook_tool` | Creates an HTTP webhook tool (see below) |
+
+### Webhook Tools — Connect to HTTP APIs Without Code
+
+`webhook_tool` creates a tool that makes HTTP requests when the LLM calls it. Define the request shape with JSON schemas — no custom tool function needed:
+
+```python
+from line.llm_agent import webhook_tool
+
+create_ticket = webhook_tool(
+    name="create_ticket",
+    description="Creates a support ticket for the caller.",
+    url="https://api.example.com/v1/{tenant_id}/tickets",
+    method="POST",
+    request_body_schema={
+        "type": "object",
+        "required": ["subject", "priority"],
+        "properties": {
+            "subject": {"type": "string", "description": "Short summary of the issue."},
+            "priority": {"type": "string", "enum": ["low", "medium", "high"]},
+            # constant_value: hidden from the LLM, baked into every request
+            "source": {"type": "string", "constant_value": "voice_agent"},
+        },
+    },
+    # ${ENV_VAR} resolved from os.environ at build time
+    auth={"Authorization": "Bearer ${SUPPORT_API_KEY}"},
+)
+
+agent = LlmAgent(tools=[create_ticket, end_call], ...)
+```
+
+The LLM sees `subject`, `priority`, and `tenant_id` (from the URL template). It never sees `source` — that's injected automatically. The `${SUPPORT_API_KEY}` is resolved from your environment when the tool is created.
+
+**Query parameter tools** work the same way for GET requests:
+
+```python
+search_orders = webhook_tool(
+    name="search_orders",
+    description="Search orders by status.",
+    url="https://api.example.com/orders",
+    method="GET",
+    query_params_schema={
+        "type": "object",
+        "required": ["status"],
+        "properties": {
+            "status": {"type": "string", "enum": ["pending", "shipped", "delivered"]},
+            "api_key": {"type": "string", "constant_value": "pk_live_abc123"},
+        },
+    },
+)
+```
+
+**Response format** — the LLM always receives structured JSON:
+
+```json
+{"ok": true,  "status": 201, "body": "{\"ticket_id\": \"TKT-001\"}"}
+{"ok": false, "status": 500, "error": "Internal server error"}
+{"ok": false, "status": null, "error": "Request timed out after 5.0s."}
+```
 
 ### Loopback Tools — Fetch Data & Call APIs
 
