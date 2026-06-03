@@ -735,10 +735,12 @@ def http_server_tool(
     description: str,
     url: str,
     method: str = "POST",
+    path_params_schema: Optional[Dict[str, Dict[str, Any]]] = None,
     request_body_schema: Optional[Dict[str, Any]] = None,
     query_params_schema: Optional[Dict[str, Any]] = None,
     auth: Optional[Dict[str, str]] = None,
     headers: Optional[Dict[str, str]] = None,
+    content_type: str = "application/json",
     timeout: Optional[float] = None,
     is_background: bool = True,
 ) -> FunctionTool:
@@ -755,6 +757,10 @@ def http_server_tool(
         description: Tool description shown to the LLM.
         url: Request URL. Supports {param} templating.
         method: HTTP method (default "POST").
+        path_params_schema: Dict mapping {param} names to property defs
+            with "type" and "description". If omitted, path params are
+            inferred from the URL as required strings. All path params
+            are always required.
         request_body_schema: JSON Schema dict with "type": "object" and
             "properties". Properties in "required" must be filled by the
             LLM; others are optional. Supports nested objects and
@@ -763,6 +769,8 @@ def http_server_tool(
             (string, integer, number, boolean).
         auth: Headers with ${ENV_VAR} placeholders resolved from os.environ.
         headers: Additional static headers (must not overlap with auth).
+        content_type: Request body content type. "application/json" (default)
+            or "application/x-www-form-urlencoded".
         timeout: Request timeout in seconds.
         is_background: Run in shielded background task (default True).
 
@@ -814,10 +822,37 @@ def http_server_tool(
         )
     path_params = http_server_tool_utils.parse_path_params(name, url)
 
+    if path_params_schema is not None:
+        # Validate that path_params_schema keys match URL template variables.
+        schema_keys = set(path_params_schema.keys())
+        url_keys = set(path_params)
+        extra = schema_keys - url_keys
+        missing = url_keys - schema_keys
+        if extra:
+            raise _err(f"path_params_schema has keys not in URL: {extra}.")
+        if missing:
+            raise _err(f"path_params_schema is missing keys from URL: {missing}.")
+        # Validate each property is a scalar type.
+        for param_name, param_def in path_params_schema.items():
+            if not isinstance(param_def, dict):
+                raise _err(f"path_params_schema[{param_name!r}] must be a dict.")
+            param_type = param_def.get("type")
+            if param_type is not None and param_type not in ("string", "integer", "number"):
+                raise _err(
+                    f"path_params_schema[{param_name!r}] has type={param_type!r}. "
+                    f"Path parameters must be string, integer, or number."
+                )
+
     if request_body_schema is not None:
         http_server_tool_utils.validate_body_schema(name, request_body_schema, "request_body_schema")
     if query_params_schema is not None:
         http_server_tool_utils.validate_query_schema(name, query_params_schema, "query_params_schema")
+    _VALID_CONTENT_TYPES = {"application/json", "application/x-www-form-urlencoded"}
+    if content_type not in _VALID_CONTENT_TYPES:
+        raise _err(
+            f"content_type={content_type!r} is not supported. "
+            f"Expected one of: {', '.join(sorted(_VALID_CONTENT_TYPES))}."
+        )
     if timeout is not None and timeout <= 0:
         raise _err(f"timeout must be positive, got {timeout}.")
 
@@ -862,12 +897,22 @@ def http_server_tool(
     parameters: Dict[str, ParameterInfo] = {}
 
     for p in path_params:
-        parameters[p] = ParameterInfo(
-            name=p,
-            type_annotation=str,
-            description=f"URL path parameter '{p}'",
-            required=True,
-        )
+        if path_params_schema and p in path_params_schema:
+            prop_def = path_params_schema[p]
+            py_type = http_server_tool_utils.TYPE_MAP.get(prop_def.get("type", "string"), (str,))[0]
+            parameters[p] = ParameterInfo(
+                name=p,
+                type_annotation=py_type,
+                description=prop_def.get("description", f"URL path parameter '{p}'"),
+                required=True,
+            )
+        else:
+            parameters[p] = ParameterInfo(
+                name=p,
+                type_annotation=str,
+                description=f"URL path parameter '{p}'",
+                required=True,
+            )
 
     for prop_name, prop_def in request_body_properties.items():
         parameters[prop_name] = http_server_tool_utils.build_param_info(
@@ -879,7 +924,7 @@ def http_server_tool(
     # Validate no parameter name collisions across sources
     _seen_names: Dict[str, str] = {}
     for source_label, names in [
-        ("url", set(path_params)),
+        ("path_params", set(path_params)),
         ("request_body_schema", set(request_body_properties)),
         ("query_params_schema", set(query_properties)),
     ]:
@@ -929,7 +974,10 @@ def http_server_tool(
             "headers": resolved_headers or None,
         }
         if body:
-            req_kwargs["json"] = body
+            if content_type == "application/x-www-form-urlencoded":
+                req_kwargs["data"] = body
+            else:
+                req_kwargs["json"] = body
         if query_params:
             req_kwargs["params"] = {
                 k: str(v).lower() if isinstance(v, bool) else v for k, v in query_params.items()

@@ -5,7 +5,7 @@ Extracted from system.py to keep http_server_tool() concise.
 
 import os
 import re
-from typing import Any, Dict
+from typing import Annotated, Any, Dict, Literal, Type
 
 from line.llm_agent.tools.utils import ParameterInfo
 
@@ -240,17 +240,80 @@ def strip_constants(
 
 
 def build_param_info(prop_name: str, prop_def: Dict[str, Any], required_list: list[str]) -> ParameterInfo:
-    """Build a ParameterInfo from a JSON schema property definition."""
-    json_type = "object" if has_object_properties(prop_def) else prop_def.get("type", "string")
-    py_type = TYPE_MAP[json_type][0] if json_type in TYPE_MAP else str
+    """Build a ParameterInfo from a JSON schema property definition.
+
+    Converts the JSON schema to a Python type via json_schema_to_python_type,
+    which round-trips through python_type_to_json_schema to produce the
+    provider schema. Description and enum are carried by the Python type
+    (via Annotated and Literal), so they don't need separate fields.
+    """
+    py_type = json_schema_to_python_type(prop_def)
     return ParameterInfo(
         name=prop_name,
         type_annotation=py_type,
-        description=prop_def.get("description", ""),
         required=prop_name in required_list,
-        enum=prop_def.get("enum"),
-        json_schema=prop_def,
+        description="",
     )
+
+
+_BASIC_TYPE_MAP: Dict[str, type] = {
+    "string": str,
+    "integer": int,
+    "number": float,
+    "boolean": bool,
+}
+
+_typeddict_counter = 0
+
+
+def _next_typeddict_name() -> str:
+    global _typeddict_counter
+    _typeddict_counter += 1
+    return f"_schema_{_typeddict_counter}"
+
+
+def _with_description(base: Type, description: str | None) -> Type:
+    return Annotated[base, description] if description else base
+
+
+def json_schema_to_python_type(schema: Dict[str, Any]) -> Type:
+    """Convert a JSON schema property dict to a Python type.
+
+    The returned type round-trips through python_type_to_json_schema
+    to reproduce the original schema (including nested descriptions).
+    """
+    from typing import TypedDict
+
+    json_type = schema.get("type", "string")
+    description = schema.get("description")
+    enum = schema.get("enum")
+
+    if enum is not None:
+        base = Literal[tuple(enum)]  # type: ignore[valid-type]
+        return _with_description(base, description)
+
+    if has_object_properties(schema):
+        props = schema.get("properties", {})
+        required_keys = set(schema.get("required", []))
+        fields = {name: json_schema_to_python_type(defn) for name, defn in props.items()}
+        td = TypedDict(_next_typeddict_name(), fields)  # type: ignore[call-overload]
+        td.__required_keys__ = frozenset(required_keys & set(fields))
+        td.__optional_keys__ = frozenset(set(fields) - required_keys)
+        return _with_description(td, description)
+
+    if json_type == "array":
+        items = schema.get("items")
+        if items and isinstance(items, dict):
+            base = list[json_schema_to_python_type(items)]  # type: ignore[misc]
+        else:
+            base = list
+        return _with_description(base, description)
+
+    if json_type == "object":
+        return _with_description(dict, description)
+
+    base = _BASIC_TYPE_MAP.get(json_type, str)
+    return _with_description(base, description)
 
 
 def deep_merge(base: Dict[str, Any], overlay: Dict[str, Any]) -> Dict[str, Any]:

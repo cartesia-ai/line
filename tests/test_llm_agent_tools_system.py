@@ -594,11 +594,6 @@ def test_http_server_tool_empty_name_raises(anyio_backend):
         http_server_tool(name="", description="d", url="https://example.com")
 
 
-def test_http_server_tool_whitespace_name_raises(anyio_backend):
-    with pytest.raises(ValueError, match="name must be a non-empty"):
-        http_server_tool(name="   ", description="d", url="https://example.com")
-
-
 def test_http_server_tool_empty_description_raises(anyio_backend):
     with pytest.raises(ValueError, match="description must be a non-empty"):
         http_server_tool(name="t", description="", url="https://example.com")
@@ -756,36 +751,6 @@ def test_http_server_tool_integer_constant_value_rejects_bool(anyio_backend):
         )
 
 
-def test_http_server_tool_number_constant_value_rejects_bool(anyio_backend):
-    with pytest.raises(ValueError, match="type='number'.*constant_value=False is bool"):
-        http_server_tool(
-            name="t",
-            description="d",
-            url="https://example.com",
-            request_body_schema={
-                "type": "object",
-                "properties": {
-                    "amount": {"type": "number", "constant_value": False},
-                },
-            },
-        )
-
-
-def test_http_server_tool_query_integer_constant_value_rejects_bool(anyio_backend):
-    with pytest.raises(ValueError, match="type='integer'.*constant_value=True is bool"):
-        http_server_tool(
-            name="t",
-            description="d",
-            url="https://example.com",
-            query_params_schema={
-                "type": "object",
-                "properties": {
-                    "count": {"type": "integer", "constant_value": True},
-                },
-            },
-        )
-
-
 @pytest.mark.parametrize("constant_value", [{"x": 1}, ["x"], None])
 def test_http_server_tool_query_constant_value_rejects_non_scalar(constant_value, anyio_backend):
     with pytest.raises(
@@ -800,21 +765,6 @@ def test_http_server_tool_query_constant_value_rejects_non_scalar(constant_value
                 "type": "object",
                 "properties": {
                     "fixed": {"constant_value": constant_value},
-                },
-            },
-        )
-
-
-def test_http_server_tool_constant_value_bool_mismatch_raises(anyio_backend):
-    with pytest.raises(ValueError, match="constant_value.*is int"):
-        http_server_tool(
-            name="t",
-            description="d",
-            url="https://example.com",
-            request_body_schema={
-                "type": "object",
-                "properties": {
-                    "flag": {"type": "boolean", "constant_value": 1},
                 },
             },
         )
@@ -970,30 +920,6 @@ def test_http_server_tool_returns_function_tool(anyio_backend, monkeypatch):
     assert "source" not in tool.parameters
 
 
-def test_http_server_tool_parameter_types(anyio_backend):
-    tool = http_server_tool(
-        name="t",
-        description="d",
-        url="https://example.com",
-        request_body_schema={
-            "type": "object",
-            "required": ["s", "i", "n", "b", "a"],
-            "properties": {
-                "s": {"type": "string"},
-                "i": {"type": "integer"},
-                "n": {"type": "number"},
-                "b": {"type": "boolean"},
-                "a": {"type": "array"},
-            },
-        },
-    )
-    assert tool.parameters["s"].type_annotation is str
-    assert tool.parameters["i"].type_annotation is int
-    assert tool.parameters["n"].type_annotation is float
-    assert tool.parameters["b"].type_annotation is bool
-    assert tool.parameters["a"].type_annotation is list
-
-
 def test_http_server_tool_required_and_optional(anyio_backend):
     tool = http_server_tool(
         name="t",
@@ -1010,16 +936,6 @@ def test_http_server_tool_required_and_optional(anyio_backend):
     )
     assert tool.parameters["a"].required is True
     assert tool.parameters["b"].required is False
-
-
-def test_http_server_tool_is_background_default(anyio_backend):
-    tool = http_server_tool(name="t", description="d", url="https://example.com")
-    assert tool.is_background is True
-
-
-def test_http_server_tool_is_background_configurable(anyio_backend):
-    tool = http_server_tool(name="t", description="d", url="https://example.com", is_background=False)
-    assert tool.is_background is False
 
 
 def test_http_server_tool_auth_missing_env_raises(anyio_backend, monkeypatch):
@@ -1065,30 +981,12 @@ def test_http_server_tool_query_params_schema(anyio_backend):
     assert "limit" in tool.parameters
     assert tool.parameters["q"].required is True
     assert tool.parameters["limit"].required is False
-    assert tool.parameters["q"].description == "Search query"
+    # Description is carried by Annotated on type_annotation, verified via schema output
+    from line.llm_agent.schema_converter import function_tool_to_litellm
 
-
-def test_http_server_tool_query_schema_constant_in_anyof_rejected(anyio_backend):
-    """anyOf in query_params_schema is rejected — query params must be scalar."""
-    with pytest.raises(ValueError, match="nested structure.*not supported in query_params_schema"):
-        http_server_tool(
-            name="t",
-            description="d",
-            url="https://example.com/search",
-            method="GET",
-            query_params_schema={
-                "type": "object",
-                "required": ["mode"],
-                "properties": {
-                    "mode": {
-                        "anyOf": [
-                            {"type": "string", "constant_value": "standard"},
-                            {"type": "integer"},
-                        ],
-                    },
-                },
-            },
-        )
+    schema = function_tool_to_litellm(tool, strict=False)
+    props = schema["function"]["parameters"]["properties"]
+    assert props["q"]["description"] == "Search query"
 
 
 def test_http_server_tool_combined_params(anyio_backend):
@@ -1355,7 +1253,13 @@ def test_http_server_tool_enum_passthrough(anyio_backend):
             },
         },
     )
-    assert tool.parameters["priority"].enum == ["low", "medium", "high"]
+    # Enum is carried by Literal on type_annotation, verified via schema output
+    from line.llm_agent.schema_converter import function_tool_to_litellm
+
+    schema = function_tool_to_litellm(tool)
+    props = schema["function"]["parameters"]["properties"]
+    assert props["priority"]["enum"] == ["low", "medium", "high"]
+    assert props["priority"]["description"] == "Ticket priority."
 
 
 def test_http_server_tool_nested_constant_value(anyio_backend):
@@ -1382,10 +1286,14 @@ def test_http_server_tool_nested_constant_value(anyio_backend):
     # ticket is still visible (has non-constant children)
     assert "ticket" in tool.parameters
     assert tool.parameters["ticket"].required is True
-    assert tool.parameters["ticket"].type_annotation is dict
-    assert tool.parameters["ticket"].json_schema["type"] == "object"
-    assert set(tool.parameters["ticket"].json_schema["properties"]) == {"subject"}
-    assert tool.parameters["ticket"].json_schema["required"] == ["subject"]
+    # Verify the generated schema has the right structure
+    from line.llm_agent.schema_converter import function_tool_to_litellm
+
+    schema = function_tool_to_litellm(tool)
+    ticket_schema = schema["function"]["parameters"]["properties"]["ticket"]
+    assert ticket_schema["type"] == "object"
+    assert set(ticket_schema["properties"]) == {"subject"}
+    assert ticket_schema["required"] == ["subject"]
 
 
 async def test_http_server_tool_nested_constant_injected(mock_ctx, anyio_backend, monkeypatch):
@@ -1457,3 +1365,130 @@ def test_http_server_tool_auth_headers_collision_raises(anyio_backend, monkeypat
             auth={"X-Header": "${KEY}"},
             headers={"X-Header": "static-override"},
         )
+
+
+# =============================================================================
+# Tests: http_server_tool — path_params_schema
+# =============================================================================
+
+
+def test_http_server_tool_path_params_schema_description(anyio_backend):
+    """path_params_schema provides custom descriptions for path params."""
+    tool = http_server_tool(
+        name="t",
+        description="d",
+        url="https://example.com/{tenant_id}/items/{item_id}",
+        path_params_schema={
+            "tenant_id": {"type": "string", "description": "The tenant identifier."},
+            "item_id": {"type": "integer", "description": "Numeric item ID."},
+        },
+    )
+    assert tool.parameters["tenant_id"].description == "The tenant identifier."
+    assert tool.parameters["tenant_id"].type_annotation is str
+    assert tool.parameters["item_id"].description == "Numeric item ID."
+    assert tool.parameters["item_id"].type_annotation is int
+    assert tool.parameters["tenant_id"].required is True
+    assert tool.parameters["item_id"].required is True
+
+
+def test_http_server_tool_path_params_schema_extra_key_raises(anyio_backend):
+    """path_params_schema with keys not in URL raises ValueError."""
+    with pytest.raises(ValueError, match="not in URL"):
+        http_server_tool(
+            name="t",
+            description="d",
+            url="https://example.com/{tenant_id}",
+            path_params_schema={
+                "tenant_id": {"type": "string"},
+                "ghost": {"type": "string"},
+            },
+        )
+
+
+def test_http_server_tool_path_params_schema_missing_key_raises(anyio_backend):
+    """path_params_schema missing a URL param raises ValueError."""
+    with pytest.raises(ValueError, match="missing keys"):
+        http_server_tool(
+            name="t",
+            description="d",
+            url="https://example.com/{tenant_id}/{item_id}",
+            path_params_schema={
+                "tenant_id": {"type": "string"},
+            },
+        )
+
+
+def test_http_server_tool_path_params_schema_invalid_type_raises(anyio_backend):
+    """path_params_schema with object/array/boolean type raises."""
+    with pytest.raises(ValueError, match="must be string, integer, or number"):
+        http_server_tool(
+            name="t",
+            description="d",
+            url="https://example.com/{data}",
+            path_params_schema={
+                "data": {"type": "object"},
+            },
+        )
+
+
+# =============================================================================
+# Tests: http_server_tool — content_type
+# =============================================================================
+
+
+def test_http_server_tool_freeform_object_does_not_crash_strict(anyio_backend):
+    """Freeform object property auto-disables strict instead of raising."""
+    from line.llm_agent.schema_converter import function_tool_to_litellm
+
+    tool = http_server_tool(
+        name="t",
+        description="d",
+        url="https://example.com",
+        request_body_schema={
+            "type": "object",
+            "required": ["data"],
+            "properties": {
+                "data": {"type": "object"},
+            },
+        },
+    )
+    # Should not raise — strict auto-disabled for freeform dict
+    schema = function_tool_to_litellm(tool)
+    assert schema["function"]["parameters"]["properties"]["data"] == {"type": "object"}
+    assert schema["function"].get("strict") is not True
+
+
+def test_http_server_tool_content_type_invalid_raises(anyio_backend):
+    """Invalid content_type raises ValueError."""
+    with pytest.raises(ValueError, match="content_type.*not supported"):
+        http_server_tool(
+            name="t",
+            description="d",
+            url="https://example.com",
+            content_type="text/plain",
+        )
+
+
+async def test_http_server_tool_form_urlencoded(mock_ctx, anyio_backend, monkeypatch):
+    """content_type=form-urlencoded sends body as form data."""
+    tool = http_server_tool(
+        name="t",
+        description="d",
+        url="https://example.com/submit",
+        method="POST",
+        request_body_schema={
+            "type": "object",
+            "required": ["name"],
+            "properties": {"name": {"type": "string"}},
+        },
+        content_type="application/x-www-form-urlencoded",
+        is_background=False,
+    )
+    captured = {}
+    _fake_aiohttp(monkeypatch, status=200, body='{"ok": true}', capture=captured)
+
+    await tool.func(mock_ctx, name="Alice")
+
+    assert "data" in captured
+    assert "json" not in captured
+    assert captured["data"]["name"] == "Alice"

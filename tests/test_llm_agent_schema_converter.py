@@ -35,6 +35,18 @@ class ItemWithOptional(TypedDict, total=False):
     notes: str
 
 
+class MixedItem(TypedDict):
+    """A TypedDict with both required and optional fields."""
+
+    name: str
+    notes: str
+
+
+# Simulate mixed required/optional (NotRequired not available in Python 3.10)
+MixedItem.__required_keys__ = frozenset({"name"})
+MixedItem.__optional_keys__ = frozenset({"notes"})
+
+
 class NestedItem(TypedDict):
     """A TypedDict containing another TypedDict."""
 
@@ -102,8 +114,7 @@ class TestTypedDictSchema:
         assert "additionalProperties" not in schema
 
     def test_optional_fields_typeddict(self):
-        """Should handle TypedDict with total=False (all optional) in non-strict mode."""
-        # strict=False because TypedDict with optional keys cannot satisfy strict mode
+        """Should handle TypedDict with total=False (all optional)."""
         schema = python_type_to_json_schema(ItemWithOptional, strict=False)
 
         assert schema["type"] == "object"
@@ -138,6 +149,136 @@ class TestTypedDictSchema:
         assert schema["items"]["type"] == "object"
         assert schema["items"]["properties"]["name"] == {"type": "string"}
         assert schema["items"]["additionalProperties"] is False
+
+
+# =============================================================================
+# Tests for Annotated support in TypedDict and standalone
+# =============================================================================
+
+
+class TestAnnotatedSchema:
+    """Tests for Annotated type handling in schema generation."""
+
+    def test_annotated_standalone(self):
+        """Annotated[str, 'desc'] produces string schema with description."""
+        schema = python_type_to_json_schema(Annotated[str, "A city name"])
+        assert schema == {"type": "string", "description": "A city name"}
+
+    def test_annotated_integer(self):
+        """Annotated[int, 'desc'] produces integer schema with description."""
+        schema = python_type_to_json_schema(Annotated[int, "Count of items"])
+        assert schema == {"type": "integer", "description": "Count of items"}
+
+    def test_annotated_no_string_metadata(self):
+        """Annotated with non-string metadata produces schema without description."""
+        schema = python_type_to_json_schema(Annotated[str, 42])
+        assert schema == {"type": "string"}
+
+    def test_annotated_first_string_wins(self):
+        """Only the first string in Annotated metadata becomes the description."""
+        schema = python_type_to_json_schema(Annotated[str, "first", "second"])
+        assert schema["description"] == "first"
+
+    def test_typeddict_with_annotated_fields(self):
+        """TypedDict fields with Annotated carry descriptions into the schema."""
+
+        class Ticket(TypedDict):
+            subject: Annotated[str, "Short summary of the issue"]
+            priority: str
+
+        schema = python_type_to_json_schema(Ticket)
+        assert schema["properties"]["subject"] == {
+            "type": "string",
+            "description": "Short summary of the issue",
+        }
+        # Non-annotated field has no description
+        assert schema["properties"]["priority"] == {"type": "string"}
+
+    def test_nested_typeddict_with_annotated_fields(self):
+        """Annotated descriptions survive nested TypedDict recursion."""
+
+        class Address(TypedDict):
+            street: Annotated[str, "Street address"]
+            city: Annotated[str, "City name"]
+
+        class Person(TypedDict):
+            name: str
+            address: Address
+
+        schema = python_type_to_json_schema(Person)
+        address_props = schema["properties"]["address"]["properties"]
+        assert address_props["street"] == {
+            "type": "string",
+            "description": "Street address",
+        }
+        assert address_props["city"] == {
+            "type": "string",
+            "description": "City name",
+        }
+
+    def test_annotated_list_of_typeddict(self):
+        """Annotated works on list items too."""
+
+        class Item(TypedDict):
+            name: Annotated[str, "Item name"]
+
+        schema = python_type_to_json_schema(list[Item])
+        item_props = schema["items"]["properties"]
+        assert item_props["name"] == {"type": "string", "description": "Item name"}
+
+    def test_annotated_does_not_override_existing_description(self):
+        """If the inner type already has a description, Annotated doesn't overwrite."""
+        # Annotated[Annotated[str, "inner"], "outer"] — inner wins
+        inner = Annotated[str, "inner desc"]
+        outer = Annotated[inner, "outer desc"]
+        schema = python_type_to_json_schema(outer)
+        assert schema["description"] == "inner desc"
+
+
+# =============================================================================
+# Tests for optional TypedDict strict mode auto-disable
+# =============================================================================
+
+
+class TestOptionalTypedDictStrict:
+    """Optional TypedDict fields auto-disable strict instead of raising."""
+
+    def test_all_optional_typeddict_strict_does_not_raise(self):
+        """TypedDict with total=False no longer raises in strict mode."""
+        schema = python_type_to_json_schema(ItemWithOptional, strict=True)
+        assert schema["type"] == "object"
+        # Strict auto-disabled — no additionalProperties
+        assert "additionalProperties" not in schema
+
+    def test_mixed_typeddict_strict_does_not_raise(self):
+        """TypedDict with mixed required/optional auto-disables strict."""
+        schema = python_type_to_json_schema(MixedItem, strict=True)
+        assert schema["type"] == "object"
+        assert schema["required"] == ["name"]
+        assert "additionalProperties" not in schema
+
+    def test_all_required_typeddict_strict_still_works(self):
+        """TypedDict with all required fields still gets strict constraints."""
+        schema = python_type_to_json_schema(SimpleItem, strict=True)
+        assert schema["additionalProperties"] is False
+        assert set(schema["required"]) == {"name", "quantity"}
+
+    def test_nested_optional_typeddict_auto_disables(self):
+        """Strict is disabled for nested optional TypedDicts too."""
+
+        class Inner(TypedDict, total=False):
+            x: str
+            y: str
+
+        class Outer(TypedDict):
+            inner: Inner
+
+        schema = python_type_to_json_schema(Outer, strict=True)
+        # Outer is all-required → strict
+        assert schema["additionalProperties"] is False
+        # Inner is all-optional → strict auto-disabled
+        inner_schema = schema["properties"]["inner"]
+        assert "additionalProperties" not in inner_schema
 
 
 # =============================================================================
@@ -229,8 +370,8 @@ class TestFunctionToolWithTypedDict:
         item_schema = data_schema["properties"]["item"]
         assert item_schema["additionalProperties"] is False
 
-    def test_tool_with_required_optional_typeddict_strict_raises(self):
-        """Required param typed as total=False TypedDict cannot satisfy OpenAI strict."""
+    def test_tool_with_optional_typeddict_auto_disables_strict(self):
+        """Optional-key TypedDict auto-disables strict instead of raising."""
 
         @loopback_tool
         async def with_opts(
@@ -240,26 +381,14 @@ class TestFunctionToolWithTypedDict:
             """Use optional-key TypedDict."""
             pass
 
-        with pytest.raises(ValueError, match="cannot satisfy OpenAI strict mode"):
-            function_tool_to_litellm(with_opts)
-
-    def test_tool_with_required_optional_typeddict_non_strict_ok(self):
-        """Same tool succeeds when strict=False."""
-
-        @loopback_tool
-        async def with_opts(
-            ctx: ToolEnv,
-            payload: Annotated[ItemWithOptional, "Optional keys only"],
-        ):
-            """Use optional-key TypedDict."""
-            pass
-
-        spec = function_tool_to_litellm(with_opts, strict=False)
-        assert spec["function"].get("strict") is not True
+        # Should NOT raise — strict is auto-disabled for the optional TypedDict
+        spec = function_tool_to_litellm(with_opts)
         params = spec["function"]["parameters"]
-        assert "additionalProperties" not in params
         payload = params["properties"]["payload"]
+        # The TypedDict itself should not have additionalProperties (strict disabled)
         assert "additionalProperties" not in payload
+        # All fields are optional so no required list
+        assert "required" not in payload or payload.get("required") == []
 
     def test_tool_with_list_dict_strict_raises(self):
         """list[dict] cannot satisfy strict mode."""
@@ -303,6 +432,119 @@ class TestFunctionToolWithTypedDict:
         # Verify additionalProperties is not set at top level
         params = schema["function"]["parameters"]
         assert "additionalProperties" not in params
+
+
+# =============================================================================
+# Tests: json_schema_to_python_type round-trip
+# =============================================================================
+
+
+class TestJsonSchemaToPythonType:
+    """Verify json_schema_to_python_type produces types that round-trip correctly."""
+
+    def _round_trip(self, schema, strict=False):
+        """Convert schema → Python type → back to schema."""
+        from line.llm_agent.tools.http_server_tool_utils import json_schema_to_python_type
+
+        py_type = json_schema_to_python_type(schema)
+        return python_type_to_json_schema(py_type, strict=strict)
+
+    def test_string(self):
+        assert self._round_trip({"type": "string"}) == {"type": "string"}
+
+    def test_integer(self):
+        assert self._round_trip({"type": "integer"}) == {"type": "integer"}
+
+    def test_number(self):
+        assert self._round_trip({"type": "number"}) == {"type": "number"}
+
+    def test_boolean(self):
+        assert self._round_trip({"type": "boolean"}) == {"type": "boolean"}
+
+    def test_string_with_description(self):
+        result = self._round_trip({"type": "string", "description": "A name"})
+        assert result == {"type": "string", "description": "A name"}
+
+    def test_string_enum(self):
+        result = self._round_trip({"type": "string", "enum": ["low", "high"]})
+        assert result == {"type": "string", "enum": ["low", "high"]}
+
+    def test_string_enum_with_description(self):
+        result = self._round_trip({"type": "string", "enum": ["a", "b"], "description": "Pick one"})
+        assert result["enum"] == ["a", "b"]
+        assert result["description"] == "Pick one"
+
+    def test_array_bare(self):
+        assert self._round_trip({"type": "array"}) == {"type": "array"}
+
+    def test_array_with_items(self):
+        result = self._round_trip({"type": "array", "items": {"type": "string"}})
+        assert result == {"type": "array", "items": {"type": "string"}}
+
+    def test_array_with_described_items(self):
+        result = self._round_trip({"type": "array", "items": {"type": "integer", "description": "An ID"}})
+        assert result == {
+            "type": "array",
+            "items": {"type": "integer", "description": "An ID"},
+        }
+
+    def test_freeform_object(self):
+        result = self._round_trip({"type": "object"}, strict=False)
+        assert result == {"type": "object"}
+
+    def test_object_with_properties(self):
+        schema = {
+            "type": "object",
+            "required": ["name"],
+            "properties": {
+                "name": {"type": "string", "description": "Full name"},
+                "age": {"type": "integer"},
+            },
+        }
+        result = self._round_trip(schema)
+        assert result["type"] == "object"
+        assert result["required"] == ["name"]
+        assert result["properties"]["name"] == {
+            "type": "string",
+            "description": "Full name",
+        }
+        assert result["properties"]["age"] == {"type": "integer"}
+
+    def test_nested_object(self):
+        schema = {
+            "type": "object",
+            "required": ["address"],
+            "properties": {
+                "address": {
+                    "type": "object",
+                    "required": ["street"],
+                    "properties": {
+                        "street": {"type": "string", "description": "Street address"},
+                        "city": {"type": "string"},
+                    },
+                },
+            },
+        }
+        result = self._round_trip(schema)
+        addr = result["properties"]["address"]
+        assert addr["type"] == "object"
+        assert addr["required"] == ["street"]
+        assert addr["properties"]["street"] == {
+            "type": "string",
+            "description": "Street address",
+        }
+
+    def test_object_all_optional_no_strict(self):
+        schema = {
+            "type": "object",
+            "properties": {
+                "x": {"type": "string"},
+                "y": {"type": "integer"},
+            },
+        }
+        result = self._round_trip(schema, strict=True)
+        # All optional → strict auto-disabled
+        assert "additionalProperties" not in result
 
 
 # =============================================================================
