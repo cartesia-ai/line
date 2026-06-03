@@ -844,7 +844,7 @@ def http_server_tool(
             list(query_params_schema.get("required", [])),
         )
 
-    # -- 3. Build ParameterInfo for all LLM-visible params ----------------------
+    # -- 2. Build ParameterInfo for all LLM-visible params ----------------------
     parameters: Dict[str, ParameterInfo] = {}
 
     all_path_required = list(path_params)  # path params are always required
@@ -875,7 +875,7 @@ def http_server_tool(
                 )
             _seen[n] = label
 
-    # -- 4. Build the async implementation --------------------------------------
+    # -- 3. Build the async implementation --------------------------------------
     upper_method = method.upper()
     request_body_prop_names = set(request_body_properties)
     query_prop_names = set(query_properties)
@@ -948,7 +948,7 @@ def http_server_tool(
             detail = f" after {timeout}s" if timeout is not None else ""
             return json.dumps({"ok": False, "status": None, "error": f"Request timed out{detail}."})
 
-    # -- 5. Construct FunctionTool directly -------------------------------------
+    # -- 4. Construct FunctionTool directly -------------------------------------
     return FunctionTool(
         name=name,
         description=description,

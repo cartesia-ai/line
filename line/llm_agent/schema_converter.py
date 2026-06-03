@@ -58,7 +58,6 @@ _BASIC_TYPE_SCHEMAS: dict[type, dict[str, str]] = {
     int: {"type": "integer"},
     float: {"type": "number"},
     bool: {"type": "boolean"},
-    list: {"type": "array"},
 }
 
 
@@ -84,7 +83,7 @@ def _requires_non_strict_schema(type_annotation: Type) -> bool:
         args = get_args(type_annotation)
         return bool(args) and _requires_non_strict_schema(args[0])
 
-    if type_annotation is dict:
+    if type_annotation is dict or type_annotation is list:
         return True
 
     if _is_typeddict(type_annotation):
@@ -135,10 +134,8 @@ def python_type_to_json_schema(type_annotation: Type, *, strict: bool = True) ->
         return {"type": "null"}
 
     # Handle basic types — return a copy since callers may mutate (e.g. add "description")
-    if type_annotation in _BASIC_TYPE_SCHEMAS:
-        return dict(_BASIC_TYPE_SCHEMAS[type_annotation])
-
-    # Handle plain dict - error in strict mode since it cannot satisfy OpenAI strict rules
+    # Bare dict and list are checked for strict mode first since they cannot
+    # satisfy OpenAI strict rules (no properties / no items).
     if type_annotation is dict:
         if strict:
             raise ValueError(
@@ -148,6 +145,19 @@ def python_type_to_json_schema(type_annotation: Type, *, strict: bool = True) ->
                 "See: https://platform.openai.com/docs/guides/structured-outputs"
             )
         return {"type": "object"}
+
+    if type_annotation is list:
+        if strict:
+            raise ValueError(
+                "Using bare 'list' in tool parameters yields an array schema without "
+                "item type, which cannot satisfy OpenAI strict mode. "
+                "Use list[T] to define the element type. "
+                "See: https://platform.openai.com/docs/guides/structured-outputs"
+            )
+        return {"type": "array"}
+
+    if type_annotation in _BASIC_TYPE_SCHEMAS:
+        return dict(_BASIC_TYPE_SCHEMAS[type_annotation])
 
     # Handle TypedDict - generates full schema with properties
     if _is_typeddict(type_annotation):

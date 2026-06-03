@@ -23,10 +23,9 @@ TYPE_MAP: Dict[str, tuple] = {
 
 VALID_METHODS = {"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"}
 VALID_CONTENT_TYPES = {"application/json", "application/x-www-form-urlencoded"}
-_PATH_PARAM_TYPES = {"string", "integer", "number"}
-
-_QUERY_SCALAR_TYPES = {"string", "integer", "number", "boolean"}
-_FORM_SCALAR_PYTHON_TYPES = (str, int, float, bool)
+_PATH_PARAM_JSON_TYPES = {"string", "integer", "number"}
+_SCALAR_JSON_TYPES = {"string", "integer", "number", "boolean"}
+_SCALAR_PYTHON_TYPES = (str, int, float, bool)
 
 
 def error(name: str, msg: str) -> ValueError:
@@ -122,7 +121,7 @@ def validate_inputs(
             if not isinstance(param_def, dict):
                 raise error(name, f"path_params_schema[{param_name!r}] must be a dict.")
             param_type = param_def.get("type")
-            if param_type is not None and param_type not in _PATH_PARAM_TYPES:
+            if param_type is not None and param_type not in _PATH_PARAM_JSON_TYPES:
                 raise error(
                     name,
                     f"path_params_schema[{param_name!r}] has type={param_type!r}. "
@@ -213,10 +212,6 @@ def _validate_constant_value_type(name: str, prop_def: Dict[str, Any], path: str
         )
 
 
-def _is_form_scalar_value(value: Any) -> bool:
-    return value is not None and isinstance(value, _FORM_SCALAR_PYTHON_TYPES)
-
-
 # ---------------------------------------------------------------------------
 # Body schema validation — supports nesting, objects, arrays
 # ---------------------------------------------------------------------------
@@ -261,7 +256,7 @@ def validate_form_body_schema(name: str, schema: Dict[str, Any], label: str) -> 
                 f"{path} contains nested structure, which is not supported for "
                 "application/x-www-form-urlencoded request bodies. Form fields must be flat scalars.",
             )
-        if json_type is not None and json_type not in _QUERY_SCALAR_TYPES:
+        if json_type is not None and json_type not in _SCALAR_JSON_TYPES:
             raise error(
                 name,
                 f"{path} has type={json_type!r}, which is not supported for "
@@ -270,7 +265,7 @@ def validate_form_body_schema(name: str, schema: Dict[str, Any], label: str) -> 
             )
         if "constant_value" in prop_def:
             cv = prop_def["constant_value"]
-            if not _is_form_scalar_value(cv):
+            if not (cv is not None and isinstance(cv, _SCALAR_PYTHON_TYPES)):
                 raise error(name, f"{path}.constant_value must be a scalar string, number, or boolean.")
 
 
@@ -288,7 +283,7 @@ def validate_query_schema(name: str, schema: Dict[str, Any], label: str) -> None
             raise error(name, f"{path} must be a dict, got {type(prop_def).__name__}.")
         json_type = prop_def.get("type")
         # Must be a scalar type (or omitted for constant_value-only fields).
-        if json_type is not None and json_type not in _QUERY_SCALAR_TYPES:
+        if json_type is not None and json_type not in _SCALAR_JSON_TYPES:
             raise error(
                 name,
                 f"{path} has type={json_type!r}, which is not supported in "
@@ -348,7 +343,67 @@ def strip_constants(
 
 
 # ---------------------------------------------------------------------------
-# Misc helpers
+# JSON schema → Python type conversion
+# ---------------------------------------------------------------------------
+
+_BASIC_TYPE_MAP: Dict[str, type] = {
+    "string": str,
+    "integer": int,
+    "number": float,
+    "boolean": bool,
+}
+
+_typeddict_counter = 0
+
+
+def _with_description(base: Type, description: str | None) -> Type:
+    return Annotated[base, description] if description else base
+
+
+def json_schema_to_python_type(schema: Dict[str, Any]) -> Type:
+    """Convert a JSON schema property dict to a Python type.
+
+    The returned type round-trips through python_type_to_json_schema
+    to reproduce the original schema (including nested descriptions).
+    """
+    global _typeddict_counter
+    from typing import TypedDict
+
+    json_type = schema.get("type", "string")
+    description = schema.get("description")
+    enum = schema.get("enum")
+
+    if enum is not None:
+        base = Literal[tuple(enum)]  # type: ignore[valid-type]
+        return _with_description(base, description)
+
+    if has_object_properties(schema):
+        props = schema.get("properties", {})
+        required_keys = set(schema.get("required", []))
+        fields = {name: json_schema_to_python_type(defn) for name, defn in props.items()}
+        _typeddict_counter += 1
+        td = TypedDict(f"_schema_{_typeddict_counter}", fields)  # type: ignore[call-overload]
+        td.__required_keys__ = frozenset(required_keys & set(fields))
+        td.__optional_keys__ = frozenset(set(fields) - required_keys)
+        return _with_description(td, description)
+
+    if json_type == "array":
+        items = schema.get("items")
+        if items and isinstance(items, dict):
+            base = list[json_schema_to_python_type(items)]  # type: ignore[misc]
+        else:
+            base = list
+        return _with_description(base, description)
+
+    if json_type == "object":
+        return _with_description(dict, description)
+
+    base = _BASIC_TYPE_MAP.get(json_type, str)
+    return _with_description(base, description)
+
+
+# ---------------------------------------------------------------------------
+# ParameterInfo construction
 # ---------------------------------------------------------------------------
 
 
@@ -369,74 +424,19 @@ def build_param_info(prop_name: str, prop_def: Dict[str, Any], required_list: li
     )
 
 
+# ---------------------------------------------------------------------------
+# Misc helpers
+# ---------------------------------------------------------------------------
+
+
 def validate_form_body_values(body: Dict[str, Any]) -> None:
     """Validate final form body values before passing them to aiohttp."""
     for field_name, value in body.items():
-        if not _is_form_scalar_value(value):
+        if not (value is not None and isinstance(value, _SCALAR_PYTHON_TYPES)):
             raise ValueError(
                 f"Form field {field_name!r} must be a scalar string, number, or boolean; "
                 f"got {type(value).__name__}."
             )
-
-
-_BASIC_TYPE_MAP: Dict[str, type] = {
-    "string": str,
-    "integer": int,
-    "number": float,
-    "boolean": bool,
-}
-
-_typeddict_counter = 0
-
-
-def _next_typeddict_name() -> str:
-    global _typeddict_counter
-    _typeddict_counter += 1
-    return f"_schema_{_typeddict_counter}"
-
-
-def _with_description(base: Type, description: str | None) -> Type:
-    return Annotated[base, description] if description else base
-
-
-def json_schema_to_python_type(schema: Dict[str, Any]) -> Type:
-    """Convert a JSON schema property dict to a Python type.
-
-    The returned type round-trips through python_type_to_json_schema
-    to reproduce the original schema (including nested descriptions).
-    """
-    from typing import TypedDict
-
-    json_type = schema.get("type", "string")
-    description = schema.get("description")
-    enum = schema.get("enum")
-
-    if enum is not None:
-        base = Literal[tuple(enum)]  # type: ignore[valid-type]
-        return _with_description(base, description)
-
-    if has_object_properties(schema):
-        props = schema.get("properties", {})
-        required_keys = set(schema.get("required", []))
-        fields = {name: json_schema_to_python_type(defn) for name, defn in props.items()}
-        td = TypedDict(_next_typeddict_name(), fields)  # type: ignore[call-overload]
-        td.__required_keys__ = frozenset(required_keys & set(fields))
-        td.__optional_keys__ = frozenset(set(fields) - required_keys)
-        return _with_description(td, description)
-
-    if json_type == "array":
-        items = schema.get("items")
-        if items and isinstance(items, dict):
-            base = list[json_schema_to_python_type(items)]  # type: ignore[misc]
-        else:
-            base = list
-        return _with_description(base, description)
-
-    if json_type == "object":
-        return _with_description(dict, description)
-
-    base = _BASIC_TYPE_MAP.get(json_type, str)
-    return _with_description(base, description)
 
 
 def deep_merge(base: Dict[str, Any], overlay: Dict[str, Any]) -> Dict[str, Any]:
