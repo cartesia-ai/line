@@ -82,10 +82,8 @@ class _WebSocketProvider:
         self,
         model_id: ParsedModelId,
         api_key: Optional[str] = None,
-        default_reasoning_effort: Optional[str] = "none",
     ):
         self._model_id = model_id
-        self._default_reasoning_effort = default_reasoning_effort
         self._api_key = api_key or ""
         self._ws: Optional[WebSocketClientProtocol] = None
         self._history: List[ConversationEntry] = []
@@ -169,7 +167,6 @@ class _WebSocketProvider:
 
             request = _build_request(
                 model_id=self._model_id,
-                default_reasoning_effort=self._default_reasoning_effort,
                 instructions=instructions,
                 tool_defs=tool_defs,
                 cfg=config,
@@ -215,7 +212,6 @@ class _WebSocketProvider:
             request, update_history = _plan_chat(
                 history=self._history,
                 model_id=self._model_id,
-                default_reasoning_effort=self._default_reasoning_effort,
                 messages=messages,
                 tools=tools,
                 config=config,
@@ -244,7 +240,6 @@ def _plan_chat(
     *,
     history: List[ConversationEntry],
     model_id: ParsedModelId,
-    default_reasoning_effort: Optional[str],
     messages: List[Message],
     tools: Optional[List[FunctionTool]],
     config: LlmConfig,
@@ -258,7 +253,6 @@ def _plan_chat(
     body, update = _plan_responses_chat(
         history=history,
         model_id=model_id,
-        default_reasoning_effort=default_reasoning_effort,
         messages=messages,
         tools=tools,
         config=config,
@@ -271,7 +265,6 @@ def _plan_chat(
 def _build_request(
     *,
     model_id: ParsedModelId,
-    default_reasoning_effort: Optional[str],
     instructions: Optional[str],
     tool_defs: Optional[List[Dict[str, Any]]],
     cfg: LlmConfig,
@@ -286,7 +279,6 @@ def _build_request(
     """
     body = _build_responses_body(
         model_id=model_id,
-        default_reasoning_effort=default_reasoning_effort,
         instructions=instructions,
         tool_defs=tool_defs,
         cfg=cfg,

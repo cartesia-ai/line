@@ -98,7 +98,11 @@ class LlmAgent:
 
         # Resolve the base config to insert default values for any _UNSET sentinels.
         effective_config = _normalize_config(config or LlmConfig())
-        if effective_config.reasoning_effort is not None and not model_config.supports_reasoning_effort:
+        if (
+            effective_config.reasoning_effort is not None
+            and effective_config.reasoning_effort != "none"
+            and not model_config.supports_reasoning_effort
+        ):
             raise ValueError(
                 f"Model {str(model_id)} does not support reasoning_effort. "
                 "Remove reasoning_effort from your LlmConfig or use a model that supports it."
