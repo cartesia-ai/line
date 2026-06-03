@@ -398,6 +398,66 @@ class _ModelConfig:
 _VALID_BACKENDS = frozenset({"http", "http_responses", "realtime", "websocket"})
 
 
+def _default_reasoning_effort_for_model(model_id: ParsedModelId) -> Optional[str]:
+    """Return the lowest-effort default for a reasoning-capable model.
+
+    Some OpenAI models (e.g. ``gpt-5-mini``) reject ``reasoning_effort="none"``
+    and only accept ``minimal``/``low``/… — see LiteLLM's
+    ``supports_none_reasoning_effort``. Anthropic models omit the parameter.
+    """
+    if model_id.provider == "anthropic":
+        return None
+
+    from litellm import get_model_info
+
+    try:
+        info = get_model_info(model=str(model_id))
+    except Exception:
+        return "none"
+
+    if info.get("supports_none_reasoning_effort") is True:
+        return "none"
+    if info.get("supports_none_reasoning_effort") is False:
+        if info.get("supports_minimal_reasoning_effort") is True:
+            return "minimal"
+        return None
+    if info.get("supports_reasoning"):
+        return "none"
+    return None
+
+
+def _coerce_reasoning_effort(model_id: ParsedModelId, effort: Optional[str]) -> Optional[str]:
+    """Map ``reasoning_effort`` to a wire-safe value, or ``None`` to omit it.
+
+    ``"none"`` in :class:`LlmConfig` means "disable reasoning", but several models
+    reject that literal (``gpt-5-mini`` uses ``minimal``). Non-reasoning models
+    should omit the parameter when the user requests ``"none"``.
+    """
+    if effort is None:
+        return None
+    if effort != "none":
+        return effort
+    if model_id.provider == "anthropic":
+        return None
+
+    from litellm import get_model_info
+
+    try:
+        info = get_model_info(model=str(model_id))
+    except Exception:
+        return effort
+
+    if info.get("supports_none_reasoning_effort") is False:
+        if info.get("supports_minimal_reasoning_effort") is True:
+            return "minimal"
+        return None
+    if info.get("supports_none_reasoning_effort") is True:
+        return "none"
+    if info.get("supports_reasoning"):
+        return "none"
+    return None
+
+
 def _get_model_config(
     model_id: ParsedModelId,
     *,
@@ -469,15 +529,7 @@ def _get_model_config(
 
     elif litellm_support:
         supports = "reasoning_effort" in litellm_support
-        default: Optional[str] = None
-        if supports:
-            # Anthropic: omit the param entirely to skip the thinking block. Across
-            # litellm versions the "none" string is handled inconsistently — older
-            # versions raise, newer versions accept it. None (no param) is the only
-            # deterministic skip; "low" would enable a 1024-token thinking budget.
-            # Other providers (OpenAI reasoning models, etc.): "none" is the
-            # well-defined "no reasoning" value.
-            default = None if model_id.provider == "anthropic" else "none"
+        default = _default_reasoning_effort_for_model(model_id) if supports else None
 
         mcfg = _ModelConfig(
             backend="http",

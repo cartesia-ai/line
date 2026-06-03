@@ -11,6 +11,7 @@ from line.llm_agent.provider import (
     Message,
     ParsedModelId,
     ToolCall,
+    _coerce_reasoning_effort,
     _extract_instructions_and_messages,
     _get_model_config,
     _is_realtime_model,
@@ -499,6 +500,48 @@ class TestGetModelConfig:
         assert cfg.backend == "http"
         assert cfg.supports_reasoning_effort is True
         assert cfg.default_reasoning_effort is None
+
+    def test_gpt5_mini_reasoning_default_is_minimal(self):
+        """gpt-5-mini rejects reasoning_effort='none'; use minimal instead."""
+        cfg = _get_model_config(parse_model_id("openai/gpt-5-mini"))
+        assert cfg.backend == "http"
+        assert cfg.supports_reasoning_effort is True
+        assert cfg.default_reasoning_effort == "minimal"
+
+    def test_gpt52_reasoning_default_stays_none(self):
+        cfg = _get_model_config(parse_model_id("openai/gpt-5.2"))
+        assert cfg.supports_reasoning_effort is True
+        assert cfg.default_reasoning_effort == "none"
+
+
+def test_coerce_reasoning_none_for_gpt5_mini():
+    model_id = parse_model_id("openai/gpt-5-mini")
+    assert _coerce_reasoning_effort(model_id, "none") == "minimal"
+    assert _coerce_reasoning_effort(model_id, "low") == "low"
+
+
+def test_coerce_reasoning_none_for_non_reasoning_model():
+    model_id = parse_model_id("openai/gpt-4o-mini")
+    assert _coerce_reasoning_effort(model_id, "none") is None
+
+
+def test_http_provider_coerces_reasoning_effort_for_gpt5_mini():
+    provider = _HttpProvider(
+        model_id=parse_model_id("openai/gpt-5-mini"),
+        supports_reasoning_effort=True,
+        default_reasoning_effort="minimal",
+    )
+    stream = provider.chat([], config=_normalize_config(LlmConfig(reasoning_effort="none")))
+    assert stream._kwargs["reasoning_effort"] == "minimal"
+
+
+def test_http_provider_omits_reasoning_effort_for_non_reasoning_model():
+    provider = _HttpProvider(
+        model_id=parse_model_id("openai/gpt-4o-mini"),
+        supports_reasoning_effort=False,
+    )
+    stream = provider.chat([], config=_normalize_config(LlmConfig(reasoning_effort="none")))
+    assert "reasoning_effort" not in stream._kwargs
 
 
 def test_is_websocket_model_matches_gpt52_variants():

@@ -26,6 +26,7 @@ from line.llm_agent.provider import (
     ParsedModelId,
     StreamChunk,
     ToolCall,
+    _coerce_reasoning_effort,
     _extract_instructions_and_messages,
 )
 from line.llm_agent.schema_converter import build_openai_tool_defs
@@ -163,7 +164,10 @@ def _build_responses_body(
         body["instructions"] = instructions
     if tool_defs is not None:
         body["tools"] = tool_defs
-    reasoning_effort = cfg.reasoning_effort or default_reasoning_effort
+    reasoning_effort = _coerce_reasoning_effort(
+        model_id,
+        cfg.reasoning_effort or default_reasoning_effort,
+    )
     if reasoning_effort is not None:
         body["reasoning"] = {"effort": reasoning_effort}
     if cfg.temperature is not None:

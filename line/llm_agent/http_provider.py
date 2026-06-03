@@ -16,7 +16,13 @@ from typing import Any, AsyncIterator, Dict, List, NamedTuple, Optional, Protoco
 from litellm import acompletion
 
 from line.llm_agent.config import LlmConfig
-from line.llm_agent.provider import Message, ParsedModelId, StreamChunk, ToolCall
+from line.llm_agent.provider import (
+    Message,
+    ParsedModelId,
+    StreamChunk,
+    ToolCall,
+    _coerce_reasoning_effort,
+)
 from line.llm_agent.schema_converter import tools_to_litellm
 from line.llm_agent.tools.utils import FunctionTool
 
@@ -100,7 +106,12 @@ class _HttpProvider:
         if config.frequency_penalty is not None:
             llm_kwargs["frequency_penalty"] = config.frequency_penalty
         if self._supports_reasoning_effort:
-            llm_kwargs["reasoning_effort"] = config.reasoning_effort or self._default_reasoning_effort
+            effort = _coerce_reasoning_effort(
+                self._model_id,
+                config.reasoning_effort or self._default_reasoning_effort,
+            )
+            if effort is not None:
+                llm_kwargs["reasoning_effort"] = effort
 
         if config.extra:
             llm_kwargs.update(config.extra)
