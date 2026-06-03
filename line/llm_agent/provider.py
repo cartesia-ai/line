@@ -294,7 +294,6 @@ class LlmProvider:
         self._backend_override = backend
         normalized_config = _normalize_config(config or LlmConfig())
         mcfg = _get_model_config(model_id, backend=backend, config=normalized_config)
-        self._model_config = mcfg
         self._config = _resolve_config_reasoning_effort(model_id, mcfg, normalized_config)
 
         if mcfg.backend == "realtime":
@@ -348,7 +347,6 @@ class LlmProvider:
         effective_tools, web_search_options = _normalize_tools(
             _merge_tools(self._tools, tools), model_id=self._model_id
         )
-        _get_model_config(self._model_id, backend=self._backend_override, config=effective_config)
 
         if web_search_options is not None:
             kwargs = {**kwargs, "web_search_options": web_search_options}
@@ -356,16 +354,17 @@ class LlmProvider:
         return self._backend.chat(normalized, effective_tools, config=effective_config, **kwargs)
 
     def _effective_config(self, config: Optional[LlmConfig]) -> LlmConfig:
-        """Merge a per-call config override onto the base config and resolve it.
+        """Merge a per-call config override onto the base config, validate it
+        against the model/backend, and resolve it.
 
         ``self._config`` is already resolved at init time, so resolution is
         only re-applied when an override may have reintroduced a raw value.
         """
+        merged = _merge_configs(self._config, config) if config else self._config
+        mcfg = _get_model_config(self._model_id, backend=self._backend_override, config=merged)
         if config is None:
-            return self._config
-        return _resolve_config_reasoning_effort(
-            self._model_id, self._model_config, _merge_configs(self._config, config)
-        )
+            return merged
+        return _resolve_config_reasoning_effort(self._model_id, mcfg, merged)
 
     def _set_tools(self, tools: Optional[List[Any]]) -> None:
         """Replace the provider's default tool specs."""
@@ -380,7 +379,6 @@ class LlmProvider:
         effective_tools, web_search_options = _normalize_tools(
             _merge_tools(self._tools, tools), model_id=self._model_id
         )
-        _get_model_config(self._model_id, backend=self._backend_override, config=effective_config)
         await self._backend.warmup(
             config=effective_config,
             tools=effective_tools,
@@ -401,38 +399,12 @@ class _ModelConfig:
 
     backend: str  # "realtime" | "websocket" | "http_responses" | "http"
     supports_reasoning_effort: bool
+    # Semantic default applied when the user leaves reasoning_effort unset;
+    # coerced to the model's wire-safe equivalent at resolution time.
     default_reasoning_effort: Optional[str]
 
 
 _VALID_BACKENDS = frozenset({"http", "http_responses", "realtime", "websocket"})
-
-
-def _default_reasoning_effort_for_model(model_id: ParsedModelId) -> Optional[str]:
-    """Return the lowest-effort default for a reasoning-capable model.
-
-    Some OpenAI models (e.g. ``gpt-5-mini``) reject ``reasoning_effort="none"``
-    and only accept ``minimal``/``low``/… — see LiteLLM's
-    ``supports_none_reasoning_effort``. Anthropic models omit the parameter.
-    """
-    if model_id.provider == "anthropic":
-        return None
-
-    from litellm import get_model_info
-
-    try:
-        info = get_model_info(model=str(model_id))
-    except Exception:
-        return "none"
-
-    if info.get("supports_none_reasoning_effort") is True:
-        return "none"
-    if info.get("supports_none_reasoning_effort") is False:
-        if info.get("supports_minimal_reasoning_effort") is True:
-            return "minimal"
-        return None
-    if info.get("supports_reasoning"):
-        return "none"
-    return None
 
 
 def _coerce_reasoning_effort(model_id: ParsedModelId, effort: Optional[str]) -> Optional[str]:
@@ -561,12 +533,12 @@ def _get_model_config(
 
     elif litellm_support:
         supports = "reasoning_effort" in litellm_support
-        default = _default_reasoning_effort_for_model(model_id) if supports else None
-
         mcfg = _ModelConfig(
             backend="http",
             supports_reasoning_effort=supports,
-            default_reasoning_effort=default,
+            # Reasoning is disabled by default for voice latency; resolution
+            # coerces "none" to each model's wire-safe equivalent.
+            default_reasoning_effort="none" if supports else None,
         )
 
     else:

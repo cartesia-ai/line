@@ -494,24 +494,18 @@ class TestGetModelConfig:
         assert cfg.supports_reasoning_effort is False
         assert cfg.default_reasoning_effort is None
 
-    def test_anthropic_model_reasoning_default_is_none(self):
-        """Anthropic models use None (not 'low') to skip the thinking block."""
-        cfg = _get_model_config(parse_model_id("anthropic/claude-sonnet-4-20250514"))
-        assert cfg.backend == "http"
-        assert cfg.supports_reasoning_effort is True
-        assert cfg.default_reasoning_effort is None
-
-    def test_gpt5_mini_reasoning_default_is_minimal(self):
-        """gpt-5-mini rejects reasoning_effort='none'; use minimal instead."""
-        cfg = _get_model_config(parse_model_id("openai/gpt-5-mini"))
-        assert cfg.backend == "http"
-        assert cfg.supports_reasoning_effort is True
-        assert cfg.default_reasoning_effort == "minimal"
-
-    def test_gpt52_reasoning_default_stays_none(self):
-        cfg = _get_model_config(parse_model_id("openai/gpt-5.2"))
-        assert cfg.supports_reasoning_effort is True
-        assert cfg.default_reasoning_effort == "none"
+    def test_http_reasoning_models_default_to_none(self):
+        """HTTP reasoning models get the semantic 'none' default; resolution
+        coerces it to each model's wire-safe equivalent."""
+        for model in (
+            "anthropic/claude-sonnet-4-20250514",
+            "openai/gpt-5-mini",
+            "openai/gpt-5.2",
+        ):
+            cfg = _get_model_config(parse_model_id(model))
+            assert cfg.backend == "http"
+            assert cfg.supports_reasoning_effort is True
+            assert cfg.default_reasoning_effort == "none"
 
 
 def test_coerce_reasoning_none_for_gpt5_mini():
@@ -523,6 +517,20 @@ def test_coerce_reasoning_none_for_gpt5_mini():
 def test_coerce_reasoning_none_for_non_reasoning_model():
     model_id = parse_model_id("openai/gpt-4o-mini")
     assert _coerce_reasoning_effort(model_id, "none") is None
+
+
+def test_llm_provider_resolves_default_reasoning_effort_for_gpt5_mini():
+    """With reasoning_effort unset, the 'none' default resolves to 'minimal'."""
+    provider = LlmProvider(model="openai/gpt-5-mini", api_key="test-key")
+    stream = provider.chat([Message(role="user", content="hi")])
+    assert stream._kwargs["reasoning_effort"] == "minimal"
+
+
+def test_llm_provider_omits_default_reasoning_effort_for_anthropic():
+    """With reasoning_effort unset, Anthropic models omit the parameter."""
+    provider = LlmProvider(model="anthropic/claude-sonnet-4-20250514", api_key="test-key")
+    stream = provider.chat([Message(role="user", content="hi")])
+    assert "reasoning_effort" not in stream._kwargs
 
 
 def test_llm_provider_coerces_init_reasoning_effort_for_gpt5_mini():
