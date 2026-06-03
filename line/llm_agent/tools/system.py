@@ -841,9 +841,11 @@ def http_server_tool(
     constant_values: Dict[str, Any] = {}
 
     if request_body_schema:
-        request_body_properties, request_body_required, constant_values = http_server_tool_utils.strip_constants(
-            request_body_schema.get("properties", {}),
-            list(request_body_schema.get("required", [])),
+        request_body_properties, request_body_required, constant_values = (
+            http_server_tool_utils.strip_constants(
+                request_body_schema.get("properties", {}),
+                list(request_body_schema.get("required", [])),
+            )
         )
 
     query_properties: Dict[str, Any] = {}
