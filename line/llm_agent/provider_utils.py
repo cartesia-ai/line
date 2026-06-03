@@ -26,7 +26,6 @@ from line.llm_agent.provider import (
     ParsedModelId,
     StreamChunk,
     ToolCall,
-    _coerce_reasoning_effort,
     _extract_instructions_and_messages,
 )
 from line.llm_agent.schema_converter import build_openai_tool_defs
@@ -139,7 +138,6 @@ def _expand_messages(
 def _build_responses_body(
     *,
     model_id: ParsedModelId,
-    default_reasoning_effort: Optional[str],
     instructions: Optional[str],
     tool_defs: Optional[List[Dict[str, Any]]],
     cfg: LlmConfig,
@@ -164,12 +162,8 @@ def _build_responses_body(
         body["instructions"] = instructions
     if tool_defs is not None:
         body["tools"] = tool_defs
-    reasoning_effort = _coerce_reasoning_effort(
-        model_id,
-        cfg.reasoning_effort or default_reasoning_effort,
-    )
-    if reasoning_effort is not None:
-        body["reasoning"] = {"effort": reasoning_effort}
+    if cfg.reasoning_effort is not None:
+        body["reasoning"] = {"effort": cfg.reasoning_effort}
     if cfg.temperature is not None:
         body["temperature"] = cfg.temperature
     if cfg.max_tokens is not None:
@@ -183,7 +177,6 @@ def _plan_responses_chat(
     *,
     history: List[ConversationEntry],
     model_id: ParsedModelId,
-    default_reasoning_effort: Optional[str],
     messages: List[Message],
     tools: Optional[List[FunctionTool]],
     config: LlmConfig,
@@ -244,7 +237,6 @@ def _plan_responses_chat(
     input_pairs = desired_pairs[max(0, continuation_idx - 1) :]
     body = _build_responses_body(
         model_id=model_id,
-        default_reasoning_effort=default_reasoning_effort,
         instructions=instructions,
         tool_defs=tool_defs,
         cfg=config,

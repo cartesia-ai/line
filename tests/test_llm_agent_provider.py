@@ -525,22 +525,44 @@ def test_coerce_reasoning_none_for_non_reasoning_model():
     assert _coerce_reasoning_effort(model_id, "none") is None
 
 
-def test_http_provider_coerces_reasoning_effort_for_gpt5_mini():
-    provider = _HttpProvider(
-        model_id=parse_model_id("openai/gpt-5-mini"),
-        supports_reasoning_effort=True,
-        default_reasoning_effort="minimal",
+def test_llm_provider_coerces_init_reasoning_effort_for_gpt5_mini():
+    """The LlmProvider facade coerces 'none' before it reaches the backend."""
+    provider = LlmProvider(
+        model="openai/gpt-5-mini",
+        api_key="test-key",
+        config=LlmConfig(reasoning_effort="none"),
     )
-    stream = provider.chat([], config=_normalize_config(LlmConfig(reasoning_effort="none")))
+    stream = provider.chat([Message(role="user", content="hi")])
     assert stream._kwargs["reasoning_effort"] == "minimal"
 
 
-def test_http_provider_omits_reasoning_effort_for_non_reasoning_model():
-    provider = _HttpProvider(
-        model_id=parse_model_id("openai/gpt-4o-mini"),
-        supports_reasoning_effort=False,
+def test_llm_provider_coerces_per_call_reasoning_effort_for_gpt5_mini():
+    """Per-call config overrides are also coerced by the facade."""
+    provider = LlmProvider(model="openai/gpt-5-mini", api_key="test-key")
+    stream = provider.chat(
+        [Message(role="user", content="hi")],
+        config=LlmConfig(reasoning_effort="none"),
     )
-    stream = provider.chat([], config=_normalize_config(LlmConfig(reasoning_effort="none")))
+    assert stream._kwargs["reasoning_effort"] == "minimal"
+
+
+def test_llm_provider_omits_reasoning_effort_for_non_reasoning_model():
+    provider = LlmProvider(
+        model="openai/gpt-4o-mini",
+        api_key="test-key",
+        config=LlmConfig(reasoning_effort="none"),
+    )
+    stream = provider.chat([Message(role="user", content="hi")])
+    assert "reasoning_effort" not in stream._kwargs
+
+
+def test_http_provider_sends_reasoning_effort_verbatim():
+    """Backends perform no resolution — they send the facade-resolved value as-is."""
+    provider = _HttpProvider(model_id=parse_model_id("openai/gpt-5-mini"))
+    stream = provider.chat([], config=_normalize_config(LlmConfig(reasoning_effort="minimal")))
+    assert stream._kwargs["reasoning_effort"] == "minimal"
+
+    stream = provider.chat([], config=_normalize_config(LlmConfig()))
     assert "reasoning_effort" not in stream._kwargs
 
 

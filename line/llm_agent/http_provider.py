@@ -16,13 +16,7 @@ from typing import Any, AsyncIterator, Dict, List, NamedTuple, Optional, Protoco
 from litellm import acompletion
 
 from line.llm_agent.config import LlmConfig
-from line.llm_agent.provider import (
-    Message,
-    ParsedModelId,
-    StreamChunk,
-    ToolCall,
-    _coerce_reasoning_effort,
-)
+from line.llm_agent.provider import Message, ParsedModelId, StreamChunk, ToolCall
 from line.llm_agent.schema_converter import tools_to_litellm
 from line.llm_agent.tools.utils import FunctionTool
 
@@ -39,7 +33,7 @@ class _HttpProvider:
 
     Handles streaming responses and tool calls for all LiteLLM-supported models.
 
-    Config normalization and reasoning-effort detection are handled by the
+    Config normalization and reasoning-effort resolution are handled by the
     ``LlmProvider`` facade — this class receives fully-resolved configs and
     tools on every call.
     """
@@ -48,13 +42,9 @@ class _HttpProvider:
         self,
         model_id: ParsedModelId,
         api_key: Optional[str] = None,
-        supports_reasoning_effort: bool = False,
-        default_reasoning_effort: Optional[str] = "low",
     ):
         self._model_id = model_id
         self._api_key = api_key
-        self._supports_reasoning_effort = supports_reasoning_effort
-        self._default_reasoning_effort = default_reasoning_effort
 
     def chat(
         self,
@@ -105,13 +95,8 @@ class _HttpProvider:
             llm_kwargs["presence_penalty"] = config.presence_penalty
         if config.frequency_penalty is not None:
             llm_kwargs["frequency_penalty"] = config.frequency_penalty
-        if self._supports_reasoning_effort:
-            effort = _coerce_reasoning_effort(
-                self._model_id,
-                config.reasoning_effort or self._default_reasoning_effort,
-            )
-            if effort is not None:
-                llm_kwargs["reasoning_effort"] = effort
+        if config.reasoning_effort is not None:
+            llm_kwargs["reasoning_effort"] = config.reasoning_effort
 
         if config.extra:
             llm_kwargs.update(config.extra)

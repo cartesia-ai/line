@@ -11,7 +11,7 @@ Model naming:
 """
 
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import (
     Any,
     AsyncIterable,
@@ -251,10 +251,10 @@ class LlmProvider:
     for ``gpt-5.2`` / ``gpt-5.4-*`` models) based on the model name and the
     optional ``backend`` override, and delegates all calls to it.
 
-    Handles config normalization and reasoning-effort detection so that
-    backends receive normalized configs and pre-computed flags.  This class
-    is a public SDK surface — callers may pass raw ``LlmConfig`` and tool
-    specs which are normalized internally.
+    Handles config normalization and reasoning-effort resolution so that
+    backends receive fully-resolved configs.  This class is a public SDK
+    surface — callers may pass raw ``LlmConfig`` and tool specs which are
+    normalized internally.
 
     Args:
         model: Model name (e.g. ``"gpt-4o"``, ``"gpt-4o-realtime-preview"``).
@@ -291,10 +291,11 @@ class LlmProvider:
 
         self._model_id = model_id
         self._tools = list(tools or [])
-        normalized_config = _normalize_config(config or LlmConfig())
-        self._config = normalized_config
         self._backend_override = backend
+        normalized_config = _normalize_config(config or LlmConfig())
         mcfg = _get_model_config(model_id, backend=backend, config=normalized_config)
+        self._model_config = mcfg
+        self._config = _resolve_config_reasoning_effort(model_id, mcfg, normalized_config)
 
         if mcfg.backend == "realtime":
             from line.llm_agent.realtime_provider import _RealtimeProvider
@@ -313,7 +314,6 @@ class LlmProvider:
             self._backend = _WebSocketProvider(
                 model_id=model_id,
                 api_key=api_key,
-                default_reasoning_effort=mcfg.default_reasoning_effort,
             )
         elif mcfg.backend == "http_responses":
             from line.llm_agent.http_responses_provider import _HttpResponsesProvider
@@ -323,7 +323,6 @@ class LlmProvider:
             self._backend = _HttpResponsesProvider(
                 model_id=model_id,
                 api_key=api_key,
-                default_reasoning_effort=mcfg.default_reasoning_effort,
             )
         else:
             from line.llm_agent.http_provider import _HttpProvider
@@ -332,8 +331,6 @@ class LlmProvider:
             self._backend = _HttpProvider(
                 model_id=model_id,
                 api_key=api_key,
-                supports_reasoning_effort=mcfg.supports_reasoning_effort,
-                default_reasoning_effort=mcfg.default_reasoning_effort,
             )
 
     def chat(
@@ -347,7 +344,7 @@ class LlmProvider:
         if normalized is None:
             return _empty_stream()
 
-        effective_config = _merge_configs(self._config, config) if config else self._config
+        effective_config = self._effective_config(config)
         effective_tools, web_search_options = _normalize_tools(
             _merge_tools(self._tools, tools), model_id=self._model_id
         )
@@ -358,6 +355,18 @@ class LlmProvider:
 
         return self._backend.chat(normalized, effective_tools, config=effective_config, **kwargs)
 
+    def _effective_config(self, config: Optional[LlmConfig]) -> LlmConfig:
+        """Merge a per-call config override onto the base config and resolve it.
+
+        ``self._config`` is already resolved at init time, so resolution is
+        only re-applied when an override may have reintroduced a raw value.
+        """
+        if config is None:
+            return self._config
+        return _resolve_config_reasoning_effort(
+            self._model_id, self._model_config, _merge_configs(self._config, config)
+        )
+
     def _set_tools(self, tools: Optional[List[Any]]) -> None:
         """Replace the provider's default tool specs."""
         self._tools = list(tools or [])
@@ -367,7 +376,7 @@ class LlmProvider:
         config: Optional[LlmConfig] = None,
         tools: Optional[List[Any]] = None,
     ) -> None:
-        effective_config = _merge_configs(self._config, config) if config else self._config
+        effective_config = self._effective_config(config)
         effective_tools, web_search_options = _normalize_tools(
             _merge_tools(self._tools, tools), model_id=self._model_id
         )
@@ -456,6 +465,29 @@ def _coerce_reasoning_effort(model_id: ParsedModelId, effort: Optional[str]) -> 
     if info.get("supports_reasoning"):
         return "none"
     return None
+
+
+def _resolve_config_reasoning_effort(
+    model_id: ParsedModelId,
+    model_config: "_ModelConfig",
+    config: LlmConfig,
+) -> LlmConfig:
+    """Return *config* with ``reasoning_effort`` resolved to the wire value.
+
+    Applies the model's support gate (unsupported → ``None``), the per-model
+    default when unset, and wire-safety coercion (e.g. ``"none"`` →
+    ``"minimal"`` for models that reject the literal).  ``None`` means "omit
+    the parameter".  *config* must already be normalized.
+    """
+    if not model_config.supports_reasoning_effort:
+        resolved = None
+    else:
+        resolved = _coerce_reasoning_effort(
+            model_id, config.reasoning_effort or model_config.default_reasoning_effort
+        )
+    if resolved == config.reasoning_effort:
+        return config
+    return replace(config, reasoning_effort=resolved)
 
 
 def _get_model_config(
