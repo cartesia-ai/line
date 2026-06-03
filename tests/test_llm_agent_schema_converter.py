@@ -306,19 +306,19 @@ class TestFunctionToolWithTypedDict:
 
 
 # =============================================================================
-# Tests: webhook_tool schema conversion
+# Tests: http_server_tool schema conversion
 # =============================================================================
 
 
 class TestWebhookToolSchema:
-    """Verify webhook_tool FunctionTool converts to valid provider schemas."""
+    """Verify http_server_tool FunctionTool converts to valid provider schemas."""
 
     @pytest.fixture
     def ticket_tool(self, monkeypatch):
-        from line.llm_agent.tools.system import webhook_tool
+        from line.llm_agent.tools.system import http_server_tool
 
         monkeypatch.setenv("SUPPORT_API_KEY", "test-key")
-        return webhook_tool(
+        return http_server_tool(
             name="create_ticket",
             description="Creates a support ticket.",
             url="https://example.com/api/tickets",
@@ -336,9 +336,9 @@ class TestWebhookToolSchema:
 
     @pytest.fixture
     def multi_param_tool(self):
-        from line.llm_agent.tools.system import webhook_tool
+        from line.llm_agent.tools.system import http_server_tool
 
-        return webhook_tool(
+        return http_server_tool(
             name="update_order",
             description="Update an order.",
             url="https://example.com/orders/{order_id}",
@@ -375,9 +375,9 @@ class TestWebhookToolSchema:
         assert "source" not in props
 
     def test_litellm_nested_object_constants_preserve_object_schema(self):
-        from line.llm_agent.tools.system import webhook_tool
+        from line.llm_agent.tools.system import http_server_tool
 
-        tool = webhook_tool(
+        tool = http_server_tool(
             name="create_ticket",
             description="Create a ticket.",
             url="https://example.com/api/tickets",

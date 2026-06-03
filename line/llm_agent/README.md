@@ -102,7 +102,7 @@ config = LlmConfig.from_call_request(
 The SDK provides commonly-used tools out of the box:
 
 ```python
-from line.llm_agent import end_call, send_dtmf, transfer_call, web_search, webhook_tool, agent_as_handoff
+from line.llm_agent import end_call, send_dtmf, transfer_call, web_search, http_server_tool, agent_as_handoff
 ```
 
 | Tool | Type | Description |
@@ -111,7 +111,7 @@ from line.llm_agent import end_call, send_dtmf, transfer_call, web_search, webho
 | `send_dtmf` | passthrough | Send DTMF tones (0-9, *, #) |
 | `transfer_call` | passthrough | Transfer to a phone number (E.164 format) |
 | `web_search` | loopback | Web search with native LLM support or DuckDuckGo fallback |
-| `webhook_tool` | factory | Create HTTP webhook tools from JSON schemas |
+| `http_server_tool` | factory | Create HTTP webhook tools from JSON schemas |
 | `agent_as_handoff` | handoff | Create a handoff tool from another agent |
 
 ### End Call
@@ -181,14 +181,14 @@ main_agent = LlmAgent(
 )
 ```
 
-### Webhook Tool
+### HTTP Server Tool
 
 Creates an HTTP tool from JSON schemas — no custom function needed. The LLM fills the visible parameters; constants and auth are injected automatically.
 
 ```python
-from line.llm_agent import webhook_tool
+from line.llm_agent import http_server_tool
 
-create_ticket = webhook_tool(
+create_ticket = http_server_tool(
     name="create_ticket",
     description="Creates a support ticket.",
     url="https://api.example.com/v1/{tenant_id}/tickets",
@@ -259,7 +259,7 @@ The LLM sees `subject` only. `metadata.channel` is injected into every request a
 **Query parameter example** (GET request):
 
 ```python
-search_orders = webhook_tool(
+search_orders = http_server_tool(
     name="search_orders",
     description="Search orders by status.",
     url="https://api.example.com/orders",

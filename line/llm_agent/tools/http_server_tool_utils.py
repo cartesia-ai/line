@@ -1,6 +1,6 @@
-"""Validation and schema helpers for webhook_tool.
+"""Validation and schema helpers for http_server_tool.
 
-Extracted from system.py to keep webhook_tool() concise.
+Extracted from system.py to keep http_server_tool() concise.
 """
 
 import os
@@ -27,7 +27,7 @@ _QUERY_SCALAR_TYPES = {"string", "integer", "number", "boolean"}
 
 
 def error(name: str, msg: str) -> ValueError:
-    return ValueError(f"webhook_tool(name={name!r}): {msg}")
+    return ValueError(f"http_server_tool(name={name!r}): {msg}")
 
 
 def has_object_properties(schema: Dict[str, Any]) -> bool:
@@ -54,7 +54,7 @@ def resolve_env_vars(name: str, value: str) -> str:
 
 
 def parse_path_params(name: str, url: str) -> list[str]:
-    """Return validated URL template parameter names from a webhook URL."""
+    """Return validated URL template parameter names from the URL."""
     brace_depth = 0
     for ch in url:
         if ch == "{":

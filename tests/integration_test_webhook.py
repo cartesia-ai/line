@@ -1,7 +1,7 @@
 """
-Integration tests for webhook_tool over real HTTP.
+Integration tests for http_server_tool over real HTTP.
 
-Starts a local HTTP server, constructs webhook_tools pointing at it, calls
+Starts a local HTTP server, constructs http_server_tools pointing at it, calls
 tool.func() directly (no LLM), and asserts the server received the correct
 method, headers, body, query params, and URL path.
 
@@ -19,7 +19,7 @@ from urllib.parse import parse_qs
 
 import pytest
 
-from line.llm_agent.tools.system import webhook_tool
+from line.llm_agent.tools.system import http_server_tool
 
 pytestmark = [pytest.mark.anyio, pytest.mark.parametrize("anyio_backend", ["asyncio"])]
 
@@ -158,7 +158,7 @@ async def test_post_with_body_and_constants(server, ctx, anyio_backend, monkeypa
     """POST request sends LLM args + constant_value fields in the JSON body."""
     monkeypatch.setenv("TEST_API_KEY", "secret-123")
 
-    tool = webhook_tool(
+    tool = http_server_tool(
         name="create_ticket",
         description="Create a ticket.",
         url=f"{server}/api/tickets",
@@ -191,7 +191,7 @@ async def test_post_with_body_and_constants(server, ctx, anyio_backend, monkeypa
 
 async def test_nested_constant_values(server, ctx, anyio_backend):
     """Nested constant_value fields are deep-merged into the request body."""
-    tool = webhook_tool(
+    tool = http_server_tool(
         name="t",
         description="d",
         url=f"{server}/api/tickets",
@@ -223,7 +223,7 @@ async def test_nested_constant_values(server, ctx, anyio_backend):
 
 async def test_nested_constant_values_without_object_type(server, ctx, anyio_backend):
     """Object-like schemas still hide and inject constants when type is omitted."""
-    tool = webhook_tool(
+    tool = http_server_tool(
         name="t",
         description="d",
         url=f"{server}/api/tickets",
@@ -256,7 +256,7 @@ async def test_nested_constant_values_without_object_type(server, ctx, anyio_bac
 
 async def test_freeform_object_without_properties_remains_visible(server, ctx, anyio_backend):
     """Bare object fields remain valid LLM-visible parameters."""
-    tool = webhook_tool(
+    tool = http_server_tool(
         name="t",
         description="d",
         url=f"{server}/api/tickets",
@@ -279,7 +279,7 @@ async def test_freeform_object_without_properties_remains_visible(server, ctx, a
 
 async def test_required_mixed_nested_object_remains_required(server, ctx, anyio_backend):
     """Required nested objects stay required when they mix visible and constant children."""
-    tool = webhook_tool(
+    tool = http_server_tool(
         name="t",
         description="d",
         url=f"{server}/api/tickets",
@@ -306,7 +306,7 @@ async def test_required_mixed_nested_object_remains_required(server, ctx, anyio_
 
 async def test_url_template_params(server, ctx, anyio_backend):
     """URL template variables are interpolated and percent-encoded."""
-    tool = webhook_tool(
+    tool = http_server_tool(
         name="t",
         description="d",
         url=f"{server}/orgs/{{org_id}}/tickets",
@@ -336,7 +336,7 @@ async def test_url_template_params(server, ctx, anyio_backend):
 )
 async def test_missing_url_template_param_fails_before_request(server, ctx, anyio_backend, tool_kwargs):
     """Missing or null URL template variables fail without sending a request."""
-    tool = webhook_tool(
+    tool = http_server_tool(
         name="t",
         description="d",
         url=f"{server}/orgs/{{org_id}}/tickets",
@@ -359,7 +359,7 @@ async def test_missing_url_template_param_fails_before_request(server, ctx, anyi
 
 async def test_query_params(server, ctx, anyio_backend):
     """Query parameters including booleans are sent in the URL query string."""
-    tool = webhook_tool(
+    tool = http_server_tool(
         name="t",
         description="d",
         url=f"{server}/search",
@@ -388,7 +388,7 @@ async def test_query_params(server, ctx, anyio_backend):
 
 async def test_query_params_with_constants(server, ctx, anyio_backend):
     """constant_value query params are hidden from the LLM and still sent."""
-    tool = webhook_tool(
+    tool = http_server_tool(
         name="t",
         description="d",
         url=f"{server}/search",
@@ -421,7 +421,7 @@ async def test_query_params_with_constants(server, ctx, anyio_backend):
 
 async def test_custom_headers(server, ctx, anyio_backend):
     """Static headers are sent alongside the request."""
-    tool = webhook_tool(
+    tool = http_server_tool(
         name="t",
         description="d",
         url=f"{server}/api",
@@ -443,7 +443,7 @@ async def test_custom_headers(server, ctx, anyio_backend):
 
 async def test_put_method(server, ctx, anyio_backend):
     """Non-POST methods work correctly."""
-    tool = webhook_tool(
+    tool = http_server_tool(
         name="t",
         description="d",
         url=f"{server}/api/items/{{item_id}}",
@@ -466,7 +466,7 @@ async def test_put_method(server, ctx, anyio_backend):
 
 async def test_delete_method(server, ctx, anyio_backend):
     """DELETE method with URL template works."""
-    tool = webhook_tool(
+    tool = http_server_tool(
         name="t",
         description="d",
         url=f"{server}/api/items/{{item_id}}",
@@ -484,7 +484,7 @@ async def test_delete_method(server, ctx, anyio_backend):
 
 async def test_response_truncation(server, ctx, anyio_backend):
     """Large response bodies are truncated at 4096 chars."""
-    tool = webhook_tool(
+    tool = http_server_tool(
         name="t",
         description="d",
         url=f"{server}/large/6000",
@@ -502,7 +502,7 @@ async def test_response_truncation(server, ctx, anyio_backend):
 
 async def test_small_response_not_truncated(server, ctx, anyio_backend):
     """Responses under 4096 chars are returned in full without truncation."""
-    tool = webhook_tool(
+    tool = http_server_tool(
         name="t",
         description="d",
         url=f"{server}/api",
@@ -524,7 +524,7 @@ async def test_small_response_not_truncated(server, ctx, anyio_backend):
 
 async def test_server_error_status(server, ctx, anyio_backend):
     """Non-2xx responses return ok=false with the status code and error body."""
-    tool = webhook_tool(
+    tool = http_server_tool(
         name="t",
         description="d",
         url=f"{server}/error/500",
@@ -545,7 +545,7 @@ async def test_server_error_status(server, ctx, anyio_backend):
 
 async def test_not_found_status(server, ctx, anyio_backend):
     """404 responses return ok=false with status 404."""
-    tool = webhook_tool(
+    tool = http_server_tool(
         name="t",
         description="d",
         url=f"{server}/error/404",
@@ -563,7 +563,7 @@ async def test_auth_rejected(server, ctx, anyio_backend, monkeypatch):
     """Server returns 401 when auth token is wrong."""
     monkeypatch.setenv("BAD_KEY", "wrong-token")
 
-    tool = webhook_tool(
+    tool = http_server_tool(
         name="t",
         description="d",
         url=f"{server}/auth-required/tickets",
@@ -587,7 +587,7 @@ async def test_auth_accepted(server, ctx, anyio_backend, monkeypatch):
     """Server returns 201 when auth token is correct."""
     monkeypatch.setenv("GOOD_KEY", "valid-token")
 
-    tool = webhook_tool(
+    tool = http_server_tool(
         name="t",
         description="d",
         url=f"{server}/auth-required/tickets",
@@ -609,7 +609,7 @@ async def test_auth_accepted(server, ctx, anyio_backend, monkeypatch):
 
 async def test_connection_refused(ctx, anyio_backend):
     """Connection refused returns ok=false with a descriptive error."""
-    tool = webhook_tool(
+    tool = http_server_tool(
         name="t",
         description="d",
         url="http://127.0.0.1:1",  # port 1 — nothing is listening
@@ -630,7 +630,7 @@ async def test_connection_refused(ctx, anyio_backend):
 
 async def test_timeout(server, ctx, anyio_backend):
     """Request that exceeds the timeout returns ok=false with timeout error."""
-    tool = webhook_tool(
+    tool = http_server_tool(
         name="t",
         description="d",
         url=f"{server}/slow/5",  # server sleeps 5s
@@ -650,7 +650,7 @@ async def test_combined_url_body_query_auth_headers(server, ctx, anyio_backend, 
     """All features combined in a single request."""
     monkeypatch.setenv("MY_TOKEN", "tok-abc")
 
-    tool = webhook_tool(
+    tool = http_server_tool(
         name="full_test",
         description="d",
         url=f"{server}/v2/{{tenant}}/tickets",

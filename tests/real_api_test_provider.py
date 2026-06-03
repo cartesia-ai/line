@@ -726,8 +726,8 @@ Always include menu_item_id and quantity.""",
     return True
 
 
-async def test_webhook_tool_calling(model: str, api_key: str, backend: Optional[str] = None):
-    """Test that a complex webhook_tool schema is accepted by the provider.
+async def test_http_server_tool_calling(model: str, api_key: str, backend: Optional[str] = None):
+    """Test that a complex http_server_tool schema is accepted by the provider.
 
     Exercises:
     - Top-level constant_value (string)
@@ -742,12 +742,12 @@ async def test_webhook_tool_calling(model: str, api_key: str, backend: Optional[
     response contains facts the LLM must relay back to the user.
     """
     print("\n" + "=" * 60)
-    print(f"Testing webhook_tool with {model} (backend={backend})")
+    print(f"Testing http_server_tool with {model} (backend={backend})")
     print("=" * 60)
 
     from unittest.mock import patch
 
-    from line.llm_agent.tools.system import webhook_tool
+    from line.llm_agent.tools.system import http_server_tool
 
     # Fake API response — contains facts the LLM must surface.
     _FAKE_RESPONSE = {
@@ -782,7 +782,7 @@ async def test_webhook_tool_calling(model: str, api_key: str, backend: Optional[
         async def __aexit__(self, *a):
             pass
 
-    create_ticket = webhook_tool(
+    create_ticket = http_server_tool(
         name="create_ticket",
         description=(
             "Create a support ticket. Use when the user wants to file an issue. "
@@ -951,7 +951,7 @@ async def test_webhook_tool_calling(model: str, api_key: str, backend: Optional[
     if missing:
         raise AssertionError(f"LLM response is missing expected facts: {missing}\nFull response: {full_text}")
 
-    print("✓ webhook_tool test passed:")
+    print("✓ http_server_tool test passed:")
     print("  - LLM filled subject, priority (enum), quantity (int), tags (array)")
     print("  - constant 'source' + nested 'metadata' hidden from LLM, injected into body")
     print("  - URL template resolved with tenant_id='acme'")
@@ -1038,7 +1038,7 @@ AVAILABLE_TESTS = [
     "mcp",  # test_mcp_list_tools and test_mcp_tool_execution
     "reset",  # test_conversation_reset
     "reasoning_default",  # test_reasoning_disabled_by_default
-    "webhook",  # test_webhook_tool_calling
+    "webhook",  # test_http_server_tool_calling
 ]
 
 
@@ -1164,7 +1164,7 @@ async def main(args):
                 ("reasoning_default", test_reasoning_disabled_by_default, model, api_key, backend)
             )
         if "webhook" in tests_to_run:
-            test_plan.append(("webhook", test_webhook_tool_calling, model, api_key, backend))
+            test_plan.append(("webhook", test_http_server_tool_calling, model, api_key, backend))
 
         for test_entry in test_plan:
             test_name, test_fn, *test_args = test_entry

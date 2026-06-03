@@ -24,7 +24,7 @@ from line.events import (
     CallStarted,
 )
 from line.knowledge_base import DEFAULT_TOP_K, KnowledgeBaseError, _warn_if_long_timeout
-from line.llm_agent.tools import webhook_tool_utils
+from line.llm_agent.tools import http_server_tool_utils
 from line.llm_agent.tools.decorators import passthrough_tool
 from line.llm_agent.tools.utils import FunctionTool, ParameterInfo, ToolEnv, ToolType, construct_function_tool
 
@@ -730,7 +730,7 @@ def agent_as_handoff(
     )
 
 
-def webhook_tool(
+def http_server_tool(
     name: str,
     description: str,
     url: str,
@@ -742,7 +742,7 @@ def webhook_tool(
     timeout: Optional[float] = None,
     is_background: bool = True,
 ) -> FunctionTool:
-    """Create an HTTP webhook tool that the LLM can call.
+    """Create an HTTP tool that the LLM can call.
 
     Properties with "constant_value" are hidden from the LLM and injected
     into every request. All inputs are validated at build time.
@@ -774,7 +774,7 @@ def webhook_tool(
 
     Example::
 
-        create_ticket = webhook_tool(
+        create_ticket = http_server_tool(
             name="create_ticket",
             description="Creates a support ticket.",
             url="https://example.cartesia.ai/api/{tenant_id}/tickets",
@@ -798,26 +798,26 @@ def webhook_tool(
     """
 
     def _err(msg: str) -> ValueError:
-        return webhook_tool_utils.error(name, msg)
+        return http_server_tool_utils.error(name, msg)
 
     # -- 0. Validate inputs -----------------------------------------------------
     if not name or not name.strip():
-        raise ValueError("webhook_tool: name must be a non-empty string.")
+        raise ValueError("http_server_tool: name must be a non-empty string.")
     if not description or not description.strip():
         raise _err("description must be a non-empty string.")
     if not url or not url.strip():
         raise _err("url must be a non-empty string.")
-    if method.upper() not in webhook_tool_utils.VALID_METHODS:
+    if method.upper() not in http_server_tool_utils.VALID_METHODS:
         raise _err(
             f"method={method!r} is not a valid HTTP method. "
-            f"Expected one of: {', '.join(sorted(webhook_tool_utils.VALID_METHODS))}."
+            f"Expected one of: {', '.join(sorted(http_server_tool_utils.VALID_METHODS))}."
         )
-    path_params = webhook_tool_utils.parse_path_params(name, url)
+    path_params = http_server_tool_utils.parse_path_params(name, url)
 
     if request_body_schema is not None:
-        webhook_tool_utils.validate_body_schema(name, request_body_schema, "request_body_schema")
+        http_server_tool_utils.validate_body_schema(name, request_body_schema, "request_body_schema")
     if query_params_schema is not None:
-        webhook_tool_utils.validate_query_schema(name, query_params_schema, "query_params_schema")
+        http_server_tool_utils.validate_query_schema(name, query_params_schema, "query_params_schema")
     if timeout is not None and timeout <= 0:
         raise _err(f"timeout must be positive, got {timeout}.")
 
@@ -826,7 +826,7 @@ def webhook_tool(
 
     if auth:
         for key, value in auth.items():
-            resolved_headers[key] = webhook_tool_utils.resolve_env_vars(name, value)
+            resolved_headers[key] = http_server_tool_utils.resolve_env_vars(name, value)
     if headers:
         collision = set(resolved_headers) & set(headers)
         if collision:
@@ -841,7 +841,7 @@ def webhook_tool(
     constant_values: Dict[str, Any] = {}
 
     if request_body_schema:
-        request_body_properties, request_body_required, constant_values = webhook_tool_utils.strip_constants(
+        request_body_properties, request_body_required, constant_values = http_server_tool_utils.strip_constants(
             request_body_schema.get("properties", {}),
             list(request_body_schema.get("required", [])),
         )
@@ -851,7 +851,7 @@ def webhook_tool(
     query_constant_values: Dict[str, Any] = {}
 
     if query_params_schema:
-        query_properties, query_required, query_constant_values = webhook_tool_utils.strip_constants(
+        query_properties, query_required, query_constant_values = http_server_tool_utils.strip_constants(
             query_params_schema.get("properties", {}),
             list(query_params_schema.get("required", [])),
         )
@@ -868,11 +868,11 @@ def webhook_tool(
         )
 
     for prop_name, prop_def in request_body_properties.items():
-        parameters[prop_name] = webhook_tool_utils.build_param_info(
+        parameters[prop_name] = http_server_tool_utils.build_param_info(
             prop_name, prop_def, request_body_required
         )
     for prop_name, prop_def in query_properties.items():
-        parameters[prop_name] = webhook_tool_utils.build_param_info(prop_name, prop_def, query_required)
+        parameters[prop_name] = http_server_tool_utils.build_param_info(prop_name, prop_def, query_required)
 
     # Validate no parameter name collisions across sources
     _seen_names: Dict[str, str] = {}
@@ -893,7 +893,7 @@ def webhook_tool(
     path_param_names = set(path_params)
     max_response_chars = 4096
 
-    async def execute_webhook_request(ctx: ToolEnv, **kwargs: Any) -> str:
+    async def execute_http_request(ctx: ToolEnv, **kwargs: Any) -> str:
         final_url = url
         query_params: Dict[str, Any] = {}
         body: Dict[str, Any] = {}
@@ -919,7 +919,7 @@ def webhook_tool(
         if query_constant_values:
             query_params.update(query_constant_values)
         if constant_values:
-            body = webhook_tool_utils.deep_merge(body, constant_values)
+            body = http_server_tool_utils.deep_merge(body, constant_values)
 
         req_kwargs: Dict[str, Any] = {
             "method": upper_method,
@@ -956,7 +956,7 @@ def webhook_tool(
     return FunctionTool(
         name=name,
         description=description,
-        func=execute_webhook_request,
+        func=execute_http_request,
         parameters=parameters,
         tool_type=ToolType.GENERAL,
         is_background=is_background,
@@ -975,5 +975,5 @@ __all__ = [
     "send_dtmf",
     "transfer_call",
     "agent_as_handoff",
-    "webhook_tool",
+    "http_server_tool",
 ]

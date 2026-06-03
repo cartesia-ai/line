@@ -21,7 +21,7 @@ from line.llm_agent.tools.system import (
     knowledge_base,
     send_dtmf,
     transfer_call,
-    webhook_tool,
+    http_server_tool,
 )
 from line.llm_agent.tools.utils import FunctionTool, ToolType
 
@@ -585,58 +585,58 @@ async def test_normalize_tools_rejects_duplicate_names(anyio_backend):
 
 
 # =============================================================================
-# Tests: webhook_tool — build-time validation
+# Tests: http_server_tool — build-time validation
 # =============================================================================
 
 
-def test_webhook_tool_empty_name_raises(anyio_backend):
+def test_http_server_tool_empty_name_raises(anyio_backend):
     with pytest.raises(ValueError, match="name must be a non-empty"):
-        webhook_tool(name="", description="d", url="https://example.com")
+        http_server_tool(name="", description="d", url="https://example.com")
 
 
-def test_webhook_tool_whitespace_name_raises(anyio_backend):
+def test_http_server_tool_whitespace_name_raises(anyio_backend):
     with pytest.raises(ValueError, match="name must be a non-empty"):
-        webhook_tool(name="   ", description="d", url="https://example.com")
+        http_server_tool(name="   ", description="d", url="https://example.com")
 
 
-def test_webhook_tool_empty_description_raises(anyio_backend):
+def test_http_server_tool_empty_description_raises(anyio_backend):
     with pytest.raises(ValueError, match="description must be a non-empty"):
-        webhook_tool(name="t", description="", url="https://example.com")
+        http_server_tool(name="t", description="", url="https://example.com")
 
 
-def test_webhook_tool_empty_url_raises(anyio_backend):
+def test_http_server_tool_empty_url_raises(anyio_backend):
     with pytest.raises(ValueError, match="url must be a non-empty"):
-        webhook_tool(name="t", description="d", url="")
+        http_server_tool(name="t", description="d", url="")
 
 
-def test_webhook_tool_invalid_method_raises(anyio_backend):
+def test_http_server_tool_invalid_method_raises(anyio_backend):
     with pytest.raises(ValueError, match="not a valid HTTP method"):
-        webhook_tool(name="t", description="d", url="https://example.com", method="BANANA")
+        http_server_tool(name="t", description="d", url="https://example.com", method="BANANA")
 
 
-def test_webhook_tool_unmatched_opening_brace_raises(anyio_backend):
+def test_http_server_tool_unmatched_opening_brace_raises(anyio_backend):
     with pytest.raises(ValueError, match="unmatched opening brace"):
-        webhook_tool(name="t", description="d", url="https://example.com/{id")
+        http_server_tool(name="t", description="d", url="https://example.com/{id")
 
 
-def test_webhook_tool_unmatched_closing_brace_raises(anyio_backend):
+def test_http_server_tool_unmatched_closing_brace_raises(anyio_backend):
     with pytest.raises(ValueError, match="unmatched closing brace"):
-        webhook_tool(name="t", description="d", url="https://example.com/id}")
+        http_server_tool(name="t", description="d", url="https://example.com/id}")
 
 
-def test_webhook_tool_nested_braces_raises(anyio_backend):
+def test_http_server_tool_nested_braces_raises(anyio_backend):
     with pytest.raises(ValueError, match="nested braces"):
-        webhook_tool(name="t", description="d", url="https://example.com/{{id}}")
+        http_server_tool(name="t", description="d", url="https://example.com/{{id}}")
 
 
-def test_webhook_tool_empty_url_placeholder_raises(anyio_backend):
+def test_http_server_tool_empty_url_placeholder_raises(anyio_backend):
     with pytest.raises(ValueError, match="url template variable"):
-        webhook_tool(name="t", description="d", url="https://example.com/{}/tickets")
+        http_server_tool(name="t", description="d", url="https://example.com/{}/tickets")
 
 
-def test_webhook_tool_duplicate_url_placeholder_raises(anyio_backend):
+def test_http_server_tool_duplicate_url_placeholder_raises(anyio_backend):
     with pytest.raises(ValueError, match="appears more than once"):
-        webhook_tool(
+        http_server_tool(
             name="t",
             description="d",
             url="https://example.com/{item_id}/related/{item_id}",
@@ -644,20 +644,20 @@ def test_webhook_tool_duplicate_url_placeholder_raises(anyio_backend):
 
 
 @pytest.mark.parametrize("placeholder", ["tenant id", " tenant", "tenant:id", "x" * 65])
-def test_webhook_tool_invalid_url_placeholder_name_raises(anyio_backend, placeholder):
+def test_http_server_tool_invalid_url_placeholder_name_raises(anyio_backend, placeholder):
     with pytest.raises(ValueError, match="url template variable"):
-        webhook_tool(
+        http_server_tool(
             name="t",
             description="d",
             url=f"https://example.com/{{{placeholder}}}/tickets",
         )
 
 
-def test_webhook_tool_invalid_url_placeholder_raises_before_auth_env(anyio_backend, monkeypatch):
+def test_http_server_tool_invalid_url_placeholder_raises_before_auth_env(anyio_backend, monkeypatch):
     monkeypatch.delenv("MISSING_AUTH_ENV", raising=False)
 
     with pytest.raises(ValueError, match="url template variable"):
-        webhook_tool(
+        http_server_tool(
             name="t",
             description="d",
             url="https://example.com/{tenant id}/tickets",
@@ -665,9 +665,9 @@ def test_webhook_tool_invalid_url_placeholder_raises_before_auth_env(anyio_backe
         )
 
 
-def test_webhook_tool_body_schema_not_object_type_raises(anyio_backend):
+def test_http_server_tool_body_schema_not_object_type_raises(anyio_backend):
     with pytest.raises(ValueError, match='"type": "object"'):
-        webhook_tool(
+        http_server_tool(
             name="t",
             description="d",
             url="https://example.com",
@@ -675,9 +675,9 @@ def test_webhook_tool_body_schema_not_object_type_raises(anyio_backend):
         )
 
 
-def test_webhook_tool_body_schema_missing_properties_raises(anyio_backend):
+def test_http_server_tool_body_schema_missing_properties_raises(anyio_backend):
     with pytest.raises(ValueError, match='"properties"'):
-        webhook_tool(
+        http_server_tool(
             name="t",
             description="d",
             url="https://example.com",
@@ -685,9 +685,9 @@ def test_webhook_tool_body_schema_missing_properties_raises(anyio_backend):
         )
 
 
-def test_webhook_tool_body_schema_required_not_list_raises(anyio_backend):
+def test_http_server_tool_body_schema_required_not_list_raises(anyio_backend):
     with pytest.raises(ValueError, match="must be a list"):
-        webhook_tool(
+        http_server_tool(
             name="t",
             description="d",
             url="https://example.com",
@@ -699,9 +699,9 @@ def test_webhook_tool_body_schema_required_not_list_raises(anyio_backend):
         )
 
 
-def test_webhook_tool_body_schema_required_unknown_field_raises(anyio_backend):
+def test_http_server_tool_body_schema_required_unknown_field_raises(anyio_backend):
     with pytest.raises(ValueError, match="not in properties"):
-        webhook_tool(
+        http_server_tool(
             name="t",
             description="d",
             url="https://example.com",
@@ -713,9 +713,9 @@ def test_webhook_tool_body_schema_required_unknown_field_raises(anyio_backend):
         )
 
 
-def test_webhook_tool_property_unknown_type_raises(anyio_backend):
+def test_http_server_tool_property_unknown_type_raises(anyio_backend):
     with pytest.raises(ValueError, match="unknown type"):
-        webhook_tool(
+        http_server_tool(
             name="t",
             description="d",
             url="https://example.com",
@@ -726,9 +726,9 @@ def test_webhook_tool_property_unknown_type_raises(anyio_backend):
         )
 
 
-def test_webhook_tool_constant_value_type_mismatch_raises(anyio_backend):
+def test_http_server_tool_constant_value_type_mismatch_raises(anyio_backend):
     with pytest.raises(ValueError, match="constant_value.*is str"):
-        webhook_tool(
+        http_server_tool(
             name="t",
             description="d",
             url="https://example.com",
@@ -741,9 +741,9 @@ def test_webhook_tool_constant_value_type_mismatch_raises(anyio_backend):
         )
 
 
-def test_webhook_tool_integer_constant_value_rejects_bool(anyio_backend):
+def test_http_server_tool_integer_constant_value_rejects_bool(anyio_backend):
     with pytest.raises(ValueError, match="type='integer'.*constant_value=True is bool"):
-        webhook_tool(
+        http_server_tool(
             name="t",
             description="d",
             url="https://example.com",
@@ -756,9 +756,9 @@ def test_webhook_tool_integer_constant_value_rejects_bool(anyio_backend):
         )
 
 
-def test_webhook_tool_number_constant_value_rejects_bool(anyio_backend):
+def test_http_server_tool_number_constant_value_rejects_bool(anyio_backend):
     with pytest.raises(ValueError, match="type='number'.*constant_value=False is bool"):
-        webhook_tool(
+        http_server_tool(
             name="t",
             description="d",
             url="https://example.com",
@@ -771,9 +771,9 @@ def test_webhook_tool_number_constant_value_rejects_bool(anyio_backend):
         )
 
 
-def test_webhook_tool_query_integer_constant_value_rejects_bool(anyio_backend):
+def test_http_server_tool_query_integer_constant_value_rejects_bool(anyio_backend):
     with pytest.raises(ValueError, match="type='integer'.*constant_value=True is bool"):
-        webhook_tool(
+        http_server_tool(
             name="t",
             description="d",
             url="https://example.com",
@@ -787,12 +787,12 @@ def test_webhook_tool_query_integer_constant_value_rejects_bool(anyio_backend):
 
 
 @pytest.mark.parametrize("constant_value", [{"x": 1}, ["x"], None])
-def test_webhook_tool_query_constant_value_rejects_non_scalar(constant_value, anyio_backend):
+def test_http_server_tool_query_constant_value_rejects_non_scalar(constant_value, anyio_backend):
     with pytest.raises(
         ValueError,
         match="query_params_schema.*constant_value must be a scalar",
     ):
-        webhook_tool(
+        http_server_tool(
             name="t",
             description="d",
             url="https://example.com",
@@ -805,9 +805,9 @@ def test_webhook_tool_query_constant_value_rejects_non_scalar(constant_value, an
         )
 
 
-def test_webhook_tool_constant_value_bool_mismatch_raises(anyio_backend):
+def test_http_server_tool_constant_value_bool_mismatch_raises(anyio_backend):
     with pytest.raises(ValueError, match="constant_value.*is int"):
-        webhook_tool(
+        http_server_tool(
             name="t",
             description="d",
             url="https://example.com",
@@ -820,10 +820,10 @@ def test_webhook_tool_constant_value_bool_mismatch_raises(anyio_backend):
         )
 
 
-def test_webhook_tool_nested_schema_validation(anyio_backend):
+def test_http_server_tool_nested_schema_validation(anyio_backend):
     """Validation recurses into nested object schemas."""
     with pytest.raises(ValueError, match="nested_prop.*unknown type"):
-        webhook_tool(
+        http_server_tool(
             name="t",
             description="d",
             url="https://example.com",
@@ -841,10 +841,10 @@ def test_webhook_tool_nested_schema_validation(anyio_backend):
         )
 
 
-def test_webhook_tool_query_params_schema_validation(anyio_backend):
+def test_http_server_tool_query_params_schema_validation(anyio_backend):
     """query_params_schema gets the same validation as body_schema."""
     with pytest.raises(ValueError, match='query_params_schema.*"type": "object"'):
-        webhook_tool(
+        http_server_tool(
             name="t",
             description="d",
             url="https://example.com",
@@ -853,10 +853,10 @@ def test_webhook_tool_query_params_schema_validation(anyio_backend):
 
 
 @pytest.mark.parametrize("param_type", ["object", "array"])
-def test_webhook_tool_query_param_rejects_non_scalar_types(anyio_backend, param_type):
+def test_http_server_tool_query_param_rejects_non_scalar_types(anyio_backend, param_type):
     """Query params must be scalar — object and array types are rejected."""
     with pytest.raises(ValueError, match="not supported in query_params_schema"):
-        webhook_tool(
+        http_server_tool(
             name="t",
             description="d",
             url="https://example.com",
@@ -867,10 +867,10 @@ def test_webhook_tool_query_param_rejects_non_scalar_types(anyio_backend, param_
         )
 
 
-def test_webhook_tool_query_param_rejects_object_without_explicit_type(anyio_backend):
+def test_http_server_tool_query_param_rejects_object_without_explicit_type(anyio_backend):
     """Object-shaped query params with omitted type are also rejected."""
     with pytest.raises(ValueError, match="not supported in query_params_schema"):
-        webhook_tool(
+        http_server_tool(
             name="t",
             description="d",
             url="https://example.com",
@@ -885,14 +885,14 @@ def test_webhook_tool_query_param_rejects_object_without_explicit_type(anyio_bac
         )
 
 
-def test_webhook_tool_negative_timeout_raises(anyio_backend):
+def test_http_server_tool_negative_timeout_raises(anyio_backend):
     with pytest.raises(ValueError, match="timeout must be positive"):
-        webhook_tool(name="t", description="d", url="https://example.com", timeout=-1.0)
+        http_server_tool(name="t", description="d", url="https://example.com", timeout=-1.0)
 
 
-def test_webhook_tool_property_not_dict_raises(anyio_backend):
+def test_http_server_tool_property_not_dict_raises(anyio_backend):
     with pytest.raises(ValueError, match="must be a dict"):
-        webhook_tool(
+        http_server_tool(
             name="t",
             description="d",
             url="https://example.com",
@@ -904,7 +904,7 @@ def test_webhook_tool_property_not_dict_raises(anyio_backend):
 
 
 # =============================================================================
-# Tests: webhook_tool — behavior
+# Tests: http_server_tool — behavior
 # =============================================================================
 
 
@@ -952,9 +952,9 @@ _TICKET_BODY_SCHEMA = {
 }
 
 
-def test_webhook_tool_returns_function_tool(anyio_backend, monkeypatch):
+def test_http_server_tool_returns_function_tool(anyio_backend, monkeypatch):
     monkeypatch.setenv("SUPPORT_API_KEY", "test-key")
-    tool = webhook_tool(
+    tool = http_server_tool(
         name="create_ticket",
         description="Creates a ticket.",
         url="https://example.com/api/tickets",
@@ -970,8 +970,8 @@ def test_webhook_tool_returns_function_tool(anyio_backend, monkeypatch):
     assert "source" not in tool.parameters
 
 
-def test_webhook_tool_parameter_types(anyio_backend):
-    tool = webhook_tool(
+def test_http_server_tool_parameter_types(anyio_backend):
+    tool = http_server_tool(
         name="t",
         description="d",
         url="https://example.com",
@@ -994,8 +994,8 @@ def test_webhook_tool_parameter_types(anyio_backend):
     assert tool.parameters["a"].type_annotation is list
 
 
-def test_webhook_tool_required_and_optional(anyio_backend):
-    tool = webhook_tool(
+def test_http_server_tool_required_and_optional(anyio_backend):
+    tool = http_server_tool(
         name="t",
         description="d",
         url="https://example.com",
@@ -1012,20 +1012,20 @@ def test_webhook_tool_required_and_optional(anyio_backend):
     assert tool.parameters["b"].required is False
 
 
-def test_webhook_tool_is_background_default(anyio_backend):
-    tool = webhook_tool(name="t", description="d", url="https://example.com")
+def test_http_server_tool_is_background_default(anyio_backend):
+    tool = http_server_tool(name="t", description="d", url="https://example.com")
     assert tool.is_background is True
 
 
-def test_webhook_tool_is_background_configurable(anyio_backend):
-    tool = webhook_tool(name="t", description="d", url="https://example.com", is_background=False)
+def test_http_server_tool_is_background_configurable(anyio_backend):
+    tool = http_server_tool(name="t", description="d", url="https://example.com", is_background=False)
     assert tool.is_background is False
 
 
-def test_webhook_tool_auth_missing_env_raises(anyio_backend, monkeypatch):
+def test_http_server_tool_auth_missing_env_raises(anyio_backend, monkeypatch):
     monkeypatch.delenv("MISSING_VAR", raising=False)
     with pytest.raises(ValueError, match="MISSING_VAR"):
-        webhook_tool(
+        http_server_tool(
             name="t",
             description="d",
             url="https://example.com",
@@ -1033,8 +1033,8 @@ def test_webhook_tool_auth_missing_env_raises(anyio_backend, monkeypatch):
         )
 
 
-def test_webhook_tool_url_template_params(anyio_backend):
-    tool = webhook_tool(
+def test_http_server_tool_url_template_params(anyio_backend):
+    tool = http_server_tool(
         name="t",
         description="d",
         url="https://example.com/orders/{order_id}/items/{item_id}",
@@ -1046,8 +1046,8 @@ def test_webhook_tool_url_template_params(anyio_backend):
     assert tool.parameters["order_id"].type_annotation is str
 
 
-def test_webhook_tool_query_params_schema(anyio_backend):
-    tool = webhook_tool(
+def test_http_server_tool_query_params_schema(anyio_backend):
+    tool = http_server_tool(
         name="t",
         description="d",
         url="https://example.com/search",
@@ -1068,10 +1068,10 @@ def test_webhook_tool_query_params_schema(anyio_backend):
     assert tool.parameters["q"].description == "Search query"
 
 
-def test_webhook_tool_query_schema_constant_in_anyof_rejected(anyio_backend):
+def test_http_server_tool_query_schema_constant_in_anyof_rejected(anyio_backend):
     """anyOf in query_params_schema is rejected — query params must be scalar."""
     with pytest.raises(ValueError, match="nested structure.*not supported in query_params_schema"):
-        webhook_tool(
+        http_server_tool(
             name="t",
             description="d",
             url="https://example.com/search",
@@ -1091,9 +1091,9 @@ def test_webhook_tool_query_schema_constant_in_anyof_rejected(anyio_backend):
         )
 
 
-def test_webhook_tool_combined_params(anyio_backend):
+def test_http_server_tool_combined_params(anyio_backend):
     """URL template + body + query params all appear in parameters."""
-    tool = webhook_tool(
+    tool = http_server_tool(
         name="t",
         description="d",
         url="https://example.com/{tenant_id}/tickets",
@@ -1116,12 +1116,12 @@ def test_webhook_tool_combined_params(anyio_backend):
     assert set(tool.parameters.keys()) == {"tenant_id", "subject", "priority"}
 
 
-def test_webhook_tool_normalize_tools(anyio_backend, monkeypatch):
-    """webhook_tool is already a FunctionTool and passes through _normalize_tools."""
+def test_http_server_tool_normalize_tools(anyio_backend, monkeypatch):
+    """http_server_tool is already a FunctionTool and passes through _normalize_tools."""
     from line.llm_agent.tools.utils import _normalize_tools
 
     monkeypatch.setenv("K", "v")
-    tool = webhook_tool(
+    tool = http_server_tool(
         name="wh",
         description="d",
         url="https://example.com",
@@ -1132,11 +1132,11 @@ def test_webhook_tool_normalize_tools(anyio_backend, monkeypatch):
     assert function_tools[0].name == "wh"
 
 
-async def test_webhook_tool_http_call(mock_ctx, anyio_backend, monkeypatch):
+async def test_http_server_tool_http_call(mock_ctx, anyio_backend, monkeypatch):
     """Test that the impl function makes the correct aiohttp request."""
     monkeypatch.setenv("API_KEY", "sk-test")
 
-    tool = webhook_tool(
+    tool = http_server_tool(
         name="create_ticket",
         description="Creates a ticket.",
         url="https://example.com/api/{tenant}/tickets",
@@ -1175,11 +1175,11 @@ async def test_webhook_tool_http_call(mock_ctx, anyio_backend, monkeypatch):
     assert '"id": "t-1"' in parsed["body"]
 
 
-async def test_webhook_tool_http_error_handling(mock_ctx, anyio_backend, monkeypatch):
+async def test_http_server_tool_http_error_handling(mock_ctx, anyio_backend, monkeypatch):
     """HTTP errors return a structured error string instead of raising."""
     import aiohttp
 
-    tool = webhook_tool(
+    tool = http_server_tool(
         name="t",
         description="d",
         url="https://example.com",
@@ -1204,11 +1204,11 @@ async def test_webhook_tool_http_error_handling(mock_ctx, anyio_backend, monkeyp
     assert "ClientConnectionError" in parsed["error"]
 
 
-async def test_webhook_tool_timeout_without_configured_value(mock_ctx, anyio_backend, monkeypatch):
+async def test_http_server_tool_timeout_without_configured_value(mock_ctx, anyio_backend, monkeypatch):
     """Timeout errors omit the duration when no timeout was configured."""
     import asyncio
 
-    tool = webhook_tool(
+    tool = http_server_tool(
         name="t",
         description="d",
         url="https://example.com",
@@ -1234,9 +1234,9 @@ async def test_webhook_tool_timeout_without_configured_value(mock_ctx, anyio_bac
     assert parsed["error"] == "Request timed out."
 
 
-async def test_webhook_tool_response_truncation(mock_ctx, anyio_backend, monkeypatch):
+async def test_http_server_tool_response_truncation(mock_ctx, anyio_backend, monkeypatch):
     """Large response bodies are truncated."""
-    tool = webhook_tool(name="t", description="d", url="https://example.com")
+    tool = http_server_tool(name="t", description="d", url="https://example.com")
     _fake_aiohttp(monkeypatch, body="x" * 10_000)
 
     result = await tool.func(mock_ctx)
@@ -1246,9 +1246,9 @@ async def test_webhook_tool_response_truncation(mock_ctx, anyio_backend, monkeyp
     assert len(parsed["body"]) < 5000
 
 
-async def test_webhook_tool_unknown_kwargs_ignored(mock_ctx, anyio_backend, monkeypatch):
+async def test_http_server_tool_unknown_kwargs_ignored(mock_ctx, anyio_backend, monkeypatch):
     """Kwargs not in any param set are not sent in the request body."""
-    tool = webhook_tool(
+    tool = http_server_tool(
         name="t",
         description="d",
         url="https://example.com",
@@ -1265,10 +1265,10 @@ async def test_webhook_tool_unknown_kwargs_ignored(mock_ctx, anyio_backend, monk
     assert "hallucinated_param" not in captured.get("json", {})
 
 
-def test_webhook_tool_param_name_collision_raises(anyio_backend):
+def test_http_server_tool_param_name_collision_raises(anyio_backend):
     """Duplicate parameter names across URL/body/query raise ValueError."""
     with pytest.raises(ValueError, match="order_id"):
-        webhook_tool(
+        http_server_tool(
             name="t",
             description="d",
             url="https://example.com/{order_id}",
@@ -1280,9 +1280,9 @@ def test_webhook_tool_param_name_collision_raises(anyio_backend):
         )
 
 
-async def test_webhook_tool_get_request_no_body(mock_ctx, anyio_backend, monkeypatch):
+async def test_http_server_tool_get_request_no_body(mock_ctx, anyio_backend, monkeypatch):
     """GET requests with only query params should not send a json body."""
-    tool = webhook_tool(
+    tool = http_server_tool(
         name="lookup",
         description="Look up order.",
         url="https://example.com/orders",
@@ -1307,9 +1307,9 @@ async def test_webhook_tool_get_request_no_body(mock_ctx, anyio_backend, monkeyp
     assert "shipped" in parsed["body"]
 
 
-async def test_webhook_tool_url_params_are_encoded(mock_ctx, anyio_backend, monkeypatch):
+async def test_http_server_tool_url_params_are_encoded(mock_ctx, anyio_backend, monkeypatch):
     """URL template params are percent-encoded to prevent broken URLs."""
-    tool = webhook_tool(
+    tool = http_server_tool(
         name="t",
         description="d",
         url="https://example.com/items/{item_id}",
@@ -1321,9 +1321,9 @@ async def test_webhook_tool_url_params_are_encoded(mock_ctx, anyio_backend, monk
     assert captured["url"] == "https://example.com/items/has%20spaces%2Fand%20slashes"
 
 
-async def test_webhook_tool_url_params_allow_hyphens(mock_ctx, anyio_backend, monkeypatch):
+async def test_http_server_tool_url_params_allow_hyphens(mock_ctx, anyio_backend, monkeypatch):
     """URL template params can contain non-word characters like hyphens."""
-    tool = webhook_tool(
+    tool = http_server_tool(
         name="t",
         description="d",
         url="https://example.com/{tenant-id}/tickets",
@@ -1337,9 +1337,9 @@ async def test_webhook_tool_url_params_allow_hyphens(mock_ctx, anyio_backend, mo
     assert captured["url"] == "https://example.com/acme%20corp/tickets"
 
 
-def test_webhook_tool_enum_passthrough(anyio_backend):
+def test_http_server_tool_enum_passthrough(anyio_backend):
     """Enum constraints from JSON schema are preserved in ParameterInfo."""
-    tool = webhook_tool(
+    tool = http_server_tool(
         name="t",
         description="d",
         url="https://example.com",
@@ -1358,9 +1358,9 @@ def test_webhook_tool_enum_passthrough(anyio_backend):
     assert tool.parameters["priority"].enum == ["low", "medium", "high"]
 
 
-def test_webhook_tool_nested_constant_value(anyio_backend):
+def test_http_server_tool_nested_constant_value(anyio_backend):
     """constant_value inside nested objects is hidden from parameters."""
-    tool = webhook_tool(
+    tool = http_server_tool(
         name="t",
         description="d",
         url="https://example.com",
@@ -1388,9 +1388,9 @@ def test_webhook_tool_nested_constant_value(anyio_backend):
     assert tool.parameters["ticket"].json_schema["required"] == ["subject"]
 
 
-async def test_webhook_tool_nested_constant_injected(mock_ctx, anyio_backend, monkeypatch):
+async def test_http_server_tool_nested_constant_injected(mock_ctx, anyio_backend, monkeypatch):
     """Nested constant_value fields are deep-merged into the request body."""
-    tool = webhook_tool(
+    tool = http_server_tool(
         name="t",
         description="d",
         url="https://example.com",
@@ -1421,9 +1421,9 @@ async def test_webhook_tool_nested_constant_injected(mock_ctx, anyio_backend, mo
     assert body["ticket"]["subject"] == "Help"
 
 
-def test_webhook_tool_all_constant_nested_object_hidden(anyio_backend):
+def test_http_server_tool_all_constant_nested_object_hidden(anyio_backend):
     """A nested object with only constant_value children is fully hidden."""
-    tool = webhook_tool(
+    tool = http_server_tool(
         name="t",
         description="d",
         url="https://example.com",
@@ -1446,11 +1446,11 @@ def test_webhook_tool_all_constant_nested_object_hidden(anyio_backend):
     assert "metadata" not in tool.parameters
 
 
-def test_webhook_tool_auth_headers_collision_raises(anyio_backend, monkeypatch):
+def test_http_server_tool_auth_headers_collision_raises(anyio_backend, monkeypatch):
     """Overlapping keys in auth and headers raise ValueError."""
     monkeypatch.setenv("KEY", "from-env")
     with pytest.raises(ValueError, match="X-Header"):
-        webhook_tool(
+        http_server_tool(
             name="t",
             description="d",
             url="https://example.com",

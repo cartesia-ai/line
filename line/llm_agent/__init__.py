@@ -32,7 +32,7 @@ from line.llm_agent.tools.system import (
     send_dtmf,
     transfer_call,
     web_search,
-    webhook_tool,
+    http_server_tool,
 )
 
 # Function tool definitions and types
@@ -71,7 +71,7 @@ __all__ = [
     "agent_as_handoff",
     "mcp_tool",
     "knowledge_base",
-    "webhook_tool",
+    "http_server_tool",
     # Tool types
     "ToolEnv",
     "LoopbackToolFn",
