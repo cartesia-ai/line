@@ -31,7 +31,6 @@ def test_plan_chat_update_preserves_text_then_tool_call_outputs():
     _, update = _plan_chat(
         history=history,
         model_id=parse_model_id("openai/gpt-5.2"),
-        default_reasoning_effort="none",
         messages=[Message(role="user", content="Weather?")],
         tools=None,
         config=config,
@@ -79,7 +78,6 @@ def test_plan_chat_continuation_from_checkpoint():
     request, _ = _plan_chat(
         history=history,
         model_id=parse_model_id("openai/gpt-5.2"),
-        default_reasoning_effort="none",
         messages=[
             Message(role="user", content="hello"),
             Message(role="assistant", content="hi"),
@@ -109,7 +107,6 @@ def test_plan_chat_divergence_rolls_back_to_checkpoint():
     request, _ = _plan_chat(
         history=history,
         model_id=parse_model_id("openai/gpt-5.2"),
-        default_reasoning_effort="none",
         messages=[
             Message(role="user", content="hello"),
             Message(role="assistant", content="truncated"),  # diverges
@@ -132,7 +129,6 @@ def test_plan_chat_update_builds_correct_history():
     _, update = _plan_chat(
         history=[],
         model_id=parse_model_id("openai/gpt-5.2"),
-        default_reasoning_effort="none",
         messages=[Message(role="user", content="hi")],
         tools=None,
         config=config,
@@ -162,10 +158,9 @@ def test_plan_chat_update_builds_correct_history():
 def test_build_request_uses_bare_model_name():
     request = _build_request(
         model_id=parse_model_id("openai/gpt-5.2"),
-        default_reasoning_effort="none",
         instructions=None,
         tool_defs=None,
-        cfg=LlmConfig(),
+        cfg=_normalize_config(LlmConfig()),
     )
     assert request["model"] == "gpt-5.2"
 
