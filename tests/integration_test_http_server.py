@@ -69,7 +69,14 @@ def _make_handler(log: _RequestLog):
         def _handle(self):
             length = int(self.headers.get("Content-Length", 0))
             raw = self.rfile.read(length) if length else b""
-            body = json.loads(raw) if raw else None
+            content_type = self.headers.get("Content-Type", "")
+            if raw and content_type.startswith("application/x-www-form-urlencoded"):
+                body = {
+                    key: values[0] if len(values) == 1 else values
+                    for key, values in parse_qs(raw.decode()).items()
+                }
+            else:
+                body = json.loads(raw) if raw else None
             query = self.path.split("?", 1)[1] if "?" in self.path else ""
             path = self.path.split("?", 1)[0]
 
@@ -417,6 +424,112 @@ async def test_query_params_with_constants(server, ctx, anyio_backend):
     assert parsed_query["q"] == ["hello world"]
     assert parsed_query["api_key"] == ["public-token"]
     assert parsed_query["include_archived"] == ["false"]
+
+
+async def test_form_urlencoded_body_sends_flat_scalars(server, ctx, anyio_backend):
+    """Form-encoded request bodies support flat LLM fields and scalar constants."""
+    tool = http_server_tool(
+        name="t",
+        description="d",
+        url=f"{server}/api/tickets",
+        method="POST",
+        content_type="application/x-www-form-urlencoded",
+        request_body_schema={
+            "type": "object",
+            "required": ["subject"],
+            "properties": {
+                "subject": {"type": "string"},
+                "priority": {"type": "string"},
+                "source": {"type": "string", "constant_value": "voice_agent"},
+            },
+        },
+        is_background=False,
+    )
+
+    await tool.func(ctx, subject="Printer is broken", priority="high")
+
+    req = _log.last
+    assert req["headers"]["Content-Type"].startswith("application/x-www-form-urlencoded")
+    assert req["body"] == {
+        "subject": "Printer is broken",
+        "priority": "high",
+        "source": "voice_agent",
+    }
+
+
+@pytest.mark.parametrize(
+    "field_schema,error_fragment",
+    [
+        (
+            {
+                "type": "object",
+                "properties": {"channel": {"type": "string"}},
+            },
+            "contains nested structure",
+        ),
+        (
+            {"type": "object"},
+            "type='object'",
+        ),
+        (
+            {
+                "type": "array",
+                "items": {"type": "string"},
+            },
+            "contains nested structure",
+        ),
+        (
+            {"constant_value": {"channel": "phone"}},
+            "constant_value must be a scalar",
+        ),
+        (
+            {"constant_value": ("phone", "web")},
+            "constant_value must be a scalar",
+        ),
+    ],
+)
+async def test_form_urlencoded_body_rejects_nested_or_compound_fields(
+    server, ctx, anyio_backend, field_schema, error_fragment
+):
+    """Form-encoded request bodies fail fast for structures aiohttp cannot encode reliably."""
+    with pytest.raises(ValueError, match=error_fragment):
+        http_server_tool(
+            name="t",
+            description="d",
+            url=f"{server}/api/tickets",
+            method="POST",
+            content_type="application/x-www-form-urlencoded",
+            request_body_schema={
+                "type": "object",
+                "properties": {"metadata": field_schema},
+            },
+            is_background=False,
+        )
+
+
+async def test_form_urlencoded_body_rejects_runtime_compound_values(server, ctx, anyio_backend):
+    """Direct tool calls cannot bypass scalar-only form body validation."""
+    tool = http_server_tool(
+        name="t",
+        description="d",
+        url=f"{server}/api/tickets",
+        method="POST",
+        content_type="application/x-www-form-urlencoded",
+        request_body_schema={
+            "type": "object",
+            "properties": {
+                "metadata": {"type": "string"},
+            },
+        },
+        is_background=False,
+    )
+
+    result = json.loads(await tool.func(ctx, metadata={"channel": "phone"}))
+
+    assert result["ok"] is False
+    assert result["status"] is None
+    assert "Form field 'metadata' must be a scalar" in result["error"]
+    assert _log.requests == []
 
 
 async def test_custom_headers(server, ctx, anyio_backend):

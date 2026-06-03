@@ -917,6 +917,10 @@ def http_server_tool(
         }
         if body:
             if content_type == "application/x-www-form-urlencoded":
+                try:
+                    http_server_tool_utils.validate_form_body_values(body)
+                except ValueError as exc:
+                    return json.dumps({"ok": False, "status": None, "error": str(exc)})
                 req_kwargs["data"] = body
             else:
                 req_kwargs["json"] = body

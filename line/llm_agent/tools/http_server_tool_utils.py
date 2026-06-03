@@ -26,6 +26,7 @@ VALID_CONTENT_TYPES = {"application/json", "application/x-www-form-urlencoded"}
 _PATH_PARAM_TYPES = {"string", "integer", "number"}
 
 _QUERY_SCALAR_TYPES = {"string", "integer", "number", "boolean"}
+_FORM_SCALAR_PYTHON_TYPES = (str, int, float, bool)
 
 
 def error(name: str, msg: str) -> ValueError:
@@ -129,6 +130,8 @@ def validate_inputs(
                 )
     if request_body_schema is not None:
         validate_body_schema(name, request_body_schema, "request_body_schema")
+        if content_type == "application/x-www-form-urlencoded":
+            validate_form_body_schema(name, request_body_schema, "request_body_schema")
     if query_params_schema is not None:
         validate_query_schema(name, query_params_schema, "query_params_schema")
     if content_type not in VALID_CONTENT_TYPES:
@@ -210,6 +213,10 @@ def _validate_constant_value_type(name: str, prop_def: Dict[str, Any], path: str
         )
 
 
+def _is_form_scalar_value(value: Any) -> bool:
+    return value is not None and isinstance(value, _FORM_SCALAR_PYTHON_TYPES)
+
+
 # ---------------------------------------------------------------------------
 # Body schema validation — supports nesting, objects, arrays
 # ---------------------------------------------------------------------------
@@ -238,6 +245,33 @@ def _validate_body_property(name: str, prop_def: Dict[str, Any], path: str) -> N
         props, _ = _validate_schema_structure(name, prop_def, path, allow_omitted_type=True)
         for prop_name, child_def in props.items():
             _validate_body_property(name, child_def, f"{path}.properties.{prop_name}")
+
+
+def validate_form_body_schema(name: str, schema: Dict[str, Any], label: str) -> None:
+    """Validate a form-encoded request_body_schema dict. Properties must be scalar."""
+    props, _ = _validate_schema_structure(name, schema, label)
+    for prop_name, prop_def in props.items():
+        path = f"{label}.properties.{prop_name}"
+        if not isinstance(prop_def, dict):
+            raise error(name, f"{path} must be a dict, got {type(prop_def).__name__}.")
+        json_type = prop_def.get("type")
+        if any(k in prop_def for k in ("properties", "items", "anyOf", "oneOf", "allOf")):
+            raise error(
+                name,
+                f"{path} contains nested structure, which is not supported for "
+                "application/x-www-form-urlencoded request bodies. Form fields must be flat scalars.",
+            )
+        if json_type is not None and json_type not in _QUERY_SCALAR_TYPES:
+            raise error(
+                name,
+                f"{path} has type={json_type!r}, which is not supported for "
+                "application/x-www-form-urlencoded request bodies. Form fields must be "
+                "flat scalars (string, integer, number, or boolean).",
+            )
+        if "constant_value" in prop_def:
+            cv = prop_def["constant_value"]
+            if not _is_form_scalar_value(cv):
+                raise error(name, f"{path}.constant_value must be a scalar string, number, or boolean.")
 
 
 # ---------------------------------------------------------------------------
@@ -333,6 +367,16 @@ def build_param_info(prop_name: str, prop_def: Dict[str, Any], required_list: li
         required=prop_name in required_list,
         description="",
     )
+
+
+def validate_form_body_values(body: Dict[str, Any]) -> None:
+    """Validate final form body values before passing them to aiohttp."""
+    for field_name, value in body.items():
+        if not _is_form_scalar_value(value):
+            raise ValueError(
+                f"Form field {field_name!r} must be a scalar string, number, or boolean; "
+                f"got {type(value).__name__}."
+            )
 
 
 _BASIC_TYPE_MAP: Dict[str, type] = {

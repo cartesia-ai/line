@@ -234,7 +234,7 @@ update_item = http_server_tool(
 |-----------|-------------|
 | `url` | Supports `{param}` templating — each variable becomes a required path parameter |
 | `path_params_schema` | Optional dict mapping `{param}` names to `{"type": ..., "description": ...}`. If omitted, path params default to required strings |
-| `request_body_schema` | JSON body schema (see schema format below) |
+| `request_body_schema` | Body schema (see schema format below); form-encoded bodies support flat scalar fields only |
 | `query_params_schema` | Query string schema — same format but scalars only (no objects/arrays) |
 | `auth` | Headers with `${ENV_VAR}` placeholders resolved from `os.environ` at build time |
 | `headers` | Additional static headers (must not overlap with `auth` keys) |
@@ -248,7 +248,7 @@ Both must have `"type": "object"` and a `"properties"` dict. Each property suppo
 
 | Key | Purpose |
 |-----|---------|
-| `type` | `string`, `integer`, `number`, `boolean`, `array`, `object` (query: first four only) |
+| `type` | `string`, `integer`, `number`, `boolean`, `array`, `object` (query and form-encoded body fields: first four only) |
 | `description` | Shown to the LLM to guide parameter filling |
 | `enum` | List of allowed values — constrains LLM output |
 | `constant_value` | Hides property from LLM, injects this value into every request. Must match declared `type` |
