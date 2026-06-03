@@ -805,72 +805,23 @@ def http_server_tool(
         )
     """
 
-    def _err(msg: str) -> ValueError:
-        return http_server_tool_utils.error(name, msg)
-
-    # -- 0. Validate inputs -----------------------------------------------------
-    if not name or not name.strip():
-        raise ValueError("http_server_tool: name must be a non-empty string.")
-    if not description or not description.strip():
-        raise _err("description must be a non-empty string.")
-    if not url or not url.strip():
-        raise _err("url must be a non-empty string.")
-    if method.upper() not in http_server_tool_utils.VALID_METHODS:
-        raise _err(
-            f"method={method!r} is not a valid HTTP method. "
-            f"Expected one of: {', '.join(sorted(http_server_tool_utils.VALID_METHODS))}."
-        )
+    # -- 0. Validate inputs & resolve headers ------------------------------------
     path_params = http_server_tool_utils.parse_path_params(name, url)
+    http_server_tool_utils.validate_inputs(
+        name,
+        description,
+        url,
+        method,
+        path_params,
+        path_params_schema,
+        request_body_schema,
+        query_params_schema,
+        content_type,
+        timeout,
+    )
+    resolved_headers = http_server_tool_utils.resolve_headers(name, auth, headers)
 
-    if path_params_schema is not None:
-        # Validate that path_params_schema keys match URL template variables.
-        schema_keys = set(path_params_schema.keys())
-        url_keys = set(path_params)
-        extra = schema_keys - url_keys
-        missing = url_keys - schema_keys
-        if extra:
-            raise _err(f"path_params_schema has keys not in URL: {extra}.")
-        if missing:
-            raise _err(f"path_params_schema is missing keys from URL: {missing}.")
-        # Validate each property is a scalar type.
-        for param_name, param_def in path_params_schema.items():
-            if not isinstance(param_def, dict):
-                raise _err(f"path_params_schema[{param_name!r}] must be a dict.")
-            param_type = param_def.get("type")
-            if param_type is not None and param_type not in ("string", "integer", "number"):
-                raise _err(
-                    f"path_params_schema[{param_name!r}] has type={param_type!r}. "
-                    f"Path parameters must be string, integer, or number."
-                )
-
-    if request_body_schema is not None:
-        http_server_tool_utils.validate_body_schema(name, request_body_schema, "request_body_schema")
-    if query_params_schema is not None:
-        http_server_tool_utils.validate_query_schema(name, query_params_schema, "query_params_schema")
-    _VALID_CONTENT_TYPES = {"application/json", "application/x-www-form-urlencoded"}
-    if content_type not in _VALID_CONTENT_TYPES:
-        raise _err(
-            f"content_type={content_type!r} is not supported. "
-            f"Expected one of: {', '.join(sorted(_VALID_CONTENT_TYPES))}."
-        )
-    if timeout is not None and timeout <= 0:
-        raise _err(f"timeout must be positive, got {timeout}.")
-
-    # -- 1. Resolve auth headers ------------------------------------------------
-    resolved_headers: Dict[str, str] = {}
-
-    if auth:
-        for key, value in auth.items():
-            resolved_headers[key] = http_server_tool_utils.resolve_env_vars(name, value)
-    if headers:
-        collision = set(resolved_headers) & set(headers)
-        if collision:
-            raise _err(
-                f"header(s) {collision} appear in both auth and headers. Use one or the other for each key."
-            )
-        resolved_headers.update(headers)
-
-    # -- 2. Strip constants from schemas ----------------------------------------
+    # -- 1. Strip constants from schemas ----------------------------------------
     request_body_properties: Dict[str, Any] = {}
     request_body_required: list[str] = []
     constant_values: Dict[str, Any] = {}
@@ -896,23 +847,12 @@ def http_server_tool(
     # -- 3. Build ParameterInfo for all LLM-visible params ----------------------
     parameters: Dict[str, ParameterInfo] = {}
 
+    all_path_required = list(path_params)  # path params are always required
     for p in path_params:
-        if path_params_schema and p in path_params_schema:
-            prop_def = path_params_schema[p]
-            py_type = http_server_tool_utils.TYPE_MAP.get(prop_def.get("type", "string"), (str,))[0]
-            parameters[p] = ParameterInfo(
-                name=p,
-                type_annotation=py_type,
-                description=prop_def.get("description", f"URL path parameter '{p}'"),
-                required=True,
-            )
-        else:
-            parameters[p] = ParameterInfo(
-                name=p,
-                type_annotation=str,
-                description=f"URL path parameter '{p}'",
-                required=True,
-            )
+        prop_def = (path_params_schema or {}).get(
+            p, {"type": "string", "description": f"URL path parameter '{p}'"}
+        )
+        parameters[p] = http_server_tool_utils.build_param_info(p, prop_def, all_path_required)
 
     for prop_name, prop_def in request_body_properties.items():
         parameters[prop_name] = http_server_tool_utils.build_param_info(
@@ -922,16 +862,18 @@ def http_server_tool(
         parameters[prop_name] = http_server_tool_utils.build_param_info(prop_name, prop_def, query_required)
 
     # Validate no parameter name collisions across sources
-    _seen_names: Dict[str, str] = {}
-    for source_label, names in [
-        ("path_params", set(path_params)),
-        ("request_body_schema", set(request_body_properties)),
-        ("query_params_schema", set(query_properties)),
+    _seen: Dict[str, str] = {}
+    for label, names in [
+        ("path", path_params),
+        ("body", list(request_body_properties)),
+        ("query", list(query_properties)),
     ]:
         for n in names:
-            if n in _seen_names:
-                raise _err(f"parameter {n!r} appears in both {_seen_names[n]} and {source_label}.")
-            _seen_names[n] = source_label
+            if n in _seen:
+                raise http_server_tool_utils.error(
+                    name, f"parameter {n!r} appears in both {_seen[n]} and {label}."
+                )
+            _seen[n] = label
 
     # -- 4. Build the async implementation --------------------------------------
     upper_method = method.upper()

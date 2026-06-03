@@ -126,7 +126,7 @@ async def add_to_order_broken(
     ctx,
     items: Annotated[list[dict], "List of menu items with format [{'menu_item_id': str, 'quantity': int}]"],
 ) -> str:
-    """Add items using list[dict]. Fails strict schema conversion unless strict_tool_schemas=False."""
+    """Add items using list[dict]. This automatically uses a non-strict schema."""
     return json.dumps({"success": True, "items_added": len(items), "items": items})
 
 
@@ -543,8 +543,8 @@ async def test_nested_objects(model: str, api_key: str, backend: Optional[str] =
     2. The schema includes additionalProperties: false for OpenAI compatibility
     3. The LLM can correctly call tools with nested object parameters
 
-    Use TypedDict instead of list[dict]: with strict tool schemas (default), bare dict
-    shapes fail at conversion before any API call.
+    Use TypedDict instead of list[dict] when strict tool schemas are required.
+    Bare dict shapes are allowed, but they automatically use non-strict schemas.
     """
     print("\n" + "=" * 60)
     print(f"Testing nested objects (TypedDict) with {model} (backend={backend})")
@@ -630,10 +630,10 @@ Always include menu_item_id, quantity, and modifiers (can be empty list).""",
 
 
 async def test_nested_objects_without_typeddict(model: str, api_key: str, backend: Optional[str] = None):
-    """list[dict] under default strict schemas raises at conversion; opt-out path still works.
+    """list[dict] under default strict schemas automatically falls back to non-strict.
 
-    First asserts ``function_tool_to_litellm(..., strict=True)`` raises. Then runs the agent
-    with ``LlmConfig(strict_tool_schemas=False)`` so non-strict tool definitions are allowed.
+    First asserts ``function_tool_to_litellm(..., strict=True)`` emits no strict marker.
+    Then runs the agent with the same list[dict] tool shape.
     """
     print("\n" + "=" * 60)
     print(f"Testing nested objects WITHOUT TypedDict (list[dict]) with {model} (backend={backend})")
@@ -641,23 +641,13 @@ async def test_nested_objects_without_typeddict(model: str, api_key: str, backen
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        try:
-            function_tool_to_litellm(add_to_order_broken)
-        except ValueError as e:
-            print(f"✓ Strict conversion rejected list[dict] as expected: {e!s}")
-        else:
-            print("✗ Expected ValueError from function_tool_to_litellm(strict=True)")
-            return False
-
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        litellm_tool = function_tool_to_litellm(add_to_order_broken, strict=False)
+        litellm_tool = function_tool_to_litellm(add_to_order_broken)
     fn = litellm_tool["function"]
     assert fn.get("strict") is not True
     items_param = fn["parameters"]["properties"]["items"]
     assert items_param["type"] == "array"
     assert items_param["items"] == {"type": "object"}
-    print("✓ With strict=False: tool spec has untyped object array items (as expected)")
+    print("✓ Default conversion auto-disabled strict for untyped object array items")
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
@@ -666,7 +656,6 @@ async def test_nested_objects_without_typeddict(model: str, api_key: str, backen
             api_key=api_key,
             tools=[add_to_order_broken],
             config=LlmConfig(
-                strict_tool_schemas=False,
                 system_prompt="""You are a restaurant order assistant.
 When the user wants to order food, use the add_to_order_broken tool.
 

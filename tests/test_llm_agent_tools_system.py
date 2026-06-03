@@ -959,7 +959,6 @@ def test_http_server_tool_url_template_params(anyio_backend):
     assert "item_id" in tool.parameters
     assert tool.parameters["order_id"].required is True
     assert tool.parameters["item_id"].required is True
-    assert tool.parameters["order_id"].type_annotation is str
 
 
 def test_http_server_tool_query_params_schema(anyio_backend):
@@ -1383,12 +1382,17 @@ def test_http_server_tool_path_params_schema_description(anyio_backend):
             "item_id": {"type": "integer", "description": "Numeric item ID."},
         },
     )
-    assert tool.parameters["tenant_id"].description == "The tenant identifier."
-    assert tool.parameters["tenant_id"].type_annotation is str
-    assert tool.parameters["item_id"].description == "Numeric item ID."
-    assert tool.parameters["item_id"].type_annotation is int
     assert tool.parameters["tenant_id"].required is True
     assert tool.parameters["item_id"].required is True
+    # Descriptions and types carried by Annotated on type_annotation
+    from line.llm_agent.schema_converter import function_tool_to_litellm
+
+    schema = function_tool_to_litellm(tool, strict=False)
+    props = schema["function"]["parameters"]["properties"]
+    assert props["tenant_id"]["description"] == "The tenant identifier."
+    assert props["tenant_id"]["type"] == "string"
+    assert props["item_id"]["description"] == "Numeric item ID."
+    assert props["item_id"]["type"] == "integer"
 
 
 def test_http_server_tool_path_params_schema_extra_key_raises(anyio_backend):

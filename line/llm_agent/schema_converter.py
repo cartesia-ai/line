@@ -36,15 +36,19 @@ TypedDict Support:
         ...
     ```
 
-    Tool schemas must satisfy OpenAI strict rules. Bare ``dict`` / ``list[dict]`` cannot,
-    so conversion raises ``ValueError``. Use ``typing.TypedDict`` for nested objects.
+    Tool schemas should satisfy OpenAI strict rules when possible. Bare ``dict`` /
+    ``list[dict]`` cannot, so conversion automatically disables strict mode for
+    those tools. Use ``typing.TypedDict`` for nested objects when strict schemas
+    are required.
 
     TypedDict with optional fields (``total=False`` or ``NotRequired``) is also
-    incompatible with strict mode, so conversion fails. Use only fully-required
-    object shapes.
+    incompatible with strict mode, so conversion automatically disables strict
+    mode for those tools. Use only fully-required object shapes when strict
+    schemas are required.
 """
 
 from enum import Enum
+from types import UnionType
 from typing import Annotated, Any, Literal, Optional, Type, Union, get_args, get_origin, get_type_hints
 
 from line.llm_agent.tools.utils import FunctionTool, ParameterInfo
@@ -56,6 +60,46 @@ def _is_typeddict(tp: Type) -> bool:
     TypedDict classes have __required_keys__ and __optional_keys__ attributes.
     """
     return isinstance(tp, type) and hasattr(tp, "__required_keys__") and hasattr(tp, "__optional_keys__")
+
+
+def _get_typeddict_hints(tp: Type) -> dict[str, Any]:
+    """Return TypedDict field annotations, preserving Annotated metadata."""
+    try:
+        return get_type_hints(tp, include_extras=True)
+    except Exception:
+        return getattr(tp, "__annotations__", {})
+
+
+def _requires_non_strict_schema(type_annotation: Type) -> bool:
+    """Return True when an annotation cannot satisfy OpenAI strict schema rules."""
+    if get_origin(type_annotation) is Annotated:
+        args = get_args(type_annotation)
+        return bool(args) and _requires_non_strict_schema(args[0])
+
+    if type_annotation is dict:
+        return True
+
+    if _is_typeddict(type_annotation):
+        if type_annotation.__optional_keys__:
+            return True
+        return any(
+            _requires_non_strict_schema(field_type)
+            for field_type in _get_typeddict_hints(type_annotation).values()
+        )
+
+    origin = get_origin(type_annotation)
+    args = get_args(type_annotation)
+
+    if origin is list:
+        return any(_requires_non_strict_schema(arg) for arg in args)
+
+    if origin is dict:
+        return True
+
+    if origin in (Union, UnionType):
+        return any(_requires_non_strict_schema(arg) for arg in args if arg is not type(None))
+
+    return False
 
 
 def python_type_to_json_schema(type_annotation: Type, *, strict: bool = True) -> dict[str, Any]:
@@ -115,15 +159,9 @@ def python_type_to_json_schema(type_annotation: Type, *, strict: bool = True) ->
         properties = {}
         required = []
 
-        # Get type hints with include_extras=True so Annotated metadata
-        # (e.g. descriptions) is preserved and handled by the Annotated
-        # branch above during recursion.
-        try:
-            hints = get_type_hints(type_annotation, include_extras=True)
-        except Exception:
-            hints = getattr(type_annotation, "__annotations__", {})
-
-        for field_name, field_type in hints.items():
+        # include_extras=True preserves Annotated metadata, which is handled by
+        # the Annotated branch above during recursion.
+        for field_name, field_type in _get_typeddict_hints(type_annotation).items():
             properties[field_name] = python_type_to_json_schema(field_type, strict=use_strict)
             if field_name in type_annotation.__required_keys__:
                 required.append(field_name)
@@ -174,7 +212,7 @@ def python_type_to_json_schema(type_annotation: Type, *, strict: bool = True) ->
             return {"enum": values}
 
     # Handle Union types (including Optional)
-    if origin is Union:
+    if origin in (Union, UnionType):
         # Filter out NoneType for Optional handling
         non_none_args = [a for a in args if a is not type(None)]
         if len(non_none_args) == 1:
@@ -233,13 +271,16 @@ def build_parameters_schema(parameters: dict[str, ParameterInfo], *, strict: boo
 
 def _build_function_tool_payload(tool: FunctionTool, *, strict: bool = True) -> dict[str, Any]:
     """Build the shared OpenAI-style function payload for a FunctionTool."""
-    # Disable strict mode if any parameters are optional, since OpenAI strict
-    # mode requires every property to be listed in 'required'.
+    # Disable strict mode if any parameters are optional or contain freeform
+    # object shapes, since OpenAI strict mode requires every property to be
+    # listed in 'required' and object schemas to define their properties.
     # This must be computed BEFORE calling build_parameters_schema so that
     # strict validation does not raise for tools that will use non-strict mode.
     has_optional = any(not p.required for p in tool.parameters.values())
-    has_freeform_dict = any(p.type_annotation is dict for p in tool.parameters.values())
-    use_strict = strict and not has_optional and not has_freeform_dict
+    has_non_strict_schema = any(
+        _requires_non_strict_schema(p.type_annotation) for p in tool.parameters.values()
+    )
+    use_strict = strict and not has_optional and not has_non_strict_schema
 
     params_schema = build_parameters_schema(tool.parameters, strict=use_strict)
 
@@ -263,9 +304,9 @@ def function_tool_to_litellm(tool: FunctionTool, *, strict: bool = True) -> dict
     Args:
         tool: The FunctionTool to convert.
         strict: Whether to require OpenAI-compatible strict schemas (default True).
-            When True, conversion raises if the tool schema cannot satisfy strict rules
-            (e.g. bare ``dict``, optional-key TypedDict). When False, nested objects omit
-            the strict lock and the result does not set ``"strict": true``.
+            When True, conversion uses strict schemas only if the tool can satisfy
+            strict rules. Tools with optional parameters, bare ``dict`` shapes,
+            or optional-key TypedDict fields are converted without ``"strict": true``.
 
     Returns:
         Tool definition dictionary.

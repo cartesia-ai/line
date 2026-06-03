@@ -22,6 +22,8 @@ TYPE_MAP: Dict[str, tuple] = {
 }
 
 VALID_METHODS = {"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"}
+VALID_CONTENT_TYPES = {"application/json", "application/x-www-form-urlencoded"}
+_PATH_PARAM_TYPES = {"string", "integer", "number"}
 
 _QUERY_SCALAR_TYPES = {"string", "integer", "number", "boolean"}
 
@@ -81,6 +83,83 @@ def parse_path_params(name: str, url: str) -> list[str]:
             raise error(name, f"url template variable {param!r} appears more than once.")
         seen.add(param)
     return params
+
+
+def validate_inputs(
+    name: str,
+    description: str,
+    url: str,
+    method: str,
+    path_params: list[str],
+    path_params_schema: Dict[str, Dict[str, Any]] | None,
+    request_body_schema: Dict[str, Any] | None,
+    query_params_schema: Dict[str, Any] | None,
+    content_type: str,
+    timeout: float | None,
+) -> None:
+    """Validate all http_server_tool inputs at build time."""
+    if not name or not name.strip():
+        raise ValueError("http_server_tool: name must be a non-empty string.")
+    if not description or not description.strip():
+        raise error(name, "description must be a non-empty string.")
+    if not url or not url.strip():
+        raise error(name, "url must be a non-empty string.")
+    if method.upper() not in VALID_METHODS:
+        raise error(
+            name,
+            f"method={method!r} is not a valid HTTP method. "
+            f"Expected one of: {', '.join(sorted(VALID_METHODS))}.",
+        )
+    if path_params_schema is not None:
+        schema_keys = set(path_params_schema)
+        url_keys = set(path_params)
+        if schema_keys - url_keys:
+            raise error(name, f"path_params_schema has keys not in URL: {schema_keys - url_keys}.")
+        if url_keys - schema_keys:
+            raise error(name, f"path_params_schema is missing keys from URL: {url_keys - schema_keys}.")
+        for param_name, param_def in path_params_schema.items():
+            if not isinstance(param_def, dict):
+                raise error(name, f"path_params_schema[{param_name!r}] must be a dict.")
+            param_type = param_def.get("type")
+            if param_type is not None and param_type not in _PATH_PARAM_TYPES:
+                raise error(
+                    name,
+                    f"path_params_schema[{param_name!r}] has type={param_type!r}. "
+                    f"Path parameters must be string, integer, or number.",
+                )
+    if request_body_schema is not None:
+        validate_body_schema(name, request_body_schema, "request_body_schema")
+    if query_params_schema is not None:
+        validate_query_schema(name, query_params_schema, "query_params_schema")
+    if content_type not in VALID_CONTENT_TYPES:
+        raise error(
+            name,
+            f"content_type={content_type!r} is not supported. "
+            f"Expected one of: {', '.join(sorted(VALID_CONTENT_TYPES))}.",
+        )
+    if timeout is not None and timeout <= 0:
+        raise error(name, f"timeout must be positive, got {timeout}.")
+
+
+def resolve_headers(
+    name: str,
+    auth: Dict[str, str] | None,
+    headers: Dict[str, str] | None,
+) -> Dict[str, str]:
+    """Resolve auth env vars and merge with static headers."""
+    resolved: Dict[str, str] = {}
+    if auth:
+        for key, value in auth.items():
+            resolved[key] = resolve_env_vars(name, value)
+    if headers:
+        collision = set(resolved) & set(headers)
+        if collision:
+            raise error(
+                name,
+                f"header(s) {collision} appear in both auth and headers. Use one or the other for each key.",
+            )
+        resolved.update(headers)
+    return resolved
 
 
 # ---------------------------------------------------------------------------

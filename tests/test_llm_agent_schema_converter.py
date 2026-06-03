@@ -312,6 +312,17 @@ class TestDictErrors:
         assert schema["type"] == "array"
         assert schema["items"] == {"type": "object"}
 
+    def test_pep604_dict_union_raises_in_strict_mode(self):
+        """dict | None follows Optional[dict] strict-mode behavior."""
+        with pytest.raises(ValueError) as exc_info:
+            python_type_to_json_schema(dict | None, strict=True)
+        assert "TypedDict" in str(exc_info.value)
+
+    def test_pep604_dict_union_ok_in_non_strict_mode(self):
+        """dict | None converts to the non-None schema in non-strict mode."""
+        schema = python_type_to_json_schema(dict | None, strict=False)
+        assert schema == {"type": "object"}
+
 
 # =============================================================================
 # Tests for function_tool_to_litellm with TypedDict
@@ -390,8 +401,8 @@ class TestFunctionToolWithTypedDict:
         # All fields are optional so no required list
         assert "required" not in payload or payload.get("required") == []
 
-    def test_tool_with_list_dict_strict_raises(self):
-        """list[dict] cannot satisfy strict mode."""
+    def test_tool_with_list_dict_auto_disables_strict(self):
+        """list[dict] disables strict mode instead of raising."""
 
         @loopback_tool
         async def add_items(
@@ -401,8 +412,17 @@ class TestFunctionToolWithTypedDict:
             """Add items."""
             pass
 
-        with pytest.raises(ValueError, match="cannot satisfy OpenAI strict mode"):
-            function_tool_to_litellm(add_items)
+        schema = function_tool_to_litellm(add_items)
+
+        fn = schema["function"]
+        assert fn.get("strict") is not True
+        assert "additionalProperties" not in fn["parameters"]
+        items_schema = fn["parameters"]["properties"]["items"]
+        assert items_schema == {
+            "type": "array",
+            "items": {"type": "object"},
+            "description": "Items",
+        }
 
     def test_tool_with_optional_param_dict_type_succeeds(self):
         """Tool with optional param containing dict should NOT raise.
@@ -432,6 +452,28 @@ class TestFunctionToolWithTypedDict:
         # Verify additionalProperties is not set at top level
         params = schema["function"]["parameters"]
         assert "additionalProperties" not in params
+
+    def test_tool_with_pep604_list_dict_auto_disables_strict(self):
+        """list[dict] | None disables strict mode like Optional[list[dict]]."""
+
+        @loopback_tool
+        async def add_items(
+            ctx: ToolEnv,
+            items: Annotated[list[dict] | None, "Items"],
+        ):
+            """Add items."""
+            pass
+
+        schema = function_tool_to_litellm(add_items)
+
+        fn = schema["function"]
+        assert fn.get("strict") is not True
+        items_schema = fn["parameters"]["properties"]["items"]
+        assert items_schema == {
+            "type": "array",
+            "items": {"type": "object"},
+            "description": "Items",
+        }
 
 
 # =============================================================================
@@ -655,6 +697,79 @@ class TestWebhookToolSchema:
         assert ticket_schema["properties"]["subject"]["type"] == "string"
         assert ticket_schema["properties"]["subject"]["description"] == "Ticket summary."
         assert ticket_schema["additionalProperties"] is False
+
+    def test_litellm_nested_freeform_object_disables_strict(self):
+        from line.llm_agent.tools.system import http_server_tool
+
+        tool = http_server_tool(
+            name="create_ticket",
+            description="Create a ticket.",
+            url="https://example.com/api/tickets",
+            method="POST",
+            request_body_schema={
+                "type": "object",
+                "required": ["ticket"],
+                "properties": {
+                    "ticket": {
+                        "type": "object",
+                        "required": ["metadata"],
+                        "properties": {
+                            "metadata": {
+                                "type": "object",
+                                "description": "Arbitrary customer metadata.",
+                            },
+                        },
+                    },
+                },
+            },
+        )
+
+        schema = function_tool_to_litellm(tool)
+        fn = schema["function"]
+        assert fn.get("strict") is not True
+        assert "additionalProperties" not in fn["parameters"]
+        metadata_schema = fn["parameters"]["properties"]["ticket"]["properties"]["metadata"]
+        assert metadata_schema == {
+            "type": "object",
+            "description": "Arbitrary customer metadata.",
+        }
+
+    def test_litellm_nested_freeform_object_array_disables_strict(self):
+        from line.llm_agent.tools.system import http_server_tool
+
+        tool = http_server_tool(
+            name="create_ticket",
+            description="Create a ticket.",
+            url="https://example.com/api/tickets",
+            method="POST",
+            request_body_schema={
+                "type": "object",
+                "required": ["ticket"],
+                "properties": {
+                    "ticket": {
+                        "type": "object",
+                        "required": ["events"],
+                        "properties": {
+                            "events": {
+                                "type": "array",
+                                "description": "Arbitrary event payloads.",
+                                "items": {"type": "object"},
+                            },
+                        },
+                    },
+                },
+            },
+        )
+
+        schema = function_tool_to_litellm(tool)
+        fn = schema["function"]
+        assert fn.get("strict") is not True
+        events_schema = fn["parameters"]["properties"]["ticket"]["properties"]["events"]
+        assert events_schema == {
+            "type": "array",
+            "items": {"type": "object"},
+            "description": "Arbitrary event payloads.",
+        }
 
     def test_litellm_required_correct(self, ticket_tool):
         schema = function_tool_to_litellm(ticket_tool)
