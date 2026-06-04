@@ -335,7 +335,7 @@ Each entry defaults to a user message (`role="user"`). Pass `role="system"` to i
 - **Both anchors** — replaces the segment `[start..end]` inclusive.
 
 ```python
-from line import CustomHistoryEntry, UserTextSent
+from line import CustomHistoryEntry
 
 # Prefix the history with a reminder (neither anchor)
 agent.history.update([CustomHistoryEntry(content="Remember: be concise and friendly.")])
