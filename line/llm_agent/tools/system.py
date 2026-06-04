@@ -4,9 +4,14 @@ Built-in system tools for LLM agents.
 Provides end_call, send_dtmf, transfer_call, and web_search tools.
 """
 
+import asyncio
 from dataclasses import dataclass, field
+import json
 import logging
 from typing import Annotated, Any, Dict, Literal, Optional
+from urllib.parse import quote as _url_quote
+
+import aiohttp
 
 from line.agent import Agent, call_agent
 from line.events import (
@@ -19,8 +24,9 @@ from line.events import (
     CallStarted,
 )
 from line.knowledge_base import DEFAULT_TOP_K, KnowledgeBaseError, _warn_if_long_timeout
+from line.llm_agent.tools import http_server_tool_utils
 from line.llm_agent.tools.decorators import passthrough_tool
-from line.llm_agent.tools.utils import FunctionTool, ToolEnv, ToolType, construct_function_tool
+from line.llm_agent.tools.utils import FunctionTool, ParameterInfo, ToolEnv, ToolType, construct_function_tool
 
 # Valid DTMF buttons
 DtmfButton = Literal["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "*", "#"]
@@ -724,6 +730,235 @@ def agent_as_handoff(
     )
 
 
+def http_server_tool(
+    name: str,
+    description: str,
+    url: str,
+    method: str = "POST",
+    path_params_schema: Optional[Dict[str, Dict[str, Any]]] = None,
+    request_body_schema: Optional[Dict[str, Any]] = None,
+    query_params_schema: Optional[Dict[str, Any]] = None,
+    auth: Optional[Dict[str, str]] = None,
+    headers: Optional[Dict[str, str]] = None,
+    content_type: str = "application/json",
+    timeout: Optional[float] = None,
+    is_background: bool = True,
+) -> FunctionTool:
+    """Create an HTTP tool that the LLM can call.
+
+    Properties with "constant_value" are hidden from the LLM and injected
+    into every request. All inputs are validated at build time.
+
+    See line/llm_agent/README.md for full schema format, examples, and
+    response format documentation.
+
+    Args:
+        name: Tool name shown to the LLM.
+        description: Tool description shown to the LLM.
+        url: Request URL. Supports {param} templating.
+        method: HTTP method (default "POST").
+        path_params_schema: Dict mapping {param} names to property defs
+            with "type" and "description". If omitted, path params are
+            inferred from the URL as required strings. All path params
+            are always required.
+        request_body_schema: JSON Schema dict with "type": "object" and
+            "properties". Properties in "required" must be filled by the
+            LLM; others are optional. Supports nested objects and
+            "constant_value" at any depth.
+        query_params_schema: Same structure, but scalar types only
+            (string, integer, number, boolean).
+        auth: Headers with ${ENV_VAR} placeholders resolved from os.environ.
+        headers: Additional static headers (must not overlap with auth).
+        content_type: Request body content type. "application/json" (default)
+            or "application/x-www-form-urlencoded".
+        timeout: Request timeout in seconds.
+        is_background: Run in shielded background task (default True).
+
+    Returns:
+        A FunctionTool for use in LlmAgent(tools=[...]).
+
+    Raises:
+        ValueError: On any malformed input (schemas, env vars, collisions).
+
+    Example::
+
+        create_ticket = http_server_tool(
+            name="create_ticket",
+            description="Creates a support ticket.",
+            url="https://example.cartesia.ai/api/{tenant_id}/tickets",
+            method="POST",
+            request_body_schema={
+                "type": "object",
+                "required": ["subject"],
+                "properties": {
+                    "subject": {
+                        "type": "string",
+                        "description": "Short summary of the issue.",
+                    },
+                    "source": {
+                        "type": "string",
+                        "constant_value": "voice_agent",
+                    },
+                },
+            },
+            auth={"Authorization": "Bearer ${SUPPORT_API_KEY}"},
+        )
+    """
+
+    # -- 0. Validate inputs & resolve headers ------------------------------------
+    path_params = http_server_tool_utils.parse_path_params(name, url)
+    http_server_tool_utils.validate_inputs(
+        name,
+        description,
+        url,
+        method,
+        path_params,
+        path_params_schema,
+        request_body_schema,
+        query_params_schema,
+        content_type,
+        timeout,
+    )
+    resolved_headers = http_server_tool_utils.resolve_headers(name, auth, headers)
+
+    # -- 1. Strip constants from schemas ----------------------------------------
+    request_body_properties: Dict[str, Any] = {}
+    request_body_required: list[str] = []
+    constant_values: Dict[str, Any] = {}
+
+    if request_body_schema:
+        request_body_properties, request_body_required, constant_values = (
+            http_server_tool_utils.strip_constants(
+                request_body_schema.get("properties", {}),
+                list(request_body_schema.get("required", [])),
+            )
+        )
+
+    query_properties: Dict[str, Any] = {}
+    query_required: list[str] = []
+    query_constant_values: Dict[str, Any] = {}
+
+    if query_params_schema:
+        query_properties, query_required, query_constant_values = http_server_tool_utils.strip_constants(
+            query_params_schema.get("properties", {}),
+            list(query_params_schema.get("required", [])),
+        )
+
+    # -- 2. Build ParameterInfo for all LLM-visible params ----------------------
+    parameters: Dict[str, ParameterInfo] = {}
+
+    all_path_required = list(path_params)  # path params are always required
+    for p in path_params:
+        prop_def = (path_params_schema or {}).get(
+            p, {"type": "string", "description": f"URL path parameter '{p}'"}
+        )
+        parameters[p] = http_server_tool_utils.build_param_info(p, prop_def, all_path_required)
+
+    for prop_name, prop_def in request_body_properties.items():
+        parameters[prop_name] = http_server_tool_utils.build_param_info(
+            prop_name, prop_def, request_body_required
+        )
+    for prop_name, prop_def in query_properties.items():
+        parameters[prop_name] = http_server_tool_utils.build_param_info(prop_name, prop_def, query_required)
+
+    # Validate no parameter name collisions across sources
+    _seen: Dict[str, str] = {}
+    for label, names in [
+        ("path", path_params),
+        ("body", list(request_body_properties)),
+        ("query", list(query_properties)),
+    ]:
+        for n in names:
+            if n in _seen:
+                raise http_server_tool_utils.error(
+                    name, f"parameter {n!r} appears in both {_seen[n]} and {label}."
+                )
+            _seen[n] = label
+
+    # -- 3. Build the async implementation --------------------------------------
+    upper_method = method.upper()
+    request_body_prop_names = set(request_body_properties)
+    query_prop_names = set(query_properties)
+    path_param_names = set(path_params)
+    max_response_chars = 4096
+
+    async def execute_http_request(ctx: ToolEnv, **kwargs: Any) -> str:
+        final_url = url
+        query_params: Dict[str, Any] = {}
+        body: Dict[str, Any] = {}
+
+        missing = [p for p in path_params if p not in kwargs or kwargs[p] is None]
+        if missing:
+            return json.dumps(
+                {
+                    "ok": False,
+                    "status": None,
+                    "error": f"Missing required URL path parameter(s): {', '.join(missing)}.",
+                }
+            )
+
+        for k, v in kwargs.items():
+            if k in path_param_names:
+                final_url = final_url.replace(f"{{{k}}}", _url_quote(str(v), safe=""))
+            elif k in query_prop_names:
+                query_params[k] = v
+            elif k in request_body_prop_names:
+                body[k] = v
+
+        if query_constant_values:
+            query_params.update(query_constant_values)
+        if constant_values:
+            body = http_server_tool_utils.deep_merge(body, constant_values)
+
+        req_kwargs: Dict[str, Any] = {
+            "method": upper_method,
+            "url": final_url,
+            "headers": resolved_headers or None,
+        }
+        if body:
+            if content_type == "application/x-www-form-urlencoded":
+                try:
+                    http_server_tool_utils.validate_form_body_values(body)
+                except ValueError as exc:
+                    return json.dumps({"ok": False, "status": None, "error": str(exc)})
+                req_kwargs["data"] = body
+            else:
+                req_kwargs["json"] = body
+        if query_params:
+            req_kwargs["params"] = {
+                k: str(v).lower() if isinstance(v, bool) else v for k, v in query_params.items()
+            }
+        if timeout is not None:
+            req_kwargs["timeout"] = aiohttp.ClientTimeout(total=timeout)
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.request(**req_kwargs) as resp:
+                    text = await resp.text()
+                    if len(text) > max_response_chars:
+                        text = text[:max_response_chars] + "... (truncated)"
+                    result: Dict[str, Any] = {"ok": 200 <= resp.status < 300, "status": resp.status}
+                    result["body" if result["ok"] else "error"] = text
+                    return json.dumps(result)
+        except aiohttp.ClientError as exc:
+            return json.dumps(
+                {"ok": False, "status": None, "error": f"Request failed: {type(exc).__name__}: {exc}"}
+            )
+        except asyncio.TimeoutError:
+            detail = f" after {timeout}s" if timeout is not None else ""
+            return json.dumps({"ok": False, "status": None, "error": f"Request timed out{detail}."})
+
+    # -- 4. Construct FunctionTool directly -------------------------------------
+    return FunctionTool(
+        name=name,
+        description=description,
+        func=execute_http_request,
+        parameters=parameters,
+        tool_type=ToolType.GENERAL,
+        is_background=is_background,
+    )
+
+
 __all__ = [
     "DtmfButton",
     "EndCallTool",
@@ -736,4 +971,5 @@ __all__ = [
     "send_dtmf",
     "transfer_call",
     "agent_as_handoff",
+    "http_server_tool",
 ]

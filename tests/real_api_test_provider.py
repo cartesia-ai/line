@@ -126,7 +126,7 @@ async def add_to_order_broken(
     ctx,
     items: Annotated[list[dict], "List of menu items with format [{'menu_item_id': str, 'quantity': int}]"],
 ) -> str:
-    """Add items using list[dict]. Fails strict schema conversion unless strict_tool_schemas=False."""
+    """Add items using list[dict]. This automatically uses a non-strict schema."""
     return json.dumps({"success": True, "items_added": len(items), "items": items})
 
 
@@ -543,8 +543,8 @@ async def test_nested_objects(model: str, api_key: str, backend: Optional[str] =
     2. The schema includes additionalProperties: false for OpenAI compatibility
     3. The LLM can correctly call tools with nested object parameters
 
-    Use TypedDict instead of list[dict]: with strict tool schemas (default), bare dict
-    shapes fail at conversion before any API call.
+    Use TypedDict instead of list[dict] when strict tool schemas are required.
+    Bare dict shapes are allowed, but they automatically use non-strict schemas.
     """
     print("\n" + "=" * 60)
     print(f"Testing nested objects (TypedDict) with {model} (backend={backend})")
@@ -630,10 +630,10 @@ Always include menu_item_id, quantity, and modifiers (can be empty list).""",
 
 
 async def test_nested_objects_without_typeddict(model: str, api_key: str, backend: Optional[str] = None):
-    """list[dict] under default strict schemas raises at conversion; opt-out path still works.
+    """list[dict] under default strict schemas automatically falls back to non-strict.
 
-    First asserts ``function_tool_to_litellm(..., strict=True)`` raises. Then runs the agent
-    with ``LlmConfig(strict_tool_schemas=False)`` so non-strict tool definitions are allowed.
+    First asserts ``function_tool_to_litellm(..., strict=True)`` emits no strict marker.
+    Then runs the agent with the same list[dict] tool shape.
     """
     print("\n" + "=" * 60)
     print(f"Testing nested objects WITHOUT TypedDict (list[dict]) with {model} (backend={backend})")
@@ -641,23 +641,13 @@ async def test_nested_objects_without_typeddict(model: str, api_key: str, backen
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        try:
-            function_tool_to_litellm(add_to_order_broken)
-        except ValueError as e:
-            print(f"✓ Strict conversion rejected list[dict] as expected: {e!s}")
-        else:
-            print("✗ Expected ValueError from function_tool_to_litellm(strict=True)")
-            return False
-
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        litellm_tool = function_tool_to_litellm(add_to_order_broken, strict=False)
+        litellm_tool = function_tool_to_litellm(add_to_order_broken)
     fn = litellm_tool["function"]
     assert fn.get("strict") is not True
     items_param = fn["parameters"]["properties"]["items"]
     assert items_param["type"] == "array"
     assert items_param["items"] == {"type": "object"}
-    print("✓ With strict=False: tool spec has untyped object array items (as expected)")
+    print("✓ Default conversion auto-disabled strict for untyped object array items")
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
@@ -666,7 +656,6 @@ async def test_nested_objects_without_typeddict(model: str, api_key: str, backen
             api_key=api_key,
             tools=[add_to_order_broken],
             config=LlmConfig(
-                strict_tool_schemas=False,
                 system_prompt="""You are a restaurant order assistant.
 When the user wants to order food, use the add_to_order_broken tool.
 
@@ -724,6 +713,239 @@ Always include menu_item_id and quantity.""",
             return False
     print(f"✓ list[dict] path passed (items: {tool_args['items']})")
     return True
+
+
+async def test_http_server_tool_calling(model: str, api_key: str, backend: Optional[str] = None):
+    """Test that a complex http_server_tool schema is accepted by the provider.
+
+    Exercises:
+    - Top-level constant_value (string)
+    - Nested constant_value inside an object
+    - Enum constraint (priority)
+    - Integer parameter (quantity)
+    - Array parameter (tags)
+    - URL template variable (tenant_id)
+    - Query parameter (dry_run boolean)
+
+    The LLM must call the tool with visible params only, and the stubbed
+    response contains facts the LLM must relay back to the user.
+    """
+    print("\n" + "=" * 60)
+    print(f"Testing http_server_tool with {model} (backend={backend})")
+    print("=" * 60)
+
+    from unittest.mock import patch
+
+    from line.llm_agent.tools.system import http_server_tool
+
+    # Fake API response — contains facts the LLM must surface.
+    _FAKE_RESPONSE = {
+        "ticket_id": "TKT-99210",
+        "status": "created",
+        "estimated_response_hours": 4,
+    }
+
+    # -- stub aiohttp ---------------------------------------------------------
+    class _FakeResponse:
+        status = 201
+
+        async def text(self):
+            return json.dumps(_FAKE_RESPONSE)
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            pass
+
+    captured_request: dict = {}
+
+    class _FakeSession:
+        def request(self, **kwargs):
+            captured_request.update(kwargs)
+            return _FakeResponse()
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            pass
+
+    create_ticket = http_server_tool(
+        name="create_ticket",
+        description=(
+            "Create a support ticket. Use when the user wants to file an issue. "
+            "The tool returns the created ticket ID, status, and estimated response time."
+        ),
+        url="https://support.internal/api/{tenant_id}/tickets",
+        method="POST",
+        request_body_schema={
+            "type": "object",
+            "required": ["subject", "priority", "quantity"],
+            "properties": {
+                "subject": {
+                    "type": "string",
+                    "description": "Short summary of the issue.",
+                },
+                "priority": {
+                    "type": "string",
+                    "enum": ["low", "medium", "high"],
+                    "description": "Ticket priority level.",
+                },
+                "quantity": {
+                    "type": "integer",
+                    "description": "Number of affected items.",
+                },
+                "tags": {
+                    "type": "array",
+                    "description": "Relevant tags for the ticket.",
+                },
+                # Top-level constant — hidden from LLM, injected into body
+                "source": {"type": "string", "constant_value": "voice_agent"},
+                # Nested object with a constant child
+                "metadata": {
+                    "type": "object",
+                    "required": ["channel"],
+                    "properties": {
+                        "channel": {"type": "string", "constant_value": "phone"},
+                        "api_version": {"type": "integer", "constant_value": 2},
+                    },
+                },
+            },
+        },
+        query_params_schema={
+            "type": "object",
+            "required": ["dry_run"],
+            "properties": {
+                "dry_run": {
+                    "type": "boolean",
+                    "description": "If true, validate but don't create the ticket.",
+                },
+            },
+        },
+        is_background=False,
+    )
+
+    agent = LlmAgent(
+        model=model,
+        api_key=api_key,
+        tools=[create_ticket],
+        config=LlmConfig(
+            system_prompt=(
+                "You are a support assistant. When the user wants to file a ticket, "
+                "use the create_ticket tool. Use tenant_id 'acme'. Set dry_run to false. "
+                "After the tool responds, tell the user the ticket ID, status, and "
+                "estimated response time in hours."
+            ),
+        ),
+        backend=backend,
+    )
+
+    env = TurnEnv(agent_env=AgentEnv())
+    user_message = (
+        "I need to file a high-priority ticket: '3 monitors are flickering'. "
+        "There are 3 affected monitors. Tag it with 'hardware' and 'display'."
+    )
+    event = UserTextSent(
+        content=user_message,
+        history=[UserTextSent(content=user_message)],
+    )
+
+    print(f"User: {user_message}")
+    print("\nAgent response:")
+
+    tool_calls_made = []
+    tool_args_seen = []
+    full_text = ""
+    with patch("aiohttp.ClientSession", lambda: _FakeSession()):
+        async for output in agent.process(env, event):
+            if isinstance(output, AgentSendText):
+                full_text += output.text
+                print(output.text, end="", flush=True)
+            elif isinstance(output, AgentToolCalled):
+                tool_calls_made.append(output.tool_name)
+                tool_args_seen.append(output.tool_args)
+                print(f"\n  [Tool call]: {output.tool_name}({output.tool_args})")
+            elif isinstance(output, AgentToolReturned):
+                print(f"  [Tool result]: {output.result}")
+
+    print()
+
+    # -- assertions -----------------------------------------------------------
+
+    # 1. Tool was called
+    if not tool_calls_made:
+        raise AssertionError("Expected create_ticket tool call but no tools were called")
+    assert "create_ticket" in tool_calls_made, f"Expected create_ticket in {tool_calls_made}"
+
+    # 2. LLM args: visible params present, constants absent
+    tool_args = None
+    for args_str in tool_args_seen:
+        args = json.loads(args_str) if isinstance(args_str, str) else args_str
+        if "subject" in args:
+            tool_args = args
+            break
+    assert tool_args is not None, f"No tool call contained 'subject': {tool_args_seen}"
+
+    hidden_fields = {"source", "metadata"}
+    leaked = hidden_fields & set(tool_args)
+    assert not leaked, f"LLM should not see constant fields, but args contained: {leaked}"
+
+    # Verify the LLM chose the right enum value
+    assert tool_args.get("priority") == "high", f"Expected priority='high', got {tool_args.get('priority')!r}"
+    # Verify integer parameter
+    assert isinstance(tool_args.get("quantity"), int), (
+        f"Expected integer quantity, got {type(tool_args.get('quantity')).__name__}"
+    )
+    # Verify array parameter (tags)
+    assert isinstance(tool_args.get("tags"), list), (
+        f"Expected list tags, got {type(tool_args.get('tags')).__name__}"
+    )
+
+    print(
+        f"  ✓ LLM args validated: priority={tool_args['priority']!r}, "
+        f"quantity={tool_args['quantity']}, tags={tool_args['tags']}"
+    )
+
+    # 3. URL template resolved
+    assert "/acme/" in captured_request.get("url", ""), (
+        f"Expected tenant_id='acme' in URL, got: {captured_request.get('url')}"
+    )
+
+    # 4. Query params sent
+    assert captured_request.get("params", {}).get("dry_run") == "false", (
+        f"Expected dry_run='false' in query params, got: {captured_request.get('params')}"
+    )
+
+    # 5. Top-level constant injected into body
+    body = captured_request.get("json", {})
+    assert body.get("source") == "voice_agent", (
+        f"Expected source='voice_agent' in body, got: {body.get('source')!r}"
+    )
+
+    # 6. Nested constants deep-merged into body
+    assert body.get("metadata", {}).get("channel") == "phone", (
+        f"Expected metadata.channel='phone', got: {body.get('metadata')}"
+    )
+    assert body.get("metadata", {}).get("api_version") == 2, (
+        f"Expected metadata.api_version=2, got: {body.get('metadata')}"
+    )
+
+    # 7. LLM relayed key facts from the tool response
+    text_lower = full_text.lower()
+    missing = []
+    for fact in ["tkt-99210", "created", "4"]:
+        if fact not in text_lower:
+            missing.append(fact)
+    if missing:
+        raise AssertionError(f"LLM response is missing expected facts: {missing}\nFull response: {full_text}")
+
+    print("✓ http_server_tool test passed:")
+    print("  - LLM filled subject, priority (enum), quantity (int), tags (array)")
+    print("  - constant 'source' + nested 'metadata' hidden from LLM, injected into body")
+    print("  - URL template resolved with tenant_id='acme'")
+    print("  - Query param dry_run=false sent")
+    print("  - LLM relayed ticket ID, status, and response time to user")
 
 
 async def test_reasoning_disabled_by_default(model: str, api_key: str, backend: Optional[str] = None):
@@ -813,6 +1035,7 @@ AVAILABLE_TESTS = [
     "mcp",  # test_mcp_list_tools and test_mcp_tool_execution
     "reset",  # test_conversation_reset
     "reasoning_default",  # test_reasoning_disabled_by_default
+    "webhook",  # test_http_server_tool_calling
 ]
 
 
@@ -937,6 +1160,8 @@ async def main(args):
             test_plan.append(
                 ("reasoning_default", test_reasoning_disabled_by_default, model, api_key, backend)
             )
+        if "webhook" in tests_to_run:
+            test_plan.append(("webhook", test_http_server_tool_calling, model, api_key, backend))
 
         for test_entry in test_plan:
             test_name, test_fn, *test_args = test_entry
