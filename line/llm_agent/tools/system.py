@@ -255,11 +255,49 @@ end_call = EndCallTool()
 
 class TransferCallTool:
     """
-    transfer_call tool: optional fixed message and interruptibility are set at construction
-    (``TransferCallTool(...)`` / ``transfer_call(...)``), not by the LLM at tool-call time.
+    transfer_call tool.
+
+    The destination can be supplied in one of two ways:
+
+    - **Dynamic** (default): the LLM provides ``target_phone_number`` at call
+      time. It is validated and normalized to E.164 on each call.
+    - **Pinned**: pass ``target_phone_number`` at construction
+      (``transfer_call(target_phone_number="+14155551234")``). The number is
+      validated once at construction and hidden from the LLM, which then only
+      decides *whether* to transfer. This matches the common "escalate to a
+      fixed support/human line" pattern.
+
+    The optional fixed ``message`` and ``interruptible`` flag are set at
+    construction in both modes, not by the LLM at tool-call time.
     """
 
-    def __init__(self, message: Optional[str] = None, interruptible: bool = True):
+    DYNAMIC_DESCRIPTION = (
+        "Transfer the call to another phone number (E.164).\n"
+        "Do not speak a separate line before calling this tool.\n"
+        "If the tool was configured with a fixed message at construction,\n"
+        "that message is spoken before the transfer."
+    )
+
+    FIXED_DESCRIPTION = (
+        "Transfer the call to the preconfigured destination.\n"
+        "Use this when the caller should be handed off (for example, when they "
+        "ask for a human, a supervisor, or to escalate).\n"
+        "Do not speak a separate line before calling this tool.\n"
+        "If the tool was configured with a fixed message at construction,\n"
+        "that message is spoken before the transfer."
+    )
+
+    def __init__(
+        self,
+        target_phone_number: Optional[str] = None,
+        message: Optional[str] = None,
+        interruptible: bool = True,
+    ):
+        # When pinned, validate/normalize once at construction so a bad config
+        # fails fast rather than at call time.
+        self.target_phone_number = (
+            self._normalize_number(target_phone_number) if target_phone_number is not None else None
+        )
         self.message = message
         self.interruptible = interruptible
         self._function_tool = self._create_function_tool()
@@ -269,8 +307,48 @@ class TransferCallTool:
         """Return the tool name."""
         return "transfer_call"
 
+    @staticmethod
+    def _normalize_number(number: str) -> str:
+        """Validate and normalize a phone number to E.164, raising on invalid input."""
+        import phonenumbers
+
+        try:
+            parsed = phonenumbers.parse(number)
+        except phonenumbers.NumberParseException as e:
+            raise ValueError(
+                f"TransferCallTool: could not parse target_phone_number {number!r}: {e}"
+            ) from None
+        if not phonenumbers.is_valid_number(parsed):
+            raise ValueError(
+                f"TransferCallTool: target_phone_number {number!r} is not a valid phone number."
+            )
+        return phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.E164)
+
     def _create_function_tool(self) -> FunctionTool:
-        """Create the underlying FunctionTool with the configured message and interruptibility."""
+        """Create the underlying FunctionTool for the configured mode."""
+        if self.target_phone_number is not None:
+            return self._create_fixed_number_tool()
+        return self._create_dynamic_number_tool()
+
+    def _create_fixed_number_tool(self) -> FunctionTool:
+        """Pinned destination: no LLM-facing parameter; transfer to the preset number."""
+        fixed_number = self.target_phone_number
+
+        async def _transfer_call_fixed_impl(ctx: ToolEnv):
+            """Transfer the call to the preconfigured destination number."""
+            if self.message:
+                yield AgentSendText(text=self.message, interruptible=self.interruptible)
+            yield AgentTransferCall(target_phone_number=fixed_number, interruptible=self.interruptible)
+
+        return construct_function_tool(
+            _transfer_call_fixed_impl,
+            name="transfer_call",
+            description=self.FIXED_DESCRIPTION,
+            tool_type=ToolType.GENERAL,
+        )
+
+    def _create_dynamic_number_tool(self) -> FunctionTool:
+        """Dynamic destination: the LLM supplies and we validate the number per call."""
 
         async def _transfer_call_impl(
             ctx: ToolEnv,
@@ -312,19 +390,31 @@ class TransferCallTool:
         """Return the underlying FunctionTool for use in tool resolution."""
         return self._function_tool
 
-    def __call__(self, message: Optional[str] = None, interruptible: bool = True) -> "TransferCallTool":
+    def __call__(
+        self,
+        target_phone_number: Optional[str] = None,
+        message: Optional[str] = None,
+        interruptible: bool = True,
+    ) -> "TransferCallTool":
         """Create a configured TransferCallTool instance.
 
         Args:
+            target_phone_number: Optional pinned destination (E.164). When set,
+                the number is hidden from the LLM and validated at construction.
             message: Optional message spoken before transfer.
             interruptible: Whether the transfer_call tool is interruptible.
         """
-        return TransferCallTool(message=message, interruptible=interruptible)
+        return TransferCallTool(
+            target_phone_number=target_phone_number,
+            message=message,
+            interruptible=interruptible,
+        )
 
 
 # Default instance - can be used directly or called to configure
 # Examples:
-#   transfer_call                                              # Use default behavior
+#   transfer_call                                              # LLM supplies the number
+#   transfer_call(target_phone_number="+18005550199")          # Pin the destination
 #   transfer_call(interruptible=False)                          # Disable interruptibility
 transfer_call = TransferCallTool()
 

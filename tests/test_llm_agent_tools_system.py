@@ -537,6 +537,78 @@ async def test_transfer_call_has_function_tool_attributes(mock_ctx, anyio_backen
 
 
 # =============================================================================
+# Tests: transfer_call with a pinned (preconfigured) destination
+# =============================================================================
+
+
+async def test_transfer_call_pinned_number(mock_ctx, anyio_backend):
+    """A pinned destination transfers without the LLM supplying a number."""
+    tool = transfer_call(target_phone_number="+14155551234")
+    # No target_phone_number argument is passed at call time.
+    events = await collect_events(tool.as_function_tool().func(mock_ctx))
+
+    assert len(events) == 1
+    assert isinstance(events[0], AgentTransferCall)
+    assert events[0].target_phone_number == "+14155551234"
+    assert events[0].interruptible is True
+
+
+async def test_transfer_call_pinned_hides_param_from_llm(mock_ctx, anyio_backend):
+    """A pinned destination is not exposed to the LLM as a parameter."""
+    tool = transfer_call(target_phone_number="+14155551234")
+    func_tool = tool.as_function_tool()
+
+    assert isinstance(func_tool, FunctionTool)
+    assert func_tool.name == "transfer_call"
+    assert func_tool.tool_type == ToolType.GENERAL
+    assert set(func_tool.parameters.keys()) == set()
+    assert "target_phone_number" not in func_tool.parameters
+
+
+async def test_transfer_call_pinned_number_with_message(mock_ctx, anyio_backend):
+    """A pinned destination speaks the configured message before transferring."""
+    tool = transfer_call(target_phone_number="+14155551234", message="Connecting you now")
+    events = await collect_events(tool.as_function_tool().func(mock_ctx))
+
+    assert len(events) == 2
+    assert isinstance(events[0], AgentSendText)
+    assert events[0].text == "Connecting you now"
+    assert isinstance(events[1], AgentTransferCall)
+    assert events[1].target_phone_number == "+14155551234"
+
+
+async def test_transfer_call_pinned_number_normalized_at_construction(mock_ctx, anyio_backend):
+    """A pinned number is normalized to E.164 at construction time."""
+    tool = transfer_call(target_phone_number="+1 (415) 555-1234")
+    assert tool.target_phone_number == "+14155551234"
+
+    events = await collect_events(tool.as_function_tool().func(mock_ctx))
+    assert events[0].target_phone_number == "+14155551234"
+
+
+async def test_transfer_call_pinned_interruptible_false(mock_ctx, anyio_backend):
+    """interruptible=False propagates to the pinned-destination events."""
+    tool = transfer_call(target_phone_number="+14155551234", message="Hold on", interruptible=False)
+    events = await collect_events(tool.as_function_tool().func(mock_ctx))
+
+    assert len(events) == 2
+    assert events[0].interruptible is False
+    assert events[1].interruptible is False
+
+
+async def test_transfer_call_pinned_invalid_number_raises(anyio_backend):
+    """An invalid pinned number fails fast at construction."""
+    with pytest.raises(ValueError):
+        transfer_call(target_phone_number="123")
+
+
+async def test_transfer_call_pinned_unparseable_number_raises(anyio_backend):
+    """An unparseable pinned number fails fast at construction."""
+    with pytest.raises(ValueError):
+        TransferCallTool(target_phone_number="not-a-phone-number")
+
+
+# =============================================================================
 # Tests: _normalize_tools with TransferCallTool
 # =============================================================================
 
