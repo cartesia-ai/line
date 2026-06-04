@@ -319,9 +319,7 @@ class TransferCallTool:
                 f"TransferCallTool: could not parse target_phone_number {number!r}: {e}"
             ) from None
         if not phonenumbers.is_valid_number(parsed):
-            raise ValueError(
-                f"TransferCallTool: target_phone_number {number!r} is not a valid phone number."
-            )
+            raise ValueError(f"TransferCallTool: target_phone_number {number!r} is not a valid phone number.")
         return phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.E164)
 
     def _create_function_tool(self) -> FunctionTool:
@@ -334,8 +332,13 @@ class TransferCallTool:
         """Pinned destination: no LLM-facing parameter; transfer to the preset number."""
         fixed_number = self.target_phone_number
 
-        async def _transfer_call_fixed_impl(ctx: ToolEnv):
-            """Transfer the call to the preconfigured destination number."""
+        async def _transfer_call_fixed_impl(ctx: ToolEnv, **_ignored):
+            """Transfer the call to the preconfigured destination number.
+
+            Accepts and ignores any stray arguments the model might emit (e.g. a
+            ``target_phone_number`` it invents for a tool of this name) so the
+            pinned transfer always runs.
+            """
             if self.message:
                 yield AgentSendText(text=self.message, interruptible=self.interruptible)
             yield AgentTransferCall(target_phone_number=fixed_number, interruptible=self.interruptible)

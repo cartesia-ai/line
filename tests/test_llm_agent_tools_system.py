@@ -565,6 +565,21 @@ async def test_transfer_call_pinned_hides_param_from_llm(mock_ctx, anyio_backend
     assert "target_phone_number" not in func_tool.parameters
 
 
+async def test_transfer_call_pinned_ignores_stray_model_args(mock_ctx, anyio_backend):
+    """A pinned tool ignores stray args the model may emit and still transfers.
+
+    Tools are invoked with the model's raw JSON args (`func(ctx, **tool_args)`),
+    so a hallucinated `target_phone_number` must not break the pinned transfer.
+    """
+    tool = transfer_call(target_phone_number="+14155551234")
+    events = await collect_events(tool.as_function_tool().func(mock_ctx, target_phone_number="+19998887777"))
+
+    assert len(events) == 1
+    assert isinstance(events[0], AgentTransferCall)
+    # The pinned number wins; the stray arg is ignored.
+    assert events[0].target_phone_number == "+14155551234"
+
+
 async def test_transfer_call_pinned_number_with_message(mock_ctx, anyio_backend):
     """A pinned destination speaks the configured message before transferring."""
     tool = transfer_call(target_phone_number="+14155551234", message="Connecting you now")
