@@ -247,3 +247,24 @@ def test_user_defaults_with_extra_kwargs():
     assert config.introduction == "Welcome to our store!"
     assert config.temperature == 0.8
     assert config.max_tokens == 500
+
+
+def test_responses_store_defaults_to_true():
+    """The Responses-API ``store`` opt-out defaults to True (stateful)."""
+    from line.llm_agent.config import _normalize_config
+
+    config = _normalize_config(LlmConfig())
+    assert config.responses_store is True
+
+
+def test_responses_store_explicit_false_propagates_through_merge():
+    """Explicitly disabling server state survives normalization and merge."""
+    from line.llm_agent.config import _merge_configs, _normalize_config
+
+    base = LlmConfig(responses_store=False)
+    override = LlmConfig()
+    merged = _merge_configs(base, override)
+    assert merged.responses_store is False
+
+    normalized = _normalize_config(base)
+    assert normalized.responses_store is False

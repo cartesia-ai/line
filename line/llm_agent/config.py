@@ -49,6 +49,15 @@ class LlmConfig:
     # Tool schema settings
     strict_tool_schemas: bool = _UNSET
 
+    # Responses API server-state opt-out. When True (default), the SDK sends
+    # ``store: true`` and chains turns via ``previous_response_id`` for
+    # efficient continuation. Set False for OpenAI organizations with Zero
+    # Data Retention enabled (server-side conversation storage rejected by
+    # the API) — the SDK then sends ``store: false`` and the full
+    # conversation as ``input`` each turn. Only used by the WebSocket and
+    # ``http_responses`` backends; the ``http`` backend ignores it.
+    responses_store: bool = _UNSET
+
     @classmethod
     def from_call_request(
         cls,
@@ -135,6 +144,7 @@ _FIELD_DEFAULTS: Dict[str, Any] = {
     "timeout": None,
     "extra": dict,  # callable → invoked each time
     "strict_tool_schemas": True,
+    "responses_store": True,
 }
 
 
