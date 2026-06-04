@@ -728,23 +728,31 @@ Always include menu_item_id and quantity.""",
 
 async def test_reasoning_disabled_by_default(model: str, api_key: str, backend: Optional[str] = None):
     """Verify the codebase's default reasoning_effort actually suppresses thinking on the wire."""
-    from line.llm_agent.provider import _get_model_config, parse_model_id
+    from line.llm_agent.config import LlmConfig, _normalize_config
+    from line.llm_agent.provider import (
+        _get_model_config,
+        _resolve_config_reasoning_effort,
+        parse_model_id,
+    )
 
     print("\n" + "=" * 60)
     print(f"Testing reasoning disabled by default for {model} (backend={backend})")
     print("=" * 60)
 
-    mcfg = _get_model_config(parse_model_id(model))
+    model_id = parse_model_id(model)
+    mcfg = _get_model_config(model_id)
+    resolved = _resolve_config_reasoning_effort(model_id, mcfg, _normalize_config(LlmConfig()))
     print(f"  supports_reasoning_effort: {mcfg.supports_reasoning_effort}")
     print(f"  default_reasoning_effort:  {mcfg.default_reasoning_effort!r}")
+    print(f"  resolved reasoning_effort: {resolved.reasoning_effort!r}")
 
     llm_kwargs: dict = {
         "model": model,
         "api_key": api_key,
         "messages": [{"role": "user", "content": "What is 2+2? Just give the number."}],
     }
-    if mcfg.supports_reasoning_effort and mcfg.default_reasoning_effort is not None:
-        llm_kwargs["reasoning_effort"] = mcfg.default_reasoning_effort
+    if resolved.reasoning_effort is not None:
+        llm_kwargs["reasoning_effort"] = resolved.reasoning_effort
 
     response = await litellm.acompletion(**llm_kwargs)
     msg = response.choices[0].message

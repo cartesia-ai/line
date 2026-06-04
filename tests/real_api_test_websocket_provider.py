@@ -106,7 +106,7 @@ async def _run_expect_rejection(name, api_key, config, *, model_id):
 
     Returns None on expected rejection, or an error string on failure.
     """
-    provider = _WebSocketProvider(model_id=model_id, api_key=api_key, default_reasoning_effort=None)
+    provider = _WebSocketProvider(model_id=model_id, api_key=api_key)
     try:
         text = await _collect_text(provider, _MIN_MESSAGE, config=config)
         if text:
@@ -125,11 +125,7 @@ async def _run_expect_rejection(name, api_key, config, *, model_id):
 
 async def _run_expect_success(name, api_key, config, *, model_id, **kwargs):
     """Run a chat that should succeed. Returns None on success, or an error string."""
-    provider = _WebSocketProvider(
-        model_id=model_id,
-        api_key=api_key,
-        default_reasoning_effort=kwargs.get("default_reasoning_effort"),
-    )
+    provider = _WebSocketProvider(model_id=model_id, api_key=api_key)
     try:
         if kwargs.get("expect_tool_call"):
             got_tool = await _collect_tool_calls(
@@ -347,7 +343,7 @@ async def test_response_not_found_retry(api_key: str, model_id: ParsedModelId):
     """Force a ``previous_response_not_found`` by corrupting history; verify retry recovers."""
     print_header(f"Response Not Found Retry Test ({model_id.model})")
 
-    provider = _WebSocketProvider(model_id=model_id, api_key=api_key, default_reasoning_effort=None)
+    provider = _WebSocketProvider(model_id=model_id, api_key=api_key)
     config = LlmConfig(system_prompt="You are a helpful assistant. Be brief.")
 
     try:
@@ -562,7 +558,6 @@ async def test_websocket_model_config(api_key: str, model_id: ParsedModelId):
         api_key,
         _normalize_config(LlmConfig(system_prompt="Be brief.", reasoning_effort="low")),
         model_id=model_id,
-        default_reasoning_effort="low",
     )
     if err:
         print(f"FAIL: {err}")

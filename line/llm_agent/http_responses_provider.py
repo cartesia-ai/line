@@ -260,11 +260,9 @@ class _HttpResponsesProvider:
         self,
         model_id: ParsedModelId,
         api_key: Optional[str] = None,
-        default_reasoning_effort: Optional[str] = "low",
     ):
         self._model_id = model_id
         self._api_key = api_key or ""
-        self._default_reasoning_effort = default_reasoning_effort
         self._history: List[ConversationEntry] = []
         self._lock: Optional[asyncio.Lock] = None
 
@@ -298,7 +296,6 @@ class _HttpResponsesProvider:
                         body, update = _plan_responses_chat(
                             history=self._history,
                             model_id=self._model_id,
-                            default_reasoning_effort=self._default_reasoning_effort,
                             messages=messages,
                             tools=tools,
                             config=config,

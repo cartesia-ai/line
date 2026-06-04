@@ -32,7 +32,7 @@ class LlmConfig:
     top_p: Optional[float] = _UNSET
     stop: Optional[List[str]] = _UNSET
     seed: Optional[int] = _UNSET
-    reasoning_effort: Optional[Literal["none", "low", "medium", "high"]] = _UNSET
+    reasoning_effort: Optional[Literal["none", "minimal", "low", "medium", "high"]] = _UNSET
 
     # Penalties
     presence_penalty: Optional[float] = _UNSET
