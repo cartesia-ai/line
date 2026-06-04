@@ -417,7 +417,7 @@ class TransferCallTool:
 # Default instance - can be used directly or called to configure
 # Examples:
 #   transfer_call                                              # LLM supplies the number
-#   transfer_call(target_phone_number="+18005550199")          # Pin the destination
+#   transfer_call(target_phone_number="+14155551234")          # Pin the destination
 #   transfer_call(interruptible=False)                          # Disable interruptibility
 transfer_call = TransferCallTool()
 

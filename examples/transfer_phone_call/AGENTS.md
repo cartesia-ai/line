@@ -44,12 +44,12 @@ Transfers the call to an external phone number.
 **Destination modes:**
 
 - **Dynamic** (default): the LLM supplies `target_phone_number` at call time (used in this example, where the caller chooses where to connect).
-- **Pinned**: set the destination at construction with `transfer_call(target_phone_number="+18005550199")`. The number is validated once at construction and hidden from the LLM, which then only decides *whether* to transfer. Use this for fixed escalation lines (e.g. "transfer to a human/supervisor").
+- **Pinned**: set the destination at construction with `transfer_call(target_phone_number="+14155551234")`. The number is validated once at construction and hidden from the LLM, which then only decides *whether* to transfer. Use this for fixed escalation lines (e.g. "transfer to a human/supervisor").
 
 ```python
 # Escalate to a fixed support line — the LLM never has to supply the number.
 transfer_to_human = transfer_call(
-    target_phone_number="+18005550199",
+    target_phone_number="+14155551234",
     message="Connecting you to a member of our team now.",
 )
 ```
