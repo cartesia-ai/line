@@ -137,16 +137,16 @@ agent = LlmAgent(
 | `transfer_call` | Transfers to a phone number (E.164 format) |
 | `web_search` | Searches the web (native LLM search or DuckDuckGo fallback) |
 | `knowledge_base` | Looks up information from the agent's knowledge base via natural-language query. Call `knowledge_base(filters={...}, top_k=10)` to pre-filter retrievals or override `top_k` |
-| `webhook_tool` | Creates an HTTP webhook tool (see below) |
+| `http_server_tool` | Creates an HTTP tool from JSON schemas (see below) |
 
-### Webhook Tools — Connect to HTTP APIs Without Code
+### HTTP Tools — Connect to HTTP APIs Without Code
 
-`webhook_tool` creates a tool that makes HTTP requests when the LLM calls it. Define the request shape with JSON schemas — no custom tool function needed:
+`http_server_tool` creates a tool that makes HTTP requests when the LLM calls it. Define the request shape with JSON schemas — no custom tool function needed:
 
 ```python
-from line.llm_agent import webhook_tool
+from line.llm_agent import http_server_tool
 
-create_ticket = webhook_tool(
+create_ticket = http_server_tool(
     name="create_ticket",
     description="Creates a support ticket for the caller.",
     url="https://api.example.com/v1/{tenant_id}/tickets",
@@ -173,7 +173,7 @@ The LLM sees `subject`, `priority`, and `tenant_id` (from the URL template). It 
 **Query parameter tools** work the same way for GET requests:
 
 ```python
-search_orders = webhook_tool(
+search_orders = http_server_tool(
     name="search_orders",
     description="Search orders by status.",
     url="https://api.example.com/orders",
@@ -295,11 +295,11 @@ async def search_database(ctx, query: Annotated[str, "Search query"]) -> str:
 
 ## Context Management
 
-Control what the LLM sees in its conversation history using `add_history_entry` and `set_history_processor`.
+Control what the LLM sees in its conversation history using `agent.history.add_entry` and `agent.history.update`.
 
-### Inject Context with `add_history_entry`
+### Inject Context with `agent.history.add_entry`
 
-Insert text into the LLM's conversation history. By default, entries appear as system messages. This is useful for injecting context for controlling exactly what the LLM sees from tool calls, or integrating information from external APIs.
+Insert text into the LLM's conversation history. This is useful for injecting context for controlling exactly what the LLM sees from tool calls, or integrating information from external APIs.
 
 ```python
 from line.llm_agent import LlmAgent, LlmConfig, loopback_tool
@@ -311,7 +311,7 @@ agent = LlmAgent(
 )
 
 # Inject context before the conversation starts
-agent.add_history_entry("The customer's name is Alice and she has a premium account.")
+agent.history.add_entry("The customer's name is Alice and she has a premium account.")
 
 # Or inject context from within a tool call
 @loopback_tool
@@ -319,44 +319,42 @@ async def lookup_customer(ctx, customer_id: str) -> str:
     """Look up customer details."""
     customer = await db.get_customer(customer_id)
     # Inject rich context that persists across turns
-    agent.add_history_entry(f"Customer profile: {customer.summary}")
+    agent.history.add_entry(f"Customer profile: {customer.summary}")
     return f"Found customer {customer.name}"
 ```
 
-Each entry defaults to a system message (`role="system"`). Pass `role="user"` to inject as a user message instead.
+Each entry defaults to a user message (`role="user"`). Pass `role="system"` to inject a system note instead. By default entries are appended at the end of history; pass the `before=` or `after=` anchor keyword (a `HistoryEvent` already in history) to insert relative to a specific event.
 
-### Transform History with `set_history_processor`
+### Rewrite History with `agent.history.update`
 
-Register a function that transforms the full conversation history before it's passed to the LLM. This gives you control over filtering, reordering, or injecting events
+`agent.history.update(events, *, start=None, end=None)` replaces a segment of history with a new list of `HistoryEvent` items. The optional `start` and `end` anchors (events already present in history) determine which segment is replaced:
 
-```python
-from line import HistoryEvent, CustomHistoryEntry, UserTextSent
-
-# Filter history to only keep user messages and custom entries
-def keep_relevant(history: list[HistoryEvent]) -> list[HistoryEvent]:
-    return [e for e in history if isinstance(e, (UserTextSent, CustomHistoryEntry))]
-
-agent.set_history_processor(keep_relevant)
-```
+- **Neither anchor** — `events` are prefixed before the existing history.
+- **`start` only** — replaces from `start` through the end of history.
+- **`end` only** — replaces from the beginning of history through `end` (inclusive).
+- **Both anchors** — replaces the segment `[start..end]` inclusive.
 
 ```python
-# Append a reminder to every LLM call
-def add_reminder(history: list[HistoryEvent]) -> list[HistoryEvent]:
-    return list(history) + [CustomHistoryEntry(content="Remember: be concise and friendly.")]
+from line import CustomHistoryEntry, UserTextSent
 
-agent.set_history_processor(add_reminder)
+# Prefix the history with a reminder (neither anchor)
+agent.history.update([CustomHistoryEntry(content="Remember: be concise and friendly.")])
+
+# Replace everything from `marker` onward (start only)
+agent.history.update(
+    [CustomHistoryEntry(content="Conversation summarized.")],
+    start=marker,
+)
+
+# Replace the inclusive segment between two known events (both anchors)
+agent.history.update(
+    [CustomHistoryEntry(content="(redacted)")],
+    start=first_event,
+    end=last_event,
+)
 ```
 
-```python
-# Async transforms work too — useful for fetching external context
-async def inject_live_context(history: list[HistoryEvent]) -> list[HistoryEvent]:
-    context = await fetch_latest_context()
-    return [CustomHistoryEntry(content=context)] + list(history)
-
-agent.set_history_processor(inject_live_context)
-```
-
-The transform receives the full history (input events + local events) as a list of `HistoryEvent` items and *must* return a list of `HistoryEvent` items.
+`update` raises `ValueError` if an anchor is not found in the current history, or if `end` appears before `start`.
 
 ---
 
