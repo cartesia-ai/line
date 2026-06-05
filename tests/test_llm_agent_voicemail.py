@@ -1,8 +1,8 @@
 """LlmAgent voicemail tests for both evaluation approaches.
 
 Approach 1: the built-in ``voicemail`` tool is dropped from the agent's options
-once the conversation is "deemed started" (after ``voicemail_tool_active_turns``
-completed user turns).
+once the conversation is "deemed started" (after
+``VoicemailDetectionConfig.tool_active_turns`` completed user turns).
 
 Approach 2: the cheap-LM voicemail detection sidecar buffers the main LM's first
 user-visible output behind a short gate and suppresses it on a ``voicemail``
@@ -123,7 +123,7 @@ async def test_voicemail_tool_removed_after_first_turn():
         model="gpt-4o",
         api_key="test-key",
         tools=[voicemail, end_call],
-        voicemail_tool_active_turns=1,
+        voicemail_detection=VoicemailDetectionConfig(tool_active_turns=1),
     )
     mock = _MockLLM([[StreamChunk(text="hi", is_final=True)], [StreamChunk(text="hello", is_final=True)]])
     agent._llm = mock
@@ -143,7 +143,7 @@ async def test_voicemail_tool_kept_for_two_turns():
         model="gpt-4o",
         api_key="test-key",
         tools=[voicemail, end_call],
-        voicemail_tool_active_turns=2,
+        voicemail_detection=VoicemailDetectionConfig(tool_active_turns=2),
     )
     mock = _MockLLM([[StreamChunk(text="a", is_final=True)]] * 3)
     agent._llm = mock
@@ -162,7 +162,7 @@ async def test_voicemail_tool_kept_when_active_turns_none():
         model="gpt-4o",
         api_key="test-key",
         tools=[voicemail, end_call],
-        voicemail_tool_active_turns=None,
+        voicemail_detection=VoicemailDetectionConfig(tool_active_turns=None),
     )
     mock = _MockLLM([[StreamChunk(text="a", is_final=True)]] * 3)
     agent._llm = mock
@@ -180,7 +180,13 @@ async def test_voicemail_tool_kept_when_active_turns_none():
 
 
 def _detection_agent(
-    detector: _FakeDetector, responses, *, message="Call us back.", gate_ms=200, min_words=0
+    detector: _FakeDetector,
+    responses,
+    *,
+    message="Call us back.",
+    gate_ms=200,
+    min_words=0,
+    active_turns=None,
 ):
     agent = LlmAgent(
         model="gpt-4o",
@@ -192,6 +198,7 @@ def _detection_agent(
             message=message,
             initial_gate_ms=gate_ms,
             min_transcript_words=min_words,
+            active_turns=active_turns,
         ),
     )
     agent._llm = _MockLLM(responses)
@@ -322,6 +329,34 @@ async def test_turn_at_min_words_runs_detection():
 
     assert detector.calls == ["please leave a message after the tone"]
     assert [o for o in outputs if isinstance(o, AgentEndCall)][0].reason == "voicemail_detected"
+
+
+async def test_detection_limited_to_active_turns():
+    """With active_turns=1, detection runs on turn 1 only, not later turns."""
+    detector = _FakeDetector(VoicemailDetectionResult("human"))
+    agent = _detection_agent(
+        detector,
+        [[StreamChunk(text="a", is_final=True)], [StreamChunk(text="b", is_final=True)]],
+        active_turns=1,
+    )
+    await _collect(agent, _env(), _turn("opening line here"))
+    await _collect(agent, _env(), _turn("second turn here"))
+
+    # Detector only consulted on the opening turn; the in-conversation turn skips it.
+    assert detector.calls == ["opening line here"]
+
+
+async def test_detection_runs_every_turn_when_active_turns_none():
+    detector = _FakeDetector(VoicemailDetectionResult("human"))
+    agent = _detection_agent(
+        detector,
+        [[StreamChunk(text="a", is_final=True)], [StreamChunk(text="b", is_final=True)]],
+        active_turns=None,
+    )
+    await _collect(agent, _env(), _turn("first turn text"))
+    await _collect(agent, _env(), _turn("second turn text"))
+
+    assert detector.calls == ["first turn text", "second turn text"]
 
 
 async def test_cleanup_closes_detector_provider():

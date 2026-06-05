@@ -64,7 +64,7 @@ async def get_agent(env: AgentEnv, call_request: CallRequest):
         api_key=os.getenv("ANTHROPIC_API_KEY"),
         tools=[voicemail(message=VOICEMAIL_MESSAGE), end_call],
         config=config,
-        voicemail_tool_active_turns=1,
+        voicemail_detection=VoicemailDetectionConfig(tool_active_turns=1),
     )
 
 

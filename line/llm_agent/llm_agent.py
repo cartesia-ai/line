@@ -112,21 +112,17 @@ class LlmAgent:
         max_tool_iterations: int = 10,
         backend: Optional[str] = None,
         voicemail_detection: Optional[VoicemailDetectionConfig] = None,
-        voicemail_tool_active_turns: Optional[int] = 1,
     ):
         """
         Args:
-            voicemail_detection: Opt-in cheap-LM voicemail detection sidecar
-                (Approach 2). When set, a separate classifier runs concurrently
-                with the main LM on each completed user turn; a ``voicemail``
-                verdict within the gate suppresses the main output and ends the
-                call with ``reason="voicemail_detected"``.
-            voicemail_tool_active_turns: For the built-in ``voicemail`` tool
-                (Approach 1) — how many completed user turns the tool stays
-                available before the agent drops it from its options (the
-                conversation is "deemed started"). Defaults to ``1`` (available
-                only for the first user turn). ``None`` keeps the tool for the
-                whole call. No-op when no voicemail tool is present.
+            voicemail_detection: Opt-in voicemail configuration covering both
+                approaches (see :class:`VoicemailDetectionConfig`). ``tool_active_turns``
+                controls how long the built-in ``voicemail`` tool (Approach 1) stays
+                available; setting ``model``/``api_key`` enables the cheap-LM detection
+                sidecar (Approach 2) that runs concurrently with the main LM during the
+                opening turns and ends the call with ``reason="voicemail_detected"`` on a
+                voicemail verdict. When ``None``, the tool (if present in ``tools``) is
+                dropped after the first turn and no sidecar runs.
         """
         if not api_key:
             raise ValueError("Missing API key in LLmAgent initialization")
@@ -162,16 +158,25 @@ class LlmAgent:
             backend=backend,
         )
 
+        self._voicemail_detection = voicemail_detection
+
         # Approach 1: drop the built-in voicemail tool once the conversation is
-        # "deemed started" (after `voicemail_tool_active_turns` completed turns).
-        self._voicemail_tool_active_turns = voicemail_tool_active_turns
+        # "deemed started" (after `tool_active_turns` completed turns). Defaults to
+        # 1 even with no config so the tool isn't left available all call.
+        self._voicemail_tool_active_turns = (
+            voicemail_detection.tool_active_turns if voicemail_detection is not None else 1
+        )
         self._user_turns_seen = 0
         self._voicemail_tool_removed = False
 
-        # Approach 2: opt-in cheap-LM voicemail detection sidecar.
-        self._voicemail_detection = voicemail_detection
+        # Approach 2: cheap-LM detection sidecar — only when a detector model/key
+        # are configured (otherwise the config is tool-only, Approach 1).
         self._voicemail_detector = (
-            _VoicemailDetector(voicemail_detection) if voicemail_detection is not None else None
+            _VoicemailDetector(voicemail_detection)
+            if voicemail_detection is not None
+            and voicemail_detection.model
+            and voicemail_detection.api_key
+            else None
         )
 
         self._introduction_sent = False
@@ -308,13 +313,17 @@ class LlmAgent:
         gen = self._generate_response(
             env, event, effective_tools, effective_config, context=context, history=history
         )
-        # Approach 2: gate the main response behind the voicemail detector for
-        # completed user turns that carry enough transcript content. Turns with
-        # fewer than `min_transcript_words` words are too short to judge, so we
-        # skip detection (never hang up) and wait to hear more on a later turn.
+        # Approach 2: gate the main response behind the voicemail detector, but
+        # only during the opening turns of the call. Voicemail is only worth
+        # checking at the start, so once `active_turns` is exceeded (the
+        # conversation is under way) detection stops and adds no per-turn latency.
+        # Turns with fewer than `min_transcript_words` words are also skipped as
+        # too short to judge (never hang up; wait to hear more later).
         if self._voicemail_detector is not None and isinstance(event, UserTurnEnded):
             transcript = _extract_user_transcript(event)
-            if transcript and len(transcript.split()) >= self._voicemail_detection.min_transcript_words:
+            vd = self._voicemail_detection
+            within_window = vd.active_turns is None or self._user_turns_seen <= vd.active_turns
+            if within_window and transcript and len(transcript.split()) >= vd.min_transcript_words:
                 gen = self._wrap_with_voicemail_detection(gen, transcript)
 
         async for output in gen:

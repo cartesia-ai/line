@@ -52,27 +52,47 @@ Do not include markdown, code fences, or any text outside the JSON object."""
 
 @dataclass
 class VoicemailDetectionConfig:
-    """Opt-in configuration for :class:`LlmAgent` voicemail detection.
+    """Opt-in voicemail configuration for :class:`LlmAgent`.
+
+    A single config object covering both voicemail approaches so ``LlmAgent`` needs
+    only one voicemail parameter:
+
+    - **Approach 1 — built-in ``voicemail`` tool:** ``tool_active_turns`` controls how
+      long the tool stays in the agent's options (it's added via ``tools=[voicemail(...)]``).
+      This applies even with no detector configured.
+    - **Approach 2 — cheap-LM detection sidecar:** set ``model`` and ``api_key`` to enable
+      the concurrent classifier; ``message``, ``initial_gate_ms``, ``active_turns``,
+      ``min_transcript_words``, and ``timeout`` tune it. The detector is only created when
+      both ``model`` and ``api_key`` are provided.
 
     Args:
-        model: Cheap classifier model id (LiteLLM naming, e.g. ``"openai/gpt-4o-mini"``).
-        api_key: API key for the classifier provider.
-        message: Optional fixed message spoken (uninterruptible) when a voicemail is
+        tool_active_turns: (Approach 1) How many completed user turns the built-in voicemail
+            tool stays available before the agent drops it (the conversation is "deemed
+            started"). Default ``1``; ``None`` keeps it for the whole call. No-op when no
+            voicemail tool is in ``tools``.
+        model: (Approach 2) Cheap classifier model id (e.g. ``"openai/gpt-4o-mini"``).
+        api_key: (Approach 2) API key for the classifier provider.
+        message: (Approach 2) Fixed message spoken (uninterruptible) when a voicemail is
             detected. If omitted, the call ends silently.
-        initial_gate_ms: How long to buffer the main LM's first user-visible output while
-            waiting for the detector. Advanced latency/accuracy tradeoff; default ``200``.
-        min_transcript_words: Minimum number of words in the user turn before detection runs
-            at all. Below this the agent skips detection and continues normally — so the
-            sidecar never hangs up on a too-short greeting (e.g. "Hello?", "Yep?") and
-            effectively waits to hear more content first. ``0`` (default) runs on any
-            non-empty transcript.
-        timeout: Hard timeout (seconds) for a single classifier request.
+        initial_gate_ms: (Approach 2) How long to buffer the main LM's first user-visible
+            output while waiting for the detector. Default ``200``.
+        active_turns: (Approach 2) How many of the first user turns to run detection on.
+            Voicemail is only worth checking at the start of a call, so detection stops once
+            the conversation is under way — avoiding per-turn latency for the rest of the
+            call. Default ``1``; ``None`` runs detection on every turn.
+        min_transcript_words: (Approach 2) Minimum words in the user turn before detection
+            runs. Below this the agent skips detection and continues — so the sidecar never
+            hangs up on a too-short greeting and waits to hear more first. ``0`` (default)
+            runs on any non-empty transcript.
+        timeout: (Approach 2) Hard timeout (seconds) for a single classifier request.
     """
 
-    model: str
-    api_key: str
+    tool_active_turns: Optional[int] = 1
+    model: Optional[str] = None
+    api_key: Optional[str] = None
     message: Optional[str] = None
     initial_gate_ms: int = 200
+    active_turns: Optional[int] = 1
     min_transcript_words: int = 0
     timeout: float = 5.0
 

@@ -173,6 +173,12 @@ def test_detector_uses_zero_temperature_for_non_reasoning_models():
     assert detector._provider._config.temperature == 0
 
 
+def test_config_defaults_to_opening_turn_only():
+    """Detection defaults to the opening turn so it doesn't run all conversation long."""
+    cfg = VoicemailDetectionConfig(model="openai/gpt-5-nano", api_key="test-key")
+    assert cfg.active_turns == 1
+
+
 def test_detector_system_prompt_is_self_contained():
     """The detection prompt mentions voicemail/human/unknown and strict JSON."""
     prompt = _DETECTOR_SYSTEM_PROMPT.lower()

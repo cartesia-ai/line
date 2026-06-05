@@ -5,33 +5,39 @@ plus a small harness to evaluate them side by side.
 
 ## The two approaches
 
+Both approaches are configured through a single
+`voicemail_detection=VoicemailDetectionConfig(...)` parameter, and both only act
+during the **opening turns** of the call.
+
 **Approach 1 — built-in `voicemail` tool.** The main LM is given the `voicemail`
 tool and decides, from the call's opening line, whether to call it. The tool
 speaks an optional fixed message and ends the call with
-`reason="voicemail_detected"`. The agent automatically **removes the tool after
-the first user turn** (`voicemail_tool_active_turns=1`) so the conversation is
-"deemed started" and the LM can't hang up mid-conversation.
+`reason="voicemail_detected"`. The agent **drops the tool after `tool_active_turns`
+turns** (default `1`) so once the conversation is "deemed started" the LM can't
+hang up mid-conversation. (No `model`/`api_key` on the config ⇒ tool only, no
+sidecar.)
 
 ```python
-from line.llm_agent import LlmAgent, LlmConfig, end_call, voicemail
+from line.llm_agent import LlmAgent, LlmConfig, VoicemailDetectionConfig, end_call, voicemail
 
 agent = LlmAgent(
     model="anthropic/claude-haiku-4-5-20251001",
     api_key=os.getenv("ANTHROPIC_API_KEY"),
     tools=[voicemail(message="Please call us back."), end_call],
     config=LlmConfig(system_prompt=SYSTEM_PROMPT, introduction=""),
-    voicemail_tool_active_turns=1,  # drop the tool once the conversation starts
+    voicemail_detection=VoicemailDetectionConfig(tool_active_turns=1),
 )
 ```
 
-**Approach 2 — cheap-LM detection sidecar.** A separate, cheap classifier model
-runs concurrently with the main LM on each completed user turn. The main LM's
-first user-visible output is buffered for `initial_gate_ms` (default `200`); if
-the detector returns `voicemail` within that gate, the main output is suppressed
-and the agent emits the configured message plus
-`AgentEndCall(reason="voicemail_detected")`. Otherwise the buffered output is
-released and the call continues. Detection is conservative and fail-open
-(invalid JSON, timeouts, and errors all become `unknown`).
+**Approach 2 — cheap-LM detection sidecar.** Setting `model`/`api_key` enables a
+separate, cheap classifier that runs concurrently with the main LM for the first
+`active_turns` turns (default `1`). The main LM's first user-visible output is
+buffered for `initial_gate_ms` (default `200`); if the detector returns
+`voicemail` within that gate, the main output is suppressed and the agent emits
+the configured message plus `AgentEndCall(reason="voicemail_detected")`.
+Otherwise the buffered output is released and the call continues. Detection is
+conservative and fail-open (invalid JSON, timeouts, and errors all become
+`unknown`).
 
 ```python
 from line.llm_agent import LlmAgent, LlmConfig, VoicemailDetectionConfig, end_call
@@ -46,9 +52,14 @@ agent = LlmAgent(
         api_key=os.getenv("OPENAI_API_KEY"),
         message="Hi, please call us back when you can.",
         initial_gate_ms=200,
+        active_turns=1,
     ),
 )
 ```
+
+> Both `tool_active_turns` and `active_turns` default to `1`: voicemail is only
+> worth checking at the very start, so neither approach keeps running once you're
+> in conversation. Set them higher (or `None`) only to measure the per-turn cost.
 
 ## Outbound calls and `introduction=""`
 
@@ -60,30 +71,35 @@ Approach 2 classifies it with the sidecar.
 
 ## Running the comparison harness
 
-`compare.py` runs both approaches over the labeled dataset in `transcripts.py`
-and reports, per approach, a confusion matrix (positive class = voicemail),
-accuracy / precision / recall, and average latency. False positives (hanging up
-on a real human) and false negatives (missing a voicemail) are flagged
-explicitly, since hanging up on a person is the costlier mistake.
+`compare.py` runs both approaches over the **multi-turn conversation scenarios**
+in `transcripts.py`. Voicemail scenarios are a single greeting turn; human
+scenarios run several back-and-forth turns. For each approach it reports a
+confusion matrix (positive class = voicemail), accuracy / precision / recall, and
+a **per-turn latency split** — the opening turn (where the tool/sidecar is active)
+vs. later in-conversation turns. False positives (hanging up on a real human) and
+false negatives (missing a voicemail) are flagged explicitly.
 
-It also prints a **per-category accuracy breakdown** so you can see *where* the
-approaches diverge. The dataset (~70 samples across 12 categories) is
-intentionally diverse and adversarial — it includes subtle voicemails with no
-"leave a message" keyword, terse machine greetings, business/carrier mailboxes,
-live people who answer with their name (`Hi, this is Sarah`) or say the word
-"message", call screeners (`is this a sales call?`), and noisy partial ASR.
-Categories where the two approaches disagree are marked with `←`.
+A **per-category accuracy breakdown** shows *where* the approaches diverge
+(marked `←`). Scenarios are adversarial — subtle keyword-free voicemails, terse
+machine greetings, business/carrier mailboxes, people who answer with their name
+(`Hi, this is Sarah`) or say "message", and call screeners.
 
-The classifier (Approach 2) defaults to the small/cheap `openai/gpt-5-nano`; the
-main agent (Approach 1) defaults to `anthropic/claude-haiku-4-5-20251001`.
+To make each approach's overhead visible, the harness keeps **both mechanisms
+active on every turn by default** (`TOOL_ACTIVE_TURNS`/`DETECTOR_ACTIVE_TURNS`
+unset ⇒ `None`). That's the opposite of the production default (`1`) — set them to
+`1` to confirm the later-turn cost disappears once detection stops.
+
+The classifier defaults to the small/cheap `openai/gpt-5-nano`; the main agent to
+`anthropic/claude-haiku-4-5-20251001`.
 
 ```bash
-export ANTHROPIC_API_KEY=...   # main LM for Approach 1
-export OPENAI_API_KEY=...      # cheap classifier for Approach 2
+export ANTHROPIC_API_KEY=...   # main LM (both approaches)
+export OPENAI_API_KEY=...      # cheap classifier (Approach 2)
 uv run python examples/voicemail_detection/compare.py
 
-# Override models:
+# Override models / windows:
 MAIN_MODEL=openai/gpt-4o DETECTOR_MODEL=openai/gpt-5-mini \
+TOOL_ACTIVE_TURNS=1 DETECTOR_ACTIVE_TURNS=1 \
     uv run python examples/voicemail_detection/compare.py
 ```
 

@@ -1,45 +1,40 @@
-"""Compare two voicemail-detection approaches side by side.
+"""Compare two voicemail-detection approaches over multi-turn conversations.
 
-Approach 1 — built-in ``voicemail`` tool: the main LM decides, given the call's
-opening line, whether to call the ``voicemail`` tool (which ends the call with
-``reason="voicemail_detected"``). We run a fresh LlmAgent for each sample and
-check whether it emitted that end-call event.
+Approach 1 — built-in ``voicemail`` tool: the main LM decides whether to call the
+``voicemail`` tool (which ends the call with ``reason="voicemail_detected"``).
 
-Approach 2 — cheap-LM detection sidecar: a separate, cheap classifier model
-labels the opening line ``voicemail`` / ``human`` / ``unknown`` independently of
-the main LM.
+Approach 2 — cheap-LM detection sidecar: a separate classifier runs concurrently
+with the main LM and can end the call on a ``voicemail`` verdict.
 
-Both are run over the labeled dataset in ``transcripts.py`` and reported with a
-confusion matrix (positive class = voicemail), accuracy / precision / recall, and
-average latency, so you can decide which approach to ship. False positives
-(hanging up on a real human) and false negatives (missing a voicemail) are called
-out explicitly since they carry very different costs.
+Each scenario in ``transcripts.py`` is a short *conversation*, so the harness
+measures detection quality (confusion matrix, accuracy / precision / recall) AND
+**per-turn latency** — splitting the opening turn (where the tool/sidecar is
+active) from later in-conversation turns, to show the overhead each approach adds.
+
+By default both mechanisms are kept active for *every* turn
+(``*_ACTIVE_TURNS=None``) so that overhead is visible. In production you'd set
+them to ``1`` (only check the opening turn); pass ``TOOL_ACTIVE_TURNS=1`` /
+``DETECTOR_ACTIVE_TURNS=1`` to see that.
 
 Usage:
-    # Main agent (Approach 1) — defaults to Anthropic; detector (Approach 2) to OpenAI.
-    export ANTHROPIC_API_KEY=...      # main LM for Approach 1
+    export ANTHROPIC_API_KEY=...      # main LM for Approach 1 + 2
     export OPENAI_API_KEY=...         # cheap classifier for Approach 2
     uv run python examples/voicemail_detection/compare.py
-
-    # Override models:
-    MAIN_MODEL=openai/gpt-4o DETECTOR_MODEL=openai/gpt-4o-mini \
-        uv run python examples/voicemail_detection/compare.py
 """
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import os
 import time
 from typing import Dict, List, Optional
 
 import litellm
-from transcripts import SAMPLES, Sample
+from transcripts import SCENARIOS, Scenario
 
 from line.agent import AgentEnv, TurnEnv
-from line.events import AgentEndCall, UserTextSent, UserTurnEnded
-from line.llm_agent import LlmAgent, LlmConfig, voicemail
+from line.events import AgentEndCall, AgentSendText, AgentTextSent, UserTextSent, UserTurnEnded
+from line.llm_agent import LlmAgent, LlmConfig, VoicemailDetectionConfig, voicemail
 from line.llm_agent.tools.system import end_call
-from line.llm_agent.voicemail_detection import VoicemailDetectionConfig, _VoicemailDetector
 
 # Models (override via env). Approach 1 uses a full conversational model; Approach 2
 # uses a cheap classifier.
@@ -47,61 +42,94 @@ MAIN_MODEL = os.getenv("MAIN_MODEL", "anthropic/claude-haiku-4-5-20251001")
 MAIN_API_KEY = os.getenv("MAIN_API_KEY") or os.getenv("ANTHROPIC_API_KEY")
 DETECTOR_MODEL = os.getenv("DETECTOR_MODEL", "openai/gpt-5-nano")
 DETECTOR_API_KEY = os.getenv("DETECTOR_API_KEY") or os.getenv("OPENAI_API_KEY")
-# Skip detection until the turn has at least this many words, so the sidecar
-# never hangs up on a too-short greeting. Tune to trade FPs vs. terse-voicemail recall.
+
+
+def _opt_int(name: str) -> Optional[int]:
+    """Parse an optional int env var; empty / 'none' → None (active for all turns)."""
+    raw = os.getenv(name)
+    if raw is None or raw.strip().lower() in ("", "none"):
+        return None
+    return int(raw)
+
+
+# Keep both mechanisms active across all turns by default so per-turn overhead is
+# measurable; set to 1 to mimic the recommended production config.
+TOOL_ACTIVE_TURNS = _opt_int("TOOL_ACTIVE_TURNS")
+DETECTOR_ACTIVE_TURNS = _opt_int("DETECTOR_ACTIVE_TURNS")
 DETECTOR_MIN_WORDS = int(os.getenv("DETECTOR_MIN_WORDS", "0"))
 
 SYSTEM_PROMPT = (
     "You are an outbound voice agent calling a customer about their recent order. "
-    "Greet the person and confirm you're speaking to the right customer. If you reach "
-    "a voicemail or answering machine instead of a live person, use the voicemail tool."
+    "Greet the person and confirm you're speaking to the right customer, then keep it brief. "
+    "If you reach a voicemail or answering machine instead of a live person, use the voicemail tool."
 )
 VOICEMAIL_MESSAGE = "Hi, this is a courtesy call about your recent order. Please call us back. Thanks!"
 
 
 @dataclass
-class Outcome:
-    predicted_voicemail: bool
-    detail: str
-    latency_ms: float
+class ScenarioOutcome:
+    detected_voicemail: bool = False
+    per_turn_ms: List[float] = field(default_factory=list)
 
 
-async def run_approach1(sample: Sample) -> Outcome:
-    """Run the main LM with the voicemail tool over the call's opening line."""
-    agent = LlmAgent(
+def _approach1_agent() -> LlmAgent:
+    return LlmAgent(
         model=MAIN_MODEL,
         api_key=MAIN_API_KEY,
         tools=[voicemail(message=VOICEMAIL_MESSAGE), end_call],
-        # introduction="" → outbound call: the agent waits for the callee to speak first.
         config=LlmConfig(system_prompt=SYSTEM_PROMPT, introduction=""),
-        # Keep the tool available for this single opening turn.
-        voicemail_tool_active_turns=1,
+        voicemail_detection=VoicemailDetectionConfig(tool_active_turns=TOOL_ACTIVE_TURNS),
     )
-    env = TurnEnv(agent_env=AgentEnv())
-    user_msg = UserTextSent(content=sample.transcript)
-    event = UserTurnEnded(content=[UserTextSent(content=sample.transcript)], history=[user_msg])
 
-    start = time.perf_counter()
-    detected = False
+
+def _approach2_agent() -> LlmAgent:
+    return LlmAgent(
+        model=MAIN_MODEL,
+        api_key=MAIN_API_KEY,
+        tools=[end_call],
+        config=LlmConfig(system_prompt=SYSTEM_PROMPT, introduction=""),
+        voicemail_detection=VoicemailDetectionConfig(
+            model=DETECTOR_MODEL,
+            api_key=DETECTOR_API_KEY,
+            message=VOICEMAIL_MESSAGE,
+            initial_gate_ms=200,
+            active_turns=DETECTOR_ACTIVE_TURNS,
+            min_transcript_words=DETECTOR_MIN_WORDS,
+        ),
+    )
+
+
+async def _run_scenario(agent: LlmAgent, scenario: Scenario) -> ScenarioOutcome:
+    """Drive a whole conversation through one agent, timing each turn."""
+    env = TurnEnv(agent_env=AgentEnv())
+    history: list = []
+    outcome = ScenarioOutcome()
     try:
-        async for output in agent.process(env, event):
-            if isinstance(output, AgentEndCall) and output.reason == "voicemail_detected":
-                detected = True
+        for text in scenario.turns:
+            history.append(UserTextSent(content=text))
+            event = UserTurnEnded(content=[UserTextSent(content=text)], history=list(history))
+
+            start = time.perf_counter()
+            agent_text: List[str] = []
+            async for output in agent.process(env, event):
+                if isinstance(output, AgentEndCall) and output.reason == "voicemail_detected":
+                    outcome.detected_voicemail = True
+                elif isinstance(output, AgentSendText):
+                    agent_text.append(output.text)
+            outcome.per_turn_ms.append((time.perf_counter() - start) * 1000)
+
+            if agent_text:
+                history.append(AgentTextSent(content=" ".join(agent_text)))
+            if outcome.detected_voicemail:
+                break  # the call has ended
     finally:
         await agent.cleanup()
-    latency_ms = (time.perf_counter() - start) * 1000
-    return Outcome(detected, "called voicemail tool" if detected else "no voicemail tool call", latency_ms)
+    return outcome
 
 
-async def run_approach2(detector: _VoicemailDetector, sample: Sample) -> Outcome:
-    """Run the cheap-LM classifier over the call's opening line."""
-    # Mirror the agent: too-short turns are skipped (never hang up, wait for more).
-    if len(sample.transcript.split()) < DETECTOR_MIN_WORDS:
-        return Outcome(False, f"deferred (<{DETECTOR_MIN_WORDS}w)", 0.0)
-    start = time.perf_counter()
-    result = await detector.classify(sample.transcript)
-    latency_ms = (time.perf_counter() - start) * 1000
-    return Outcome(result.classification == "voicemail", result.classification, latency_ms)
+# --------------------------------------------------------------------------- #
+# Reporting
+# --------------------------------------------------------------------------- #
 
 
 @dataclass
@@ -123,42 +151,45 @@ class ConfusionMatrix:
 
     @property
     def precision(self) -> float:
-        """Of the calls flagged as voicemail, how many really were."""
         denom = self.tp + self.fp
         return self.tp / denom if denom else 0.0
 
     @property
     def recall(self) -> float:
-        """Of the actual voicemails, how many were caught."""
         denom = self.tp + self.fn
         return self.tp / denom if denom else 0.0
 
 
-def _confusion_matrix(samples: List[Sample], outcomes: List[Outcome]) -> ConfusionMatrix:
+def _confusion_matrix(scenarios: List[Scenario], outcomes: List[ScenarioOutcome]) -> ConfusionMatrix:
     cm = ConfusionMatrix()
-    for sample, outcome in zip(samples, outcomes, strict=False):
-        actual_voicemail = sample.label == "voicemail"
-        if actual_voicemail and outcome.predicted_voicemail:
+    for s, o in zip(scenarios, outcomes, strict=False):
+        actual = s.label == "voicemail"
+        if actual and o.detected_voicemail:
             cm.tp += 1
-        elif actual_voicemail and not outcome.predicted_voicemail:
+        elif actual and not o.detected_voicemail:
             cm.fn += 1
-        elif not actual_voicemail and outcome.predicted_voicemail:
+        elif not actual and o.detected_voicemail:
             cm.fp += 1
         else:
             cm.tn += 1
     return cm
 
 
-def _report(name: str, samples: List[Sample], outcomes: List[Outcome]) -> None:
-    cm = _confusion_matrix(samples, outcomes)
-    avg_latency = sum(o.latency_ms for o in outcomes) / len(outcomes) if outcomes else 0.0
+def _latency_split(outcomes: List[ScenarioOutcome]) -> tuple:
+    """Average opening-turn latency vs. later in-conversation-turn latency."""
+    first = [o.per_turn_ms[0] for o in outcomes if o.per_turn_ms]
+    later = [ms for o in outcomes for ms in o.per_turn_ms[1:]]
+    first_avg = sum(first) / len(first) if first else 0.0
+    later_avg = sum(later) / len(later) if later else 0.0
+    return first_avg, later_avg, len(later)
+
+
+def _report(name: str, scenarios: List[Scenario], outcomes: List[ScenarioOutcome]) -> None:
+    cm = _confusion_matrix(scenarios, outcomes)
+    first_avg, later_avg, n_later = _latency_split(outcomes)
 
     print(f"\n{name}")
-    print(
-        f"  accuracy {cm.accuracy:.0%}  precision {cm.precision:.0%}  recall {cm.recall:.0%}"
-        f"  avg latency {avg_latency:.0f}ms"
-    )
-    # Confusion matrix (positive class = voicemail).
+    print(f"  accuracy {cm.accuracy:.0%}  precision {cm.precision:.0%}  recall {cm.recall:.0%}")
     print("  confusion matrix          predicted")
     print("                         voicemail   human")
     print(f"    actual voicemail   {cm.tp:>9}   {cm.fn:>5}")
@@ -167,12 +198,14 @@ def _report(name: str, samples: List[Sample], outcomes: List[Outcome]) -> None:
         print(f"  ⚠  {cm.fp} false positive(s): hung up on a real human")
     if cm.fn:
         print(f"  ⚠  {cm.fn} false negative(s): missed a voicemail (kept talking to a machine)")
+    print(f"  latency  opening turn: {first_avg:>5.0f}ms   later turns: {later_avg:>5.0f}ms (n={n_later})")
 
 
-def _category_breakdown(samples: List[Sample], a1: List[Outcome], a2: List[Outcome]) -> None:
-    """Per-category accuracy for each approach — shows *where* they diverge."""
+def _category_breakdown(
+    scenarios: List[Scenario], a1: List[ScenarioOutcome], a2: List[ScenarioOutcome]
+) -> None:
     cats: Dict[str, List[int]] = {}
-    for i, s in enumerate(samples):
+    for i, s in enumerate(scenarios):
         cats.setdefault(s.category, []).append(i)
 
     print("\nPer-category accuracy (where the approaches differ)")
@@ -181,18 +214,18 @@ def _category_breakdown(samples: List[Sample], a1: List[Outcome], a2: List[Outco
     for category in sorted(cats):
         idxs = cats[category]
         n = len(idxs)
-        a1_correct = sum(1 for i in idxs if a1[i].predicted_voicemail == (samples[i].label == "voicemail"))
-        a2_correct = sum(1 for i in idxs if a2[i].predicted_voicemail == (samples[i].label == "voicemail"))
-        flag = "  ←" if a1_correct != a2_correct else ""
-        print(f"  {category:<20} {n:>3}  {a1_correct:>4}/{n:<5} {a2_correct:>6}/{n:<5}{flag}")
+        a1_ok = sum(1 for i in idxs if a1[i].detected_voicemail == (scenarios[i].label == "voicemail"))
+        a2_ok = sum(1 for i in idxs if a2[i].detected_voicemail == (scenarios[i].label == "voicemail"))
+        flag = "  ←" if a1_ok != a2_ok else ""
+        print(f"  {category:<20} {n:>3}  {a1_ok:>4}/{n:<5} {a2_ok:>6}/{n:<5}{flag}")
 
 
 def _missing_keys() -> Optional[str]:
     missing = []
     if not MAIN_API_KEY:
-        missing.append("ANTHROPIC_API_KEY (or MAIN_API_KEY) for Approach 1")
+        missing.append("ANTHROPIC_API_KEY (or MAIN_API_KEY) for the main LM")
     if not DETECTOR_API_KEY:
-        missing.append("OPENAI_API_KEY (or DETECTOR_API_KEY) for Approach 2")
+        missing.append("OPENAI_API_KEY (or DETECTOR_API_KEY) for the sidecar")
     return ", ".join(missing) if missing else None
 
 
@@ -201,36 +234,33 @@ async def main() -> None:
     if missing:
         raise SystemExit(f"Missing API key(s): {missing}")
 
-    detector = _VoicemailDetector(
-        VoicemailDetectionConfig(
-            model=DETECTOR_MODEL, api_key=DETECTOR_API_KEY, min_transcript_words=DETECTOR_MIN_WORDS
-        )
+    print(
+        f"main={MAIN_MODEL}  detector={DETECTOR_MODEL}  "
+        f"tool_active_turns={TOOL_ACTIVE_TURNS}  detector_active_turns={DETECTOR_ACTIVE_TURNS}  "
+        f"min_words={DETECTOR_MIN_WORDS}"
     )
-
-    a1: List[Outcome] = []
-    a2: List[Outcome] = []
+    a1: List[ScenarioOutcome] = []
+    a2: List[ScenarioOutcome] = []
     try:
-        header = f"{'truth':<10} {'A1 (tool)':<12} {'A2 (sidecar)':<14} transcript"
+        header = f"{'truth':<10} {'A1':<7} {'A2':<7} {'turns':>5}  scenario"
         print(header)
         print("-" * len(header))
-        for sample in SAMPLES:
-            o1 = await run_approach1(sample)
-            o2 = await run_approach2(detector, sample)
+        for scenario in SCENARIOS:
+            o1 = await _run_scenario(_approach1_agent(), scenario)
+            o2 = await _run_scenario(_approach2_agent(), scenario)
             a1.append(o1)
             a2.append(o2)
-            a1_mark = "voicemail" if o1.predicted_voicemail else "human"
-            a2_mark = o2.detail
-            snippet = sample.transcript[:48] + ("…" if len(sample.transcript) > 48 else "")
-            print(f"{sample.label:<10} {a1_mark:<12} {a2_mark:<14} {snippet}")
+            m1 = "vm" if o1.detected_voicemail else "human"
+            m2 = "vm" if o2.detected_voicemail else "human"
+            print(f"{scenario.label:<10} {m1:<7} {m2:<7} {len(scenario.turns):>5}  {scenario.name}")
     finally:
-        await detector.aclose()
         # litellm caches async HTTP clients globally; close them before the event
         # loop tears down or their SSL transports raise "Event loop is closed".
         await litellm.close_litellm_async_clients()
 
-    _report("Approach 1 (voicemail tool)", SAMPLES, a1)
-    _report("Approach 2 (detection sidecar)", SAMPLES, a2)
-    _category_breakdown(SAMPLES, a1, a2)
+    _report("Approach 1 (voicemail tool)", SCENARIOS, a1)
+    _report("Approach 2 (detection sidecar)", SCENARIOS, a2)
+    _category_breakdown(SCENARIOS, a1, a2)
 
 
 if __name__ == "__main__":

@@ -146,28 +146,31 @@ agent = LlmAgent(
 
 On outbound calls you usually want the agent to hear the callee's opening line
 before speaking, so set `introduction=""` — the agent stays silent on
-`CallStarted` and only responds after the first `UserTurnEnded`. There are two
-ways to react when that opening line is a voicemail greeting:
+`CallStarted` and only responds after the first `UserTurnEnded`. Both approaches
+are configured through a single `voicemail_detection=VoicemailDetectionConfig(...)`
+parameter, and both only act during the opening turns of the call (voicemail is
+only worth checking at the start).
 
-**1. The built-in `voicemail` tool.** The main LM decides whether to call it. By
-default the agent drops the tool after the first user turn
-(`voicemail_tool_active_turns=1`) — once the conversation is "deemed started" the
-LM can't hang up mid-call. Set it to `None` to keep the tool for the whole call.
+**1. The built-in `voicemail` tool.** The main LM decides whether to call it. The
+agent drops the tool after `tool_active_turns` user turns (default `1`) — once the
+conversation is "deemed started" the LM can't hang up mid-call. Set it to `None`
+to keep the tool for the whole call.
 
 ```python
-from line.llm_agent import LlmAgent, LlmConfig, end_call, voicemail
+from line.llm_agent import LlmAgent, LlmConfig, VoicemailDetectionConfig, end_call, voicemail
 
 agent = LlmAgent(
     model="anthropic/claude-haiku-4-5-20251001",
     api_key=os.getenv("ANTHROPIC_API_KEY"),
     tools=[voicemail(message="Hi, please call us back when you can."), end_call],
     config=LlmConfig(system_prompt=SYSTEM_PROMPT, introduction=""),  # outbound: wait for the callee
-    voicemail_tool_active_turns=1,
+    voicemail_detection=VoicemailDetectionConfig(tool_active_turns=1),  # tool-only: no detector
 )
 ```
 
-**2. The cheap-LM detection sidecar.** A separate, cheap classifier runs
-concurrently with the main LM on each user turn. The main reply is buffered for
+**2. The cheap-LM detection sidecar.** Set `model`/`api_key` to enable a separate,
+cheap classifier that runs concurrently with the main LM during the first
+`active_turns` turns (default `1`). The main reply is buffered for
 `initial_gate_ms` (default `200`); on a `voicemail` verdict the main output is
 suppressed and the agent speaks the configured message and ends the call.
 Detection is conservative and fail-open.
@@ -185,6 +188,7 @@ agent = LlmAgent(
         api_key=os.getenv("OPENAI_API_KEY"),
         message="Hi, please call us back when you can.",
         initial_gate_ms=200,
+        active_turns=1,
     ),
 )
 ```
