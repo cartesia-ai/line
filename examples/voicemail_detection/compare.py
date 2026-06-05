@@ -45,7 +45,7 @@ from line.llm_agent.voicemail_detection import VoicemailDetectionConfig, _Voicem
 # uses a cheap classifier.
 MAIN_MODEL = os.getenv("MAIN_MODEL", "anthropic/claude-haiku-4-5-20251001")
 MAIN_API_KEY = os.getenv("MAIN_API_KEY") or os.getenv("ANTHROPIC_API_KEY")
-DETECTOR_MODEL = os.getenv("DETECTOR_MODEL", "openai/gpt-5")
+DETECTOR_MODEL = os.getenv("DETECTOR_MODEL", "openai/gpt-5-nano")
 DETECTOR_API_KEY = os.getenv("DETECTOR_API_KEY") or os.getenv("OPENAI_API_KEY")
 
 SYSTEM_PROMPT = (
