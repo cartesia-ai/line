@@ -241,12 +241,6 @@ def _extract_parameters(func: Callable) -> Dict[str, ParameterInfo]:
         if param_name in ("self", "cls", "ctx", "context", "event"):
             continue
 
-        # Skip variadic params (*args / **kwargs): they aren't nameable tool
-        # arguments and must not surface in the schema. A tool may declare
-        # **kwargs to tolerate (and ignore) stray arguments from the model.
-        if param.kind in (Parameter.VAR_POSITIONAL, Parameter.VAR_KEYWORD):
-            continue
-
         # Get the type annotation
         type_hint = hints.get(param_name, param.annotation)
         if type_hint is Parameter.empty:

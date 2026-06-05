@@ -12,6 +12,7 @@ import pytest
 
 from line.events import AgentEndCall, AgentSendDtmf, AgentSendText, AgentTransferCall
 from line.knowledge_base import KnowledgeBaseError
+from line.llm_agent.llm_agent import _select_declared_args
 from line.llm_agent.provider import parse_model_id
 from line.llm_agent.tools.system import (
     EndCallTool,
@@ -566,17 +567,24 @@ async def test_transfer_call_pinned_hides_param_from_llm(mock_ctx, anyio_backend
 
 
 async def test_transfer_call_pinned_ignores_stray_model_args(mock_ctx, anyio_backend):
-    """A pinned tool ignores stray args the model may emit and still transfers.
+    """A stray arg the model may emit is dropped before dispatch; the pinned transfer still runs.
 
-    Tools are invoked with the model's raw JSON args (`func(ctx, **tool_args)`),
-    so a hallucinated `target_phone_number` must not break the pinned transfer.
+    The dispatcher filters the model's raw JSON args to the tool's declared
+    parameters (`_select_declared_args`) before splatting them into the handler.
+    A pinned transfer_call declares none, so a hallucinated `target_phone_number`
+    is dropped and the preset number is used.
     """
     tool = transfer_call(target_phone_number="+14155551234")
-    events = await collect_events(tool.as_function_tool().func(mock_ctx, target_phone_number="+19998887777"))
+    func_tool = tool.as_function_tool()
 
+    # The dispatcher drops the undeclared key...
+    filtered = _select_declared_args(func_tool, {"target_phone_number": "+19998887777"})
+    assert filtered == {}
+
+    # ...and the handler, called with the filtered args, transfers to the pinned number.
+    events = await collect_events(func_tool.func(mock_ctx, **filtered))
     assert len(events) == 1
     assert isinstance(events[0], AgentTransferCall)
-    # The pinned number wins; the stray arg is ignored.
     assert events[0].target_phone_number == "+14155551234"
 
 

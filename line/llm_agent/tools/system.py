@@ -332,12 +332,12 @@ class TransferCallTool:
         """Pinned destination: no LLM-facing parameter; transfer to the preset number."""
         fixed_number = self.target_phone_number
 
-        async def _transfer_call_fixed_impl(ctx: ToolEnv, **_ignored):
+        async def _transfer_call_fixed_impl(ctx: ToolEnv):
             """Transfer the call to the preconfigured destination number.
 
-            Accepts and ignores any stray arguments the model might emit (e.g. a
-            ``target_phone_number`` it invents for a tool of this name) so the
-            pinned transfer always runs.
+            Exposes no LLM-facing parameter; the dispatcher filters the model's
+            args to the declared schema, so a stray ``target_phone_number`` the
+            model might invent never reaches this handler.
             """
             if self.message:
                 yield AgentSendText(text=self.message, interruptible=self.interruptible)
