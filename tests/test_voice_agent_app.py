@@ -1416,7 +1416,7 @@ class TestCreateChatSessionErrorAttribution:
         assert response.status_code == 200
         assert "X-Cartesia-Error-Source" not in response.headers
 
-    def test_pre_call_handler_rejection_omits_header(self):
+    def test_pre_call_handler_rejection_sets_agent_code_header(self):
         from fastapi.testclient import TestClient
 
         async def reject(_request):
@@ -1425,7 +1425,7 @@ class TestCreateChatSessionErrorAttribution:
         client = TestClient(self._build_app(reject).fastapi_app)
         response = client.post("/chats", json=self._chats_body())
 
-        # Explicit rejection is a 403 from the SDK itself, not a customer-code
-        # exception, so it should not carry the agent-code attribution.
+        # Returning None is an explicit rejection by customer code, so the 403
+        # carries the agent-code attribution.
         assert response.status_code == 403
-        assert "X-Cartesia-Error-Source" not in response.headers
+        assert response.headers.get("X-Cartesia-Error-Source") == "agent-code"

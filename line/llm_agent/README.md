@@ -102,7 +102,7 @@ config = LlmConfig.from_call_request(
 The SDK provides commonly-used tools out of the box:
 
 ```python
-from line.llm_agent import end_call, send_dtmf, transfer_call, web_search, agent_as_handoff
+from line.llm_agent import end_call, send_dtmf, transfer_call, web_search, http_server_tool, agent_as_handoff
 ```
 
 | Tool | Type | Description |
@@ -111,6 +111,7 @@ from line.llm_agent import end_call, send_dtmf, transfer_call, web_search, agent
 | `send_dtmf` | passthrough | Send DTMF tones (0-9, *, #) |
 | `transfer_call` | passthrough | Transfer to a phone number (E.164 format) |
 | `web_search` | loopback | Web search with native LLM support or DuckDuckGo fallback |
+| `http_server_tool` | factory | Create HTTP webhook tools from JSON schemas |
 | `agent_as_handoff` | handoff | Create a handoff tool from another agent |
 
 ### End Call
@@ -179,6 +180,128 @@ main_agent = LlmAgent(
     ),
 )
 ```
+
+### HTTP Server Tool
+
+Creates an HTTP tool from JSON schemas — no custom function needed. The LLM fills the visible parameters; constants and auth are injected automatically.
+
+```python
+from line.llm_agent import http_server_tool
+
+create_ticket = http_server_tool(
+    name="create_ticket",
+    description="Creates a support ticket.",
+    url="https://api.example.com/v1/{tenant_id}/tickets",
+    method="POST",
+    request_body_schema={
+        "type": "object",
+        "required": ["subject"],
+        "properties": {
+            "subject": {"type": "string", "description": "Short summary."},
+            "priority": {
+                "type": "string",
+                "enum": ["low", "medium", "high"],
+                "description": "Ticket priority.",
+            },
+            "source": {"type": "string", "constant_value": "voice_agent"},
+        },
+    },
+    auth={"Authorization": "Bearer ${SUPPORT_API_KEY}"},
+    timeout=5.0,
+)
+```
+
+The LLM sees `tenant_id` (from URL), `subject` (required), and `priority` (optional — not in `required`). It never sees `source` or the API key.
+
+**Path parameters** are inferred from `{param}` in the URL as required strings. Use `path_params_schema` for custom descriptions or types:
+
+```python
+update_item = http_server_tool(
+    name="update_item",
+    description="Update an item.",
+    url="https://api.example.com/items/{item_id}",
+    method="PATCH",
+    path_params_schema={
+        "item_id": {"type": "integer", "description": "Numeric item ID."},
+    },
+    request_body_schema={...},
+)
+```
+
+**Parameters:**
+
+| Parameter | Description |
+|-----------|-------------|
+| `url` | Supports `{param}` templating — each variable becomes a required path parameter |
+| `path_params_schema` | Optional dict mapping `{param}` names to `{"type": ..., "description": ...}`. If omitted, path params default to required strings |
+| `request_body_schema` | Body schema (see schema format below); form-encoded bodies support flat scalar fields only |
+| `query_params_schema` | Query string schema — same format but scalars only (no objects/arrays) |
+| `auth` | Headers with `${ENV_VAR}` placeholders resolved from `os.environ` at build time |
+| `headers` | Additional static headers (must not overlap with `auth` keys) |
+| `content_type` | `"application/json"` (default) or `"application/x-www-form-urlencoded"` |
+| `timeout` | Request timeout in seconds (must be positive) |
+| `is_background` | Run in shielded background task (default `True`) |
+
+**Schema format** (`request_body_schema` / `query_params_schema`):
+
+Both must have `"type": "object"` and a `"properties"` dict. Each property supports:
+
+| Key | Purpose |
+|-----|---------|
+| `type` | `string`, `integer`, `number`, `boolean`, `array`, `object` (query and form-encoded body fields: first four only) |
+| `description` | Shown to the LLM to guide parameter filling |
+| `enum` | List of allowed values — constrains LLM output |
+| `constant_value` | Hides property from LLM, injects this value into every request. Must match declared `type` |
+| `required` (top-level) | List of property names the LLM must fill. Properties not listed are optional |
+
+`constant_value` works at any nesting depth for object properties in `request_body_schema`:
+
+```python
+request_body_schema={
+    "type": "object",
+    "properties": {
+        "subject": {"type": "string", "description": "Issue summary."},
+        "metadata": {
+            "type": "object",
+            "properties": {
+                "channel": {"type": "string", "constant_value": "phone"},
+            },
+        },
+    },
+}
+```
+
+The LLM sees `subject` only. `metadata.channel` is injected into every request as `"phone"`.
+
+**Query parameter example** (GET request):
+
+```python
+search_orders = http_server_tool(
+    name="search_orders",
+    description="Search orders by status.",
+    url="https://api.example.com/orders",
+    method="GET",
+    query_params_schema={
+        "type": "object",
+        "required": ["status"],
+        "properties": {
+            "status": {"type": "string", "enum": ["pending", "shipped"]},
+            "limit": {"type": "integer", "description": "Max results."},
+            "api_key": {"type": "string", "constant_value": "pk_live_abc"},
+        },
+    },
+)
+```
+
+**Response format** — the LLM always receives structured JSON:
+
+```json
+{"ok": true,  "status": 201, "body": "{\"ticket_id\": \"TKT-001\"}"}
+{"ok": false, "status": 500, "error": "Internal server error"}
+{"ok": false, "status": null, "error": "Request timed out after 5.0s."}
+```
+
+All inputs are validated at build time — malformed schemas, missing env vars, type mismatches, and parameter name collisions raise `ValueError` immediately.
 
 ## Creating Custom Tools
 
