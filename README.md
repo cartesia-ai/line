@@ -132,10 +132,10 @@ agent = LlmAgent(
 
 | Tool | What it does |
 |------|--------------|
-| `end_call` | Ends the call (records `end_reason="agent_ended"`) |
+| `end_call` | Ends the call |
 | `send_dtmf` | Presses phone buttons (0-9, *, #) |
 | `transfer_call` | Transfers to a phone number (E.164 format) |
-| `voicemail` | Call when you reach a voicemail: optionally leaves a message, then ends the call with `end_reason="voicemail_detected"`. Configure with `voicemail(message="…")` |
+| `voicemail` | Call when you reach a voicemail: optionally leaves a message, then hangs up the call. Configure with `voicemail(message="…")` |
 | `web_search` | Searches the web (native LLM search or DuckDuckGo fallback) |
 | `knowledge_base` | Looks up information from the agent's knowledge base via natural-language query. Call `knowledge_base(filters={...}, top_k=10)` to pre-filter retrievals or override `top_k` |
 
