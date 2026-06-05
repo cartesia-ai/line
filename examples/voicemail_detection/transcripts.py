@@ -1,19 +1,20 @@
 """Multi-turn conversation scenarios for the voicemail-detection comparison harness.
 
 Each scenario is a short *conversation* — a sequence of successive user turns —
-so the harness can measure not just detection accuracy but also the **per-turn
-latency** the tool (Approach 1) or sidecar (Approach 2) adds, including on
-in-conversation turns after the opening line.
+so the harness can measure detection accuracy AND the **per-turn latency** the
+tool (Approach 1) or sidecar (Approach 2) adds.
 
-- ``label`` is the ground-truth call type:
-    - ``"voicemail"`` → an answering machine. These are usually a single greeting
-      turn; the agent should leave a message and hang up.
-    - ``"human"``     → a live person. These run several back-and-forth turns so
-      we can see whether detection keeps adding latency (or wrongly hangs up)
-      once the conversation is clearly under way.
-- ``category`` groups scenarios for the per-category accuracy breakdown, and
-  includes adversarial cases (subtle keyword-free voicemails, people who answer
-  with their name or say "message", call screeners).
+The set is **deliberately weighted toward humans (~53 human vs ~15 voicemail)**,
+and most humans are adversarial: people who answer with their name, who mention
+"voicemail"/"message" while clearly live, call screeners, distracted/multitasking
+pickups, callbacks, confused/hard-of-hearing callers, and terse non-native
+phrasing. The point is to measure the **false-positive rate** — hanging up on a
+real person — with enough samples to trust it, since that is the catastrophic
+error.
+
+- ``label``: ``"voicemail"`` (answering machine; leave a message + hang up) or
+  ``"human"`` (live person; keep talking).
+- ``category``: groups scenarios for the per-category breakdown.
 """
 
 from dataclasses import dataclass
@@ -30,30 +31,42 @@ class Scenario:
 
 SCENARIOS: List[Scenario] = [
     # =====================================================================
-    # VOICEMAIL — single greeting turn (a machine doesn't converse back).
+    # VOICEMAIL (~15) — single greeting turn (a machine doesn't converse back).
     # =====================================================================
+    # --- classic: explicit machine keywords ---
     Scenario(
-        "vm_classic",
+        "vm_classic_named",
         "voicemail",
         "voicemail_classic",
         ["Hi, you've reached the voicemail of Alex Carter. Please leave a message after the tone."],
     ),
     Scenario(
-        "vm_classic_carrier",
+        "vm_classic_unavailable",
         "voicemail",
-        "voicemail_carrier",
-        ["The wireless customer you are calling is not available. Please leave a message after the tone."],
-    ),
-    Scenario(
-        "vm_business",
-        "voicemail",
-        "voicemail_business",
+        "voicemail_classic",
         [
-            "Thank you for calling Brightwave Solutions. Our office is currently closed. "
-            "Please leave a message and we'll return your call on the next business day."
+            "The person you are trying to reach is not available. At the tone, please record your "
+            "message. When you have finished recording, you may hang up."
         ],
     ),
-    Scenario("vm_subtle_casual", "voicemail", "voicemail_subtle", ["Hey, it's Dana. You know what to do."]),
+    Scenario(
+        "vm_classic_number",
+        "voicemail",
+        "voicemail_classic",
+        [
+            "You have reached 555-0142. No one is available to take your call. Please leave a message after the beep."
+        ],
+    ),
+    Scenario(
+        "vm_classic_personal",
+        "voicemail",
+        "voicemail_classic",
+        [
+            "Hi, this is Marcus. I can't take your call right now. Please leave a message and I'll call you back."
+        ],
+    ),
+    # --- subtle: casual, no "leave a message" keyword ---
+    Scenario("vm_subtle_dana", "voicemail", "voicemail_subtle", ["Hey, it's Dana. You know what to do."]),
     Scenario(
         "vm_subtle_away",
         "voicemail",
@@ -66,109 +79,255 @@ SCENARIOS: List[Scenario] = [
         "voicemail_subtle",
         ["You've reached Priya. I'll call you back as soon as I can."],
     ),
-    Scenario("vm_terse", "voicemail", "voicemail_terse", ["Leave a message."]),
-    # A machine greeting that arrives in two chunks (greeting, then the beep line).
+    Scenario("vm_subtle_chris", "voicemail", "voicemail_subtle", ["Yo. It's Chris. Talk to me."]),
+    # --- business / carrier ---
     Scenario(
-        "vm_split_greeting",
+        "vm_business_closed",
         "voicemail",
-        "voicemail_subtle",
-        ["Hi, you've reached Jordan.", "Please record your message after the tone."],
+        "voicemail_business",
+        [
+            "Thank you for calling Brightwave Solutions. Our office is currently closed. "
+            "Please leave a message and we'll return your call on the next business day."
+        ],
     ),
+    Scenario(
+        "vm_business_team",
+        "voicemail",
+        "voicemail_business",
+        [
+            "You've reached the sales team at Northgate Supply. We're unable to take your call. Leave your details."
+        ],
+    ),
+    Scenario(
+        "vm_business_hours",
+        "voicemail",
+        "voicemail_business",
+        [
+            "Thank you for calling Lakeside Dental. Our hours are nine to five, Monday through Friday. Please leave a message."
+        ],
+    ),
+    Scenario(
+        "vm_carrier_google",
+        "voicemail",
+        "voicemail_carrier",
+        [
+            "The Google subscriber you have dialed is not available. Please record your message after the tone."
+        ],
+    ),
+    Scenario(
+        "vm_carrier_forwarded",
+        "voicemail",
+        "voicemail_carrier",
+        [
+            "Your call has been forwarded to an automated voice messaging system. The person you are trying to reach is not available."
+        ],
+    ),
+    # --- terse ---
+    Scenario("vm_terse_leave", "voicemail", "voicemail_terse", ["Leave a message."]),
+    Scenario("vm_terse_tone", "voicemail", "voicemail_terse", ["Speak after the tone."]),
     # =====================================================================
-    # HUMAN — multi-turn conversations (measure in-conversation latency).
+    # HUMAN (~53) — multi-turn, heavily adversarial. FP measurement is the point.
     # =====================================================================
+    # --- short, unambiguous live greetings ---
+    Scenario("h_short_hello", "human", "human_short", ["Hello?", "Yeah, this is me. What's up?"]),
+    Scenario("h_short_yeah", "human", "human_short", ["Yeah, hello?", "Who's this?"]),
+    Scenario("h_short_hi", "human", "human_short", ["Hi?", "Sorry, who's calling?"]),
+    Scenario("h_short_yep", "human", "human_short", ["Yep?", "What's up?"]),
+    Scenario("h_short_speaking", "human", "human_short", ["Speaking.", "Go ahead."]),
+    # --- answers with their name (mirrors a voicemail opening) ---
     Scenario(
-        "human_short",
-        "human",
-        "human_short",
-        ["Hello?", "Yeah, this is me.", "Sure, what's it about?", "Okay, got it, thanks."],
-    ),
-    Scenario(
-        "human_name",
-        "human",
-        "human_name",
-        [
-            "Hello, this is Sarah speaking.",
-            "Yes, that's me — what can I do for you?",
-            "Oh, the order. Right, it hasn't shown up yet.",
-            "Alright, appreciate the call.",
-        ],
-    ),
-    Scenario(
-        "human_name_screen",
+        "h_name_sarah",
         "human",
         "human_name",
-        ["Good afternoon, Daniel here.", "Who's calling?", "Mhm, go on.", "Sounds good."],
+        ["Hello, this is Sarah speaking.", "Yes, that's me — what's this about?"],
     ),
+    Scenario("h_name_daniel", "human", "human_name", ["Good afternoon, Daniel here.", "Who's calling?"]),
+    Scenario("h_name_priya", "human", "human_name", ["Hi, this is Priya, who's this?", "Mm, okay, go on."]),
+    Scenario("h_name_greg", "human", "human_name", ["This is Greg.", "What do you need?"]),
+    Scenario("h_name_marcus", "human", "human_name", ["Hi, you've got Marcus.", "Yeah? What's up?"]),
+    Scenario("h_name_karen", "human", "human_name", ["Karen speaking.", "How can I help you?"]),
+    # --- mentions voicemail / message but is live (top FP trap) ---
     Scenario(
-        "human_message_word",
+        "h_msg_got",
         "human",
         "human_message_word",
-        [
-            "Oh hey, yeah I got your voicemail earlier — what's going on?",
-            "Right, the delivery. It's running late?",
-            "No worries, thanks for letting me know.",
-        ],
+        ["Oh hey, I got your voicemail earlier — what's up?", "Right, the order. Go on."],
     ),
     Scenario(
-        "human_message_word2",
+        "h_msg_full",
         "human",
         "human_message_word",
-        [
-            "Sorry, my voicemail's full — good thing you caught me. What do you need?",
-            "Yeah I can talk for a sec.",
-            "Okay, that works for me.",
-        ],
+        ["Sorry, my voicemail's full, good thing you caught me.", "What did you need?"],
     ),
     Scenario(
-        "human_busy",
+        "h_msg_missed",
         "human",
-        "human_busy",
-        [
-            "Hang on—okay, sorry about that, hi. You still there?",
-            "Yeah I can hear you now, go ahead.",
-            "Got it. Thanks.",
-        ],
+        "human_message_word",
+        ["Hey, did you leave me a message? I saw a missed call.", "Okay, what's it about?"],
     ),
     Scenario(
-        "human_busy_driving",
+        "h_msg_about_to",
         "human",
-        "human_busy",
-        ["Sorry, I'm driving, you're on speaker. Who's this?", "Okay, what's up?", "Fine, sounds good."],
+        "human_message_word",
+        ["I was just about to leave you a message!", "Anyway, I'm here now, go ahead."],
     ),
     Scenario(
-        "human_business_reception",
+        "h_msg_never_check",
         "human",
-        "human_business",
-        [
-            "Good morning, Brightwave Solutions, this is Jordan, how can I help you?",
-            "Sure, let me check on that order for you.",
-            "Yep, it shipped yesterday.",
-            "You're welcome, bye.",
-        ],
+        "human_message_word",
+        ["Yeah I never check my voicemail, good you called.", "What's this regarding?"],
     ),
     Scenario(
-        "human_business_frontdesk",
+        "h_msg_recording",
         "human",
-        "human_business",
-        ["Front desk, this is Lena.", "Uh huh, who did you need?", "One moment please."],
+        "human_message_word",
+        ["Hang on, are you recording a message? No? Oh, you're real. Hi.", "What's up?"],
+    ),
+    # --- call screening / who is this ---
+    Scenario(
+        "h_screen_who", "human", "human_screening", ["Who's calling please?", "And what's this regarding?"]
     ),
     Scenario(
-        "human_screening_sales",
+        "h_screen_speaking", "human", "human_screening", ["May I ask who's speaking?", "Okay, go ahead."]
+    ),
+    Scenario("h_screen_sales", "human", "human_screening", ["Is this a sales call?", "Fine, what is it?"]),
+    Scenario(
+        "h_screen_robocall",
         "human",
         "human_screening",
-        ["Hi, before we start — is this a sales call?", "Okay, what's it regarding?", "Alright, go ahead."],
+        ["If this is a robocall I'm hanging up.", "Oh, a person. Okay, what?"],
     ),
     Scenario(
-        "human_screening_wary",
-        "human",
-        "human_screening",
-        ["Yeah, who is this and how'd you get this number?", "Hm. Okay, keep going.", "Fine."],
+        "h_screen_number", "human", "human_screening", ["How did you get this number?", "Hmph. Go on then."]
+    ),
+    # --- distracted / multitasking / bad signal ---
+    Scenario("h_busy_hangon", "human", "human_busy", ["Hang on— okay, sorry, hi. You there?", "Go ahead."]),
+    Scenario(
+        "h_busy_onesec", "human", "human_busy", ["Give me one sec— okay, who's this?", "Right, what's up?"]
     ),
     Scenario(
-        "human_short_who",
+        "h_busy_driving",
         "human",
-        "human_short",
-        ["Hi, who's this?", "Oh okay. What did you need?", "Sure.", "Thanks, bye."],
+        "human_busy",
+        ["Sorry, I'm driving, you're on speaker. Who's this?", "Okay, quickly?"],
     ),
+    Scenario(
+        "h_busy_outside",
+        "human",
+        "human_busy",
+        ["One sec, let me step outside... okay, hi.", "What did you need?"],
+    ),
+    Scenario(
+        "h_busy_kids", "human", "human_busy", ["Sorry, kids are loud — say that again?", "Okay, go on."]
+    ),
+    Scenario(
+        "h_busy_signal",
+        "human",
+        "human_busy",
+        ["Ugh, hold on, bad signal— can you hear me now?", "Alright, what's up?"],
+    ),
+    # --- live business reception (not an IVR) ---
+    Scenario(
+        "h_biz_brightwave",
+        "human",
+        "human_business",
+        ["Good morning, Brightwave Solutions, this is Jordan, how can I help?", "Sure, one moment."],
+    ),
+    Scenario(
+        "h_biz_frontdesk", "human", "human_business", ["Front desk, this is Lena.", "Who did you need?"]
+    ),
+    Scenario(
+        "h_biz_apex",
+        "human",
+        "human_business",
+        ["Thanks for calling Apex Auto, this is Ray.", "What can I do for you?"],
+    ),
+    Scenario(
+        "h_biz_northgate",
+        "human",
+        "human_business",
+        ["Northgate Supply, how can I direct your call?", "One moment please."],
+    ),
+    Scenario(
+        "h_biz_dental",
+        "human",
+        "human_business",
+        ["Lakeside Dental, this is Mara speaking.", "How can I help?"],
+    ),
+    # --- returning a call / missed call ---
+    Scenario(
+        "h_cb_missed",
+        "human",
+        "human_callback",
+        ["Hi, I got a missed call from this number?", "Oh, okay, what's it about?"],
+    ),
+    Scenario(
+        "h_cb_justcalled",
+        "human",
+        "human_callback",
+        ["Someone just called me from here?", "Right, go ahead."],
+    ),
+    Scenario(
+        "h_cb_rang",
+        "human",
+        "human_callback",
+        ["Yeah, you guys rang me a minute ago?", "Okay, what did you need?"],
+    ),
+    Scenario("h_cb_returning", "human", "human_callback", ["Returning a call — who's this?", "Mm, go on."]),
+    Scenario(
+        "h_cb_needme",
+        "human",
+        "human_callback",
+        ["I have a missed call, did someone need me?", "Sure, what's up?"],
+    ),
+    # --- confused / hard of hearing ---
+    Scenario(
+        "h_conf_who",
+        "human",
+        "human_confused",
+        ["Hello? Who is this now?", "Speak up, dear, I can't hear you.", "Oh. Okay, go on."],
+    ),
+    Scenario(
+        "h_conf_hear",
+        "human",
+        "human_confused",
+        ["Hello? ... I can't hear you very well.", "A little louder?"],
+    ),
+    Scenario("h_conf_what", "human", "human_confused", ["What? Who? Hello?", "Oh, hello, yes?"]),
+    Scenario("h_conf_there", "human", "human_confused", ["Hmm? Is someone there?", "Oh, yes, hello."]),
+    Scenario(
+        "h_conf_pardon", "human", "human_confused", ["Pardon me, who did you say?", "Alright, go ahead."]
+    ),
+    # --- skeptical / spam-wary ---
+    Scenario(
+        "h_skep_exactly",
+        "human",
+        "human_skeptical",
+        ["Yeah?... who's this exactly?", "Uh huh. And why are you calling?"],
+    ),
+    Scenario(
+        "h_skep_recognize",
+        "human",
+        "human_skeptical",
+        ["I don't recognize this number.", "Okay... what do you want?"],
+    ),
+    Scenario("h_skep_quick", "human", "human_skeptical", ["Make it quick, who is this?", "Fine."]),
+    Scenario(
+        "h_skep_dnc",
+        "human",
+        "human_skeptical",
+        ["I'm on the do-not-call list, you know.", "...okay, what is it?"],
+    ),
+    Scenario("h_skep_spam", "human", "human_skeptical", ["This better not be spam.", "Alright, talking."]),
+    # --- terse / non-native phrasing ---
+    Scenario("h_terse_yes", "human", "human_terse", ["Yes? Hello?", "Who is this please?"]),
+    Scenario("h_terse_speaking", "human", "human_terse", ["Hello, yes, speaking.", "Go ahead please."]),
+    Scenario(
+        "h_terse_calling_for",
+        "human",
+        "human_terse",
+        ["Yes good morning. You are calling for?", "Okay tell me."],
+    ),
+    Scenario("h_terse_allo", "human", "human_terse", ["Allo? Yes?", "Who is this?"]),
+    Scenario("h_terse_please", "human", "human_terse", ["Hello, yes please?", "What you need?"]),
 ]
