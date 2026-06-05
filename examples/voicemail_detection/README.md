@@ -66,13 +66,23 @@ accuracy / precision / recall, and average latency. False positives (hanging up
 on a real human) and false negatives (missing a voicemail) are flagged
 explicitly, since hanging up on a person is the costlier mistake.
 
+It also prints a **per-category accuracy breakdown** so you can see *where* the
+approaches diverge. The dataset is intentionally diverse and adversarial — it
+includes subtle voicemails with no "leave a message" keyword, live people who
+answer with their name (`Hi, this is Sarah`) or say the word "message", noisy
+partial ASR, and long monologues vs. interactive greetings. Categories where the
+two approaches disagree are marked with `←`.
+
+The classifier (Approach 2) defaults to `openai/gpt-5`; the main agent
+(Approach 1) defaults to `anthropic/claude-haiku-4-5-20251001`.
+
 ```bash
 export ANTHROPIC_API_KEY=...   # main LM for Approach 1
 export OPENAI_API_KEY=...      # cheap classifier for Approach 2
 uv run python examples/voicemail_detection/compare.py
 
 # Override models:
-MAIN_MODEL=openai/gpt-4o DETECTOR_MODEL=openai/gpt-4o-mini \
+MAIN_MODEL=openai/gpt-4o DETECTOR_MODEL=openai/gpt-5-mini \
     uv run python examples/voicemail_detection/compare.py
 ```
 

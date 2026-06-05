@@ -30,8 +30,9 @@ import asyncio
 from dataclasses import dataclass
 import os
 import time
-from typing import List, Optional
+from typing import Dict, List, Optional
 
+import litellm
 from transcripts import SAMPLES, Sample
 
 from line.agent import AgentEnv, TurnEnv
@@ -44,7 +45,7 @@ from line.llm_agent.voicemail_detection import VoicemailDetectionConfig, _Voicem
 # uses a cheap classifier.
 MAIN_MODEL = os.getenv("MAIN_MODEL", "anthropic/claude-haiku-4-5-20251001")
 MAIN_API_KEY = os.getenv("MAIN_API_KEY") or os.getenv("ANTHROPIC_API_KEY")
-DETECTOR_MODEL = os.getenv("DETECTOR_MODEL", "openai/gpt-4o-mini")
+DETECTOR_MODEL = os.getenv("DETECTOR_MODEL", "openai/gpt-5")
 DETECTOR_API_KEY = os.getenv("DETECTOR_API_KEY") or os.getenv("OPENAI_API_KEY")
 
 SYSTEM_PROMPT = (
@@ -162,6 +163,24 @@ def _report(name: str, samples: List[Sample], outcomes: List[Outcome]) -> None:
         print(f"  ⚠  {cm.fn} false negative(s): missed a voicemail (kept talking to a machine)")
 
 
+def _category_breakdown(samples: List[Sample], a1: List[Outcome], a2: List[Outcome]) -> None:
+    """Per-category accuracy for each approach — shows *where* they diverge."""
+    cats: Dict[str, List[int]] = {}
+    for i, s in enumerate(samples):
+        cats.setdefault(s.category, []).append(i)
+
+    print("\nPer-category accuracy (where the approaches differ)")
+    print(f"  {'category':<20} {'n':>3}  {'A1 (tool)':>10}  {'A2 (sidecar)':>12}")
+    print("  " + "-" * 50)
+    for category in sorted(cats):
+        idxs = cats[category]
+        n = len(idxs)
+        a1_correct = sum(1 for i in idxs if a1[i].predicted_voicemail == (samples[i].label == "voicemail"))
+        a2_correct = sum(1 for i in idxs if a2[i].predicted_voicemail == (samples[i].label == "voicemail"))
+        flag = "  ←" if a1_correct != a2_correct else ""
+        print(f"  {category:<20} {n:>3}  {a1_correct:>4}/{n:<5} {a2_correct:>6}/{n:<5}{flag}")
+
+
 def _missing_keys() -> Optional[str]:
     missing = []
     if not MAIN_API_KEY:
@@ -195,9 +214,13 @@ async def main() -> None:
             print(f"{sample.label:<10} {a1_mark:<12} {a2_mark:<14} {snippet}")
     finally:
         await detector.aclose()
+        # litellm caches async HTTP clients globally; close them before the event
+        # loop tears down or their SSL transports raise "Event loop is closed".
+        await litellm.close_litellm_async_clients()
 
     _report("Approach 1 (voicemail tool)", SAMPLES, a1)
     _report("Approach 2 (detection sidecar)", SAMPLES, a2)
+    _category_breakdown(SAMPLES, a1, a2)
 
 
 if __name__ == "__main__":

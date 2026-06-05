@@ -125,11 +125,14 @@ class _VoicemailDetector:
 
     def __init__(self, config: VoicemailDetectionConfig):
         self._config = config
-        # Deterministic, low-token config: we only need a short JSON object back.
+        # Deterministic config. We only need a short JSON object back, but the
+        # budget must also cover reasoning tokens on reasoning models (e.g. gpt-5),
+        # where max_tokens caps completion + reasoning — too small and the model
+        # spends it all thinking and returns nothing (→ fail-open "unknown").
         detector_config = LlmConfig(
             system_prompt=_DETECTOR_SYSTEM_PROMPT,
             temperature=0,
-            max_tokens=64,
+            max_tokens=512,
             reasoning_effort="none",
             timeout=config.timeout,
         )
