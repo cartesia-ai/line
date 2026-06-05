@@ -61,7 +61,10 @@ Approach 2 classifies it with the sidecar.
 ## Running the comparison harness
 
 `compare.py` runs both approaches over the labeled dataset in `transcripts.py`
-and reports accuracy and average latency.
+and reports, per approach, a confusion matrix (positive class = voicemail),
+accuracy / precision / recall, and average latency. False positives (hanging up
+on a real human) and false negatives (missing a voicemail) are flagged
+explicitly, since hanging up on a person is the costlier mistake.
 
 ```bash
 export ANTHROPIC_API_KEY=...   # main LM for Approach 1

@@ -9,8 +9,11 @@ Approach 2 — cheap-LM detection sidecar: a separate, cheap classifier model
 labels the opening line ``voicemail`` / ``human`` / ``unknown`` independently of
 the main LM.
 
-Both are run over the labeled dataset in ``transcripts.py`` and reported with
-accuracy and average latency so you can decide which approach to ship.
+Both are run over the labeled dataset in ``transcripts.py`` and reported with a
+confusion matrix (positive class = voicemail), accuracy / precision / recall, and
+average latency, so you can decide which approach to ship. False positives
+(hanging up on a real human) and false negatives (missing a voicemail) are called
+out explicitly since they carry very different costs.
 
 Usage:
     # Main agent (Approach 1) — defaults to Anthropic; detector (Approach 2) to OpenAI.
@@ -94,14 +97,69 @@ async def run_approach2(detector: _VoicemailDetector, sample: Sample) -> Outcome
     return Outcome(result.classification == "voicemail", result.classification, latency_ms)
 
 
-def _summary(name: str, samples: List[Sample], outcomes: List[Outcome]) -> str:
-    correct = sum(
-        1
-        for s, o in zip(samples, outcomes, strict=False)
-        if o.predicted_voicemail == (s.label == "voicemail")
-    )
+@dataclass
+class ConfusionMatrix:
+    """Binary confusion matrix with the positive class = "voicemail"."""
+
+    tp: int = 0  # actual voicemail, predicted voicemail (correctly hung up)
+    fn: int = 0  # actual voicemail, predicted human (missed → kept talking to a machine)
+    fp: int = 0  # actual human, predicted voicemail (WORST: hung up on a real person)
+    tn: int = 0  # actual human, predicted human (correctly continued)
+
+    @property
+    def total(self) -> int:
+        return self.tp + self.fn + self.fp + self.tn
+
+    @property
+    def accuracy(self) -> float:
+        return (self.tp + self.tn) / self.total if self.total else 0.0
+
+    @property
+    def precision(self) -> float:
+        """Of the calls flagged as voicemail, how many really were."""
+        denom = self.tp + self.fp
+        return self.tp / denom if denom else 0.0
+
+    @property
+    def recall(self) -> float:
+        """Of the actual voicemails, how many were caught."""
+        denom = self.tp + self.fn
+        return self.tp / denom if denom else 0.0
+
+
+def _confusion_matrix(samples: List[Sample], outcomes: List[Outcome]) -> ConfusionMatrix:
+    cm = ConfusionMatrix()
+    for sample, outcome in zip(samples, outcomes, strict=False):
+        actual_voicemail = sample.label == "voicemail"
+        if actual_voicemail and outcome.predicted_voicemail:
+            cm.tp += 1
+        elif actual_voicemail and not outcome.predicted_voicemail:
+            cm.fn += 1
+        elif not actual_voicemail and outcome.predicted_voicemail:
+            cm.fp += 1
+        else:
+            cm.tn += 1
+    return cm
+
+
+def _report(name: str, samples: List[Sample], outcomes: List[Outcome]) -> None:
+    cm = _confusion_matrix(samples, outcomes)
     avg_latency = sum(o.latency_ms for o in outcomes) / len(outcomes) if outcomes else 0.0
-    return f"{name}: accuracy {correct}/{len(samples)} ({100 * correct / len(samples):.0f}%), avg latency {avg_latency:.0f}ms"
+
+    print(f"\n{name}")
+    print(
+        f"  accuracy {cm.accuracy:.0%}  precision {cm.precision:.0%}  recall {cm.recall:.0%}"
+        f"  avg latency {avg_latency:.0f}ms"
+    )
+    # Confusion matrix (positive class = voicemail).
+    print("  confusion matrix          predicted")
+    print("                         voicemail   human")
+    print(f"    actual voicemail   {cm.tp:>9}   {cm.fn:>5}")
+    print(f"    actual human       {cm.fp:>9}   {cm.tn:>5}")
+    if cm.fp:
+        print(f"  ⚠  {cm.fp} false positive(s): hung up on a real human")
+    if cm.fn:
+        print(f"  ⚠  {cm.fn} false negative(s): missed a voicemail (kept talking to a machine)")
 
 
 def _missing_keys() -> Optional[str]:
@@ -138,9 +196,8 @@ async def main() -> None:
     finally:
         await detector.aclose()
 
-    print()
-    print(_summary("Approach 1 (voicemail tool)", SAMPLES, a1))
-    print(_summary("Approach 2 (detection sidecar)", SAMPLES, a2))
+    _report("Approach 1 (voicemail tool)", SAMPLES, a1)
+    _report("Approach 2 (detection sidecar)", SAMPLES, a2)
 
 
 if __name__ == "__main__":
