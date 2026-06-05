@@ -47,6 +47,13 @@ from line.llm_agent.tools.utils import (
     ToolType,
 )
 
+# Voicemail detection (opt-in cheap-LM sidecar)
+from line.llm_agent.voicemail_detection import (
+    VoicemailClassification,
+    VoicemailDetectionConfig,
+    VoicemailDetectionResult,
+)
+
 __all__ = [
     # History
     "History",
@@ -60,6 +67,10 @@ __all__ = [
     "LlmConfig",
     "FALLBACK_SYSTEM_PROMPT",
     "FALLBACK_INTRODUCTION",
+    # Voicemail detection
+    "VoicemailDetectionConfig",
+    "VoicemailDetectionResult",
+    "VoicemailClassification",
     # Tool decorators
     "loopback_tool",
     "passthrough_tool",

@@ -5,6 +5,7 @@ See README.md for examples and documentation.
 """
 
 import asyncio
+from contextlib import suppress
 import inspect
 import json
 import time
@@ -28,11 +29,14 @@ from loguru import logger
 
 from line.agent import AgentCallable, TurnEnv
 from line.events import (
+    AgentEndCall,
     AgentHandedOff,
+    AgentSendDtmf,
     AgentSendText,
     AgentTextSent,
     AgentToolCalled,
     AgentToolReturned,
+    AgentTransferCall,
     CallEnded,
     CallStarted,
     CustomHistoryEntry,
@@ -41,6 +45,7 @@ from line.events import (
     LogMetric,
     OutputEvent,
     UserTextSent,
+    UserTurnEnded,
 )
 from line.llm_agent.background_queue import BackgroundQueue
 from line.llm_agent.config import LlmConfig, _merge_configs, _normalize_config
@@ -52,7 +57,7 @@ from line.llm_agent.provider import (
     _get_model_config,
     parse_model_id,
 )
-from line.llm_agent.tools.system import EndCallTool, TransferCallTool, WebSearchTool
+from line.llm_agent.tools.system import EndCallTool, TransferCallTool, VoicemailTool, WebSearchTool
 from line.llm_agent.tools.utils import (
     FunctionTool,
     ToolEnv,
@@ -60,15 +65,32 @@ from line.llm_agent.tools.utils import (
     _merge_tools,
     _normalize_tools,
 )
+from line.llm_agent.voicemail_detection import VoicemailDetectionConfig, _VoicemailDetector
 
 T = TypeVar("T")
 
 # Concrete OutputEvent types for isinstance checks (OutputEvent itself is a Union).
 _OUTPUT_EVENT_TYPES: Tuple[type, ...] = get_args(OutputEvent)
 
+# Output events the user actually sees/hears. Only these are buffered behind the
+# voicemail-detection gate; metrics/logs always pass through immediately.
+_USER_VISIBLE_OUTPUT_TYPES: Tuple[type, ...] = (
+    AgentSendText,
+    AgentEndCall,
+    AgentTransferCall,
+    AgentSendDtmf,
+)
+
 # Type alias for tools that can be passed to LlmAgent.
 # Plain callables are automatically wrapped via the @tool decorator.
-ToolSpec = Union[FunctionTool, WebSearchTool, EndCallTool, TransferCallTool, Callable]
+ToolSpec = Union[FunctionTool, WebSearchTool, EndCallTool, TransferCallTool, VoicemailTool, Callable]
+
+
+def _is_voicemail_tool(tool: Any) -> bool:
+    """Return True if *tool* is the built-in voicemail tool (instance or FunctionTool)."""
+    if isinstance(tool, VoicemailTool):
+        return True
+    return getattr(tool, "name", None) == "voicemail"
 
 
 class LlmAgent:
@@ -89,7 +111,23 @@ class LlmAgent:
         config: Optional[LlmConfig] = None,
         max_tool_iterations: int = 10,
         backend: Optional[str] = None,
+        voicemail_detection: Optional[VoicemailDetectionConfig] = None,
+        voicemail_tool_active_turns: Optional[int] = 1,
     ):
+        """
+        Args:
+            voicemail_detection: Opt-in cheap-LM voicemail detection sidecar
+                (Approach 2). When set, a separate classifier runs concurrently
+                with the main LM on each completed user turn; a ``voicemail``
+                verdict within the gate suppresses the main output and ends the
+                call with ``reason="voicemail_detected"``.
+            voicemail_tool_active_turns: For the built-in ``voicemail`` tool
+                (Approach 1) — how many completed user turns the tool stays
+                available before the agent drops it from its options (the
+                conversation is "deemed started"). Defaults to ``1`` (available
+                only for the first user turn). ``None`` keeps the tool for the
+                whole call. No-op when no voicemail tool is present.
+        """
         if not api_key:
             raise ValueError("Missing API key in LLmAgent initialization")
 
@@ -122,6 +160,18 @@ class LlmAgent:
             config=effective_config,
             tools=self._tools,
             backend=backend,
+        )
+
+        # Approach 1: drop the built-in voicemail tool once the conversation is
+        # "deemed started" (after `voicemail_tool_active_turns` completed turns).
+        self._voicemail_tool_active_turns = voicemail_tool_active_turns
+        self._user_turns_seen = 0
+        self._voicemail_tool_removed = False
+
+        # Approach 2: opt-in cheap-LM voicemail detection sidecar.
+        self._voicemail_detection = voicemail_detection
+        self._voicemail_detector = (
+            _VoicemailDetector(voicemail_detection) if voicemail_detection is not None else None
         )
 
         self._introduction_sent = False
@@ -247,9 +297,25 @@ class LlmAgent:
             yield LogMetric(name="agent_turn_ms", value=(time.perf_counter() - turn_start_time) * 1000)
             return
 
-        async for output in self._generate_response(
+        # A non-handoff, non-lifecycle event drives an agent response turn.
+        # Count it and, per Approach 1, drop the voicemail tool once the
+        # conversation is "deemed started".
+        self._user_turns_seen += 1
+        self._maybe_remove_voicemail_tool()
+        # Recompute in case the voicemail tool was just removed.
+        effective_tools = _merge_tools(self._tools, tools)
+
+        gen = self._generate_response(
             env, event, effective_tools, effective_config, context=context, history=history
-        ):
+        )
+        # Approach 2: gate the main response behind the voicemail detector for
+        # completed user turns that carry a non-empty transcript.
+        if self._voicemail_detector is not None and isinstance(event, UserTurnEnded):
+            transcript = _extract_user_transcript(event)
+            if transcript:
+                gen = self._wrap_with_voicemail_detection(gen, transcript)
+
+        async for output in gen:
             yield output
 
         yield LogMetric(name="agent_turn_ms", value=(time.perf_counter() - turn_start_time) * 1000)
@@ -683,11 +749,150 @@ class LlmAgent:
 
         self._get_background_event_queue().subscribe(generate_events())
 
+    # ------------------------------------------------------------------
+    # Approach 1: voicemail tool removal once the conversation has started
+    # ------------------------------------------------------------------
+
+    def _maybe_remove_voicemail_tool(self) -> None:
+        """Drop the built-in voicemail tool once enough user turns have elapsed.
+
+        The voicemail tool is only useful at the very start of a call (the
+        greeting). Once the conversation is "deemed started" — after
+        ``voicemail_tool_active_turns`` completed user turns — we remove it so the
+        main LM can't accidentally hang up mid-conversation. No-op when no
+        voicemail tool is configured or when removal is disabled (``None``).
+        """
+        if (
+            self._voicemail_tool_removed
+            or self._voicemail_tool_active_turns is None
+            or self._user_turns_seen <= self._voicemail_tool_active_turns
+        ):
+            return
+
+        remaining = [t for t in self._tools if not _is_voicemail_tool(t)]
+        if len(remaining) != len(self._tools):
+            logger.info(
+                f"Removing voicemail tool after {self._voicemail_tool_active_turns} user turn(s) "
+                "(conversation deemed started)"
+            )
+            self.set_tools(remaining)
+        # Set the flag regardless so we only ever attempt removal once.
+        self._voicemail_tool_removed = True
+
+    # ------------------------------------------------------------------
+    # Approach 2: cheap-LM voicemail detection sidecar
+    # ------------------------------------------------------------------
+
+    async def _wrap_with_voicemail_detection(
+        self,
+        gen: AsyncIterable[OutputEvent],
+        transcript: str,
+    ) -> AsyncIterable[OutputEvent]:
+        """Gate the main response (``gen``) behind the voicemail detector.
+
+        Runs the detector concurrently with the main LM. Buffers the main LM's
+        first user-visible output until either the detector returns or the
+        ``initial_gate_ms`` gate elapses:
+
+        - ``voicemail`` within the gate → suppress the main output, close the
+          main generation, and emit the optional voicemail message plus an
+          uninterruptible ``AgentEndCall(reason="voicemail_detected")``.
+        - ``human`` / ``unknown`` / error / arrives after the gate → release the
+          buffered output and continue normally. A late ``voicemail`` verdict
+          after the first released output is ignored.
+        """
+        assert self._voicemail_detector is not None and self._voicemail_detection is not None
+        detector_task = asyncio.create_task(self._voicemail_detector.classify(transcript))
+        gate_deadline = time.monotonic() + self._voicemail_detection.initial_gate_ms / 1000.0
+
+        buffered: List[OutputEvent] = []
+        released = False
+        voicemail_detected = False
+        agen = gen.__aiter__()
+        try:
+            async for output in agen:
+                if released or not isinstance(output, _USER_VISIBLE_OUTPUT_TYPES):
+                    # Metrics/logs pass through immediately; once released,
+                    # everything streams straight to the user.
+                    yield output
+                    continue
+
+                # First user-visible output while still gating: hold it and
+                # resolve the detector exactly once.
+                buffered.append(output)
+                verdict = await self._resolve_voicemail_gate(detector_task, gate_deadline)
+                if verdict == "voicemail":
+                    voicemail_detected = True
+                    break
+                released = True
+                for buffered_output in buffered:
+                    yield buffered_output
+                buffered = []
+
+            if voicemail_detected:
+                # Cancel/close the main generation before speaking the fixed message.
+                await agen.aclose()
+                async for output in self._emit_voicemail_response():
+                    yield output
+        finally:
+            await agen.aclose()
+            if not detector_task.done():
+                detector_task.cancel()
+            with suppress(asyncio.CancelledError, Exception):
+                await detector_task
+
+    async def _resolve_voicemail_gate(
+        self,
+        detector_task: "asyncio.Task[Any]",
+        gate_deadline: float,
+    ) -> str:
+        """Return the detector verdict if it lands within the gate, else ``"unknown"``.
+
+        Treats timeouts/late results as ``"unknown"`` (release). Uses ``shield``
+        so a gate timeout never cancels the in-flight detector — cleanup owns
+        cancellation.
+        """
+        remaining = gate_deadline - time.monotonic()
+        if remaining <= 0:
+            if detector_task.done():
+                return self._detector_classification(detector_task)
+            return "unknown"
+        try:
+            await asyncio.wait_for(asyncio.shield(detector_task), timeout=remaining)
+        except Exception:
+            # TimeoutError (gate elapsed) or any detector error → fail open.
+            return "unknown"
+        return self._detector_classification(detector_task)
+
+    @staticmethod
+    def _detector_classification(detector_task: "asyncio.Task[Any]") -> str:
+        """Best-effort read of a completed detector task's classification."""
+        if not detector_task.done() or detector_task.cancelled():
+            return "unknown"
+        exc = detector_task.exception()
+        if exc is not None:
+            return "unknown"
+        return detector_task.result().classification
+
+    async def _emit_voicemail_response(self) -> AsyncIterable[OutputEvent]:
+        """Emit the optional fixed voicemail message, then end the call."""
+        assert self._voicemail_detection is not None
+        message = self._voicemail_detection.message
+        if message:
+            text_output = AgentSendText(text=message, interruptible=False)
+            self.history._append_local(text_output)
+            yield text_output
+        end_output = AgentEndCall(reason="voicemail_detected", interruptible=False)
+        self.history._append_local(end_output)
+        yield end_output
+
     async def cleanup(self) -> None:
         """Clean up resources."""
         self._handoff_target = None
         await self._get_background_event_queue().wait()
         await self._llm.aclose()
+        if self._voicemail_detector is not None:
+            await self._voicemail_detector.aclose()
 
     # ------------------------------------------------------------------
     # Validation helpers
@@ -713,12 +918,14 @@ class LlmAgent:
                 raise TypeError(f"tools must be a list, got {type(tools).__name__}")
             for i, tool in enumerate(tools):
                 if not (
-                    isinstance(tool, (FunctionTool, WebSearchTool, EndCallTool, TransferCallTool))
+                    isinstance(
+                        tool, (FunctionTool, WebSearchTool, EndCallTool, TransferCallTool, VoicemailTool)
+                    )
                     or callable(tool)
                 ):
                     raise TypeError(
                         f"tools[{i}] must be a FunctionTool, WebSearchTool, EndCallTool, "
-                        f"TransferCallTool, or callable, got {type(tool).__name__}"
+                        f"TransferCallTool, VoicemailTool, or callable, got {type(tool).__name__}"
                     )
 
     @staticmethod
@@ -809,6 +1016,12 @@ def _construct_tool_events(
         result=result,
     )
     return called, returned
+
+
+def _extract_user_transcript(event: UserTurnEnded) -> str:
+    """Join the text parts of a completed user turn into a single transcript string."""
+    parts = [item.content for item in event.content if isinstance(item, UserTextSent) and item.content]
+    return " ".join(parts).strip()
 
 
 def _set_responding_to(event: OutputEvent, event_id: str) -> OutputEvent:

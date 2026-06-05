@@ -137,10 +137,60 @@ agent = LlmAgent(
 | `end_call` | Ends the call |
 | `send_dtmf` | Presses phone buttons (0-9, *, #) |
 | `transfer_call` | Transfers to a phone number (E.164 format) |
-| `voicemail` | Call when you reach a voicemail: optionally leaves a message, then hangs up the call. Configure with `voicemail(message="…")` |
+| `voicemail` | Call when you reach a voicemail: optionally leaves a message, then ends the call with `end_reason="voicemail_detected"`. Configure with `voicemail(message="…")` |
 | `web_search` | Searches the web (native LLM search or DuckDuckGo fallback) |
 | `knowledge_base` | Looks up information from the agent's knowledge base via natural-language query. Call `knowledge_base(filters={...}, top_k=10)` to pre-filter retrievals or override `top_k` |
 | `http_server_tool` | Creates an HTTP tool from JSON schemas (see below) |
+
+### Voicemail Detection (outbound calls)
+
+On outbound calls you usually want the agent to hear the callee's opening line
+before speaking, so set `introduction=""` — the agent stays silent on
+`CallStarted` and only responds after the first `UserTurnEnded`. There are two
+ways to react when that opening line is a voicemail greeting:
+
+**1. The built-in `voicemail` tool.** The main LM decides whether to call it. By
+default the agent drops the tool after the first user turn
+(`voicemail_tool_active_turns=1`) — once the conversation is "deemed started" the
+LM can't hang up mid-call. Set it to `None` to keep the tool for the whole call.
+
+```python
+from line.llm_agent import LlmAgent, LlmConfig, end_call, voicemail
+
+agent = LlmAgent(
+    model="anthropic/claude-haiku-4-5-20251001",
+    api_key=os.getenv("ANTHROPIC_API_KEY"),
+    tools=[voicemail(message="Hi, please call us back when you can."), end_call],
+    config=LlmConfig(system_prompt=SYSTEM_PROMPT, introduction=""),  # outbound: wait for the callee
+    voicemail_tool_active_turns=1,
+)
+```
+
+**2. The cheap-LM detection sidecar.** A separate, cheap classifier runs
+concurrently with the main LM on each user turn. The main reply is buffered for
+`initial_gate_ms` (default `200`); on a `voicemail` verdict the main output is
+suppressed and the agent speaks the configured message and ends the call.
+Detection is conservative and fail-open.
+
+```python
+from line.llm_agent import LlmAgent, LlmConfig, VoicemailDetectionConfig, end_call
+
+agent = LlmAgent(
+    model="anthropic/claude-sonnet-4-20250514",
+    api_key=os.getenv("ANTHROPIC_API_KEY"),
+    tools=[end_call],
+    config=LlmConfig(system_prompt=SYSTEM_PROMPT, introduction=""),  # outbound: wait for the callee
+    voicemail_detection=VoicemailDetectionConfig(
+        model="openai/gpt-4o-mini",
+        api_key=os.getenv("OPENAI_API_KEY"),
+        message="Hi, please call us back when you can.",
+        initial_gate_ms=200,
+    ),
+)
+```
+
+See [`examples/voicemail_detection`](examples/voicemail_detection) for a runnable
+agent and a harness that compares both approaches side by side.
 
 ### HTTP Tools — Connect to HTTP APIs Without Code
 
