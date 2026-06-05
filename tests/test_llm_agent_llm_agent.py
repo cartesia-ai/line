@@ -241,6 +241,25 @@ async def test_init_rejects_unsupported_reasoning_effort(monkeypatch, anyio_back
         )
 
 
+async def test_init_allows_reasoning_none_on_non_reasoning_model(monkeypatch, anyio_backend):
+    """reasoning_effort='none' means 'no reasoning' and must not fail init."""
+    monkeypatch.setattr(
+        "line.llm_agent.llm_agent._get_model_config",
+        lambda model_id, *, backend=None: _ModelConfig(
+            backend="http",
+            supports_reasoning_effort=False,
+            default_reasoning_effort=None,
+        ),
+    )
+
+    agent = LlmAgent(
+        model="gpt-4o-mini",
+        api_key="test-key",
+        config=LlmConfig(reasoning_effort="none"),
+    )
+    assert str(agent._model_id) == "openai/gpt-4o-mini"
+
+
 async def test_call_started_warmup_uses_effective_tools(turn_env):
     responses = []
     agent, mock_llm = create_agent_with_mock(responses)

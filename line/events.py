@@ -118,7 +118,7 @@ OutputEvent = Union[
 
 
 class CustomHistoryEntry(BaseModel):
-    """Custom text entry injected into history via add_history_entry.
+    """Custom text entry injected into history via History.add_entry (agent.history.add_entry).
 
     Not an InputEvent or OutputEvent — exists only in the agent's internal history
     and appears as a message in the LLM conversation with the specified role.

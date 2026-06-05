@@ -27,6 +27,7 @@ from line.llm_agent.tools.decorators import handoff_tool, loopback_tool, passthr
 from line.llm_agent.tools.system import (
     agent_as_handoff,
     end_call,
+    http_server_tool,
     knowledge_base,
     mcp_tool,
     send_dtmf,
@@ -72,6 +73,7 @@ __all__ = [
     "agent_as_handoff",
     "mcp_tool",
     "knowledge_base",
+    "http_server_tool",
     # Tool types
     "ToolEnv",
     "LoopbackToolFn",

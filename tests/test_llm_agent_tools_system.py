@@ -4,6 +4,7 @@ Tests for built-in tools.
 uv run pytest tests/test_llm_agent_tools_system.py -v
 """
 
+import json
 from typing import List, Optional
 from unittest.mock import MagicMock
 
@@ -18,12 +19,13 @@ from line.llm_agent.tools.system import (
     TransferCallTool,
     VoicemailTool,
     end_call,
+    http_server_tool,
     knowledge_base,
     send_dtmf,
     transfer_call,
     voicemail,
 )
-from line.llm_agent.tools.utils import ToolType
+from line.llm_agent.tools.utils import FunctionTool, ToolType
 
 # Use anyio for async test support with asyncio backend only
 pytestmark = [pytest.mark.anyio, pytest.mark.parametrize("anyio_backend", ["asyncio"])]
@@ -629,3 +631,917 @@ async def test_voicemail_custom_description(mock_ctx, anyio_backend):
     assert (
         tool.as_function_tool().description == "Reached an answering machine — leave a message and hang up."
     )
+
+
+# =============================================================================
+# Tests: http_server_tool — build-time validation
+# =============================================================================
+
+
+def test_http_server_tool_empty_name_raises(anyio_backend):
+    with pytest.raises(ValueError, match="name must be a non-empty"):
+        http_server_tool(name="", description="d", url="https://example.com")
+
+
+def test_http_server_tool_empty_description_raises(anyio_backend):
+    with pytest.raises(ValueError, match="description must be a non-empty"):
+        http_server_tool(name="t", description="", url="https://example.com")
+
+
+def test_http_server_tool_empty_url_raises(anyio_backend):
+    with pytest.raises(ValueError, match="url must be a non-empty"):
+        http_server_tool(name="t", description="d", url="")
+
+
+def test_http_server_tool_invalid_method_raises(anyio_backend):
+    with pytest.raises(ValueError, match="not a valid HTTP method"):
+        http_server_tool(name="t", description="d", url="https://example.com", method="BANANA")
+
+
+def test_http_server_tool_unmatched_opening_brace_raises(anyio_backend):
+    with pytest.raises(ValueError, match="unmatched opening brace"):
+        http_server_tool(name="t", description="d", url="https://example.com/{id")
+
+
+def test_http_server_tool_unmatched_closing_brace_raises(anyio_backend):
+    with pytest.raises(ValueError, match="unmatched closing brace"):
+        http_server_tool(name="t", description="d", url="https://example.com/id}")
+
+
+def test_http_server_tool_nested_braces_raises(anyio_backend):
+    with pytest.raises(ValueError, match="nested braces"):
+        http_server_tool(name="t", description="d", url="https://example.com/{{id}}")
+
+
+def test_http_server_tool_empty_url_placeholder_raises(anyio_backend):
+    with pytest.raises(ValueError, match="url template variable"):
+        http_server_tool(name="t", description="d", url="https://example.com/{}/tickets")
+
+
+def test_http_server_tool_duplicate_url_placeholder_raises(anyio_backend):
+    with pytest.raises(ValueError, match="appears more than once"):
+        http_server_tool(
+            name="t",
+            description="d",
+            url="https://example.com/{item_id}/related/{item_id}",
+        )
+
+
+@pytest.mark.parametrize("placeholder", ["tenant id", " tenant", "tenant:id", "x" * 65])
+def test_http_server_tool_invalid_url_placeholder_name_raises(anyio_backend, placeholder):
+    with pytest.raises(ValueError, match="url template variable"):
+        http_server_tool(
+            name="t",
+            description="d",
+            url=f"https://example.com/{{{placeholder}}}/tickets",
+        )
+
+
+def test_http_server_tool_invalid_url_placeholder_raises_before_auth_env(anyio_backend, monkeypatch):
+    monkeypatch.delenv("MISSING_AUTH_ENV", raising=False)
+
+    with pytest.raises(ValueError, match="url template variable"):
+        http_server_tool(
+            name="t",
+            description="d",
+            url="https://example.com/{tenant id}/tickets",
+            auth={"Authorization": "Bearer ${MISSING_AUTH_ENV}"},
+        )
+
+
+def test_http_server_tool_body_schema_not_object_type_raises(anyio_backend):
+    with pytest.raises(ValueError, match='"type": "object"'):
+        http_server_tool(
+            name="t",
+            description="d",
+            url="https://example.com",
+            request_body_schema={"type": "array", "items": {"type": "string"}},
+        )
+
+
+def test_http_server_tool_body_schema_missing_properties_raises(anyio_backend):
+    with pytest.raises(ValueError, match='"properties"'):
+        http_server_tool(
+            name="t",
+            description="d",
+            url="https://example.com",
+            request_body_schema={"type": "object"},
+        )
+
+
+def test_http_server_tool_body_schema_required_not_list_raises(anyio_backend):
+    with pytest.raises(ValueError, match="must be a list"):
+        http_server_tool(
+            name="t",
+            description="d",
+            url="https://example.com",
+            request_body_schema={
+                "type": "object",
+                "required": "name",
+                "properties": {"name": {"type": "string"}},
+            },
+        )
+
+
+def test_http_server_tool_body_schema_required_unknown_field_raises(anyio_backend):
+    with pytest.raises(ValueError, match="not in properties"):
+        http_server_tool(
+            name="t",
+            description="d",
+            url="https://example.com",
+            request_body_schema={
+                "type": "object",
+                "required": ["name", "ghost"],
+                "properties": {"name": {"type": "string"}},
+            },
+        )
+
+
+def test_http_server_tool_property_unknown_type_raises(anyio_backend):
+    with pytest.raises(ValueError, match="unknown type"):
+        http_server_tool(
+            name="t",
+            description="d",
+            url="https://example.com",
+            request_body_schema={
+                "type": "object",
+                "properties": {"x": {"type": "timestamp"}},
+            },
+        )
+
+
+def test_http_server_tool_constant_value_type_mismatch_raises(anyio_backend):
+    with pytest.raises(ValueError, match="constant_value.*is str"):
+        http_server_tool(
+            name="t",
+            description="d",
+            url="https://example.com",
+            request_body_schema={
+                "type": "object",
+                "properties": {
+                    "count": {"type": "integer", "constant_value": "not_a_number"},
+                },
+            },
+        )
+
+
+def test_http_server_tool_integer_constant_value_rejects_bool(anyio_backend):
+    with pytest.raises(ValueError, match="type='integer'.*constant_value=True is bool"):
+        http_server_tool(
+            name="t",
+            description="d",
+            url="https://example.com",
+            request_body_schema={
+                "type": "object",
+                "properties": {
+                    "count": {"type": "integer", "constant_value": True},
+                },
+            },
+        )
+
+
+@pytest.mark.parametrize("constant_value", [{"x": 1}, ["x"], None])
+def test_http_server_tool_query_constant_value_rejects_non_scalar(constant_value, anyio_backend):
+    with pytest.raises(
+        ValueError,
+        match="query_params_schema.*constant_value must be a scalar",
+    ):
+        http_server_tool(
+            name="t",
+            description="d",
+            url="https://example.com",
+            query_params_schema={
+                "type": "object",
+                "properties": {
+                    "fixed": {"constant_value": constant_value},
+                },
+            },
+        )
+
+
+def test_http_server_tool_nested_schema_validation(anyio_backend):
+    """Validation recurses into nested object schemas."""
+    with pytest.raises(ValueError, match="nested_prop.*unknown type"):
+        http_server_tool(
+            name="t",
+            description="d",
+            url="https://example.com",
+            request_body_schema={
+                "type": "object",
+                "properties": {
+                    "outer": {
+                        "type": "object",
+                        "properties": {
+                            "nested_prop": {"type": "invalid_type"},
+                        },
+                    },
+                },
+            },
+        )
+
+
+def test_http_server_tool_query_params_schema_validation(anyio_backend):
+    """query_params_schema gets the same validation as body_schema."""
+    with pytest.raises(ValueError, match='query_params_schema.*"type": "object"'):
+        http_server_tool(
+            name="t",
+            description="d",
+            url="https://example.com",
+            query_params_schema={"type": "string"},
+        )
+
+
+@pytest.mark.parametrize("param_type", ["object", "array"])
+def test_http_server_tool_query_param_rejects_non_scalar_types(anyio_backend, param_type):
+    """Query params must be scalar — object and array types are rejected."""
+    with pytest.raises(ValueError, match="not supported in query_params_schema"):
+        http_server_tool(
+            name="t",
+            description="d",
+            url="https://example.com",
+            query_params_schema={
+                "type": "object",
+                "properties": {"x": {"type": param_type}},
+            },
+        )
+
+
+def test_http_server_tool_query_param_rejects_object_without_explicit_type(anyio_backend):
+    """Object-shaped query params with omitted type are also rejected."""
+    with pytest.raises(ValueError, match="not supported in query_params_schema"):
+        http_server_tool(
+            name="t",
+            description="d",
+            url="https://example.com",
+            query_params_schema={
+                "type": "object",
+                "properties": {
+                    "filter": {
+                        "properties": {"status": {"type": "string"}},
+                    },
+                },
+            },
+        )
+
+
+def test_http_server_tool_negative_timeout_raises(anyio_backend):
+    with pytest.raises(ValueError, match="timeout must be positive"):
+        http_server_tool(name="t", description="d", url="https://example.com", timeout=-1.0)
+
+
+def test_http_server_tool_property_not_dict_raises(anyio_backend):
+    with pytest.raises(ValueError, match="must be a dict"):
+        http_server_tool(
+            name="t",
+            description="d",
+            url="https://example.com",
+            request_body_schema={
+                "type": "object",
+                "properties": {"x": "string"},
+            },
+        )
+
+
+# =============================================================================
+# Tests: http_server_tool — behavior
+# =============================================================================
+
+
+def _fake_aiohttp(monkeypatch, *, status=200, body="ok", capture=None):
+    """Patch aiohttp.ClientSession to return a canned response.
+
+    If *capture* is a dict, request kwargs are stored into it.
+    """
+
+    class _Resp:
+        def __init__(self):
+            self.status = status
+
+        async def text(self):
+            return body
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            pass
+
+    class _Sess:
+        def request(self, **kwargs):
+            if capture is not None:
+                capture.update(kwargs)
+            return _Resp()
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            pass
+
+    monkeypatch.setattr("aiohttp.ClientSession", lambda: _Sess())
+
+
+_TICKET_BODY_SCHEMA = {
+    "type": "object",
+    "required": ["subject"],
+    "properties": {
+        "subject": {"type": "string", "description": "Short summary of the issue."},
+        "source": {"type": "string", "constant_value": "voice_agent"},
+    },
+}
+
+
+def test_http_server_tool_returns_function_tool(anyio_backend, monkeypatch):
+    monkeypatch.setenv("SUPPORT_API_KEY", "test-key")
+    tool = http_server_tool(
+        name="create_ticket",
+        description="Creates a ticket.",
+        url="https://example.com/api/tickets",
+        request_body_schema=_TICKET_BODY_SCHEMA,
+        auth={"Authorization": "Bearer ${SUPPORT_API_KEY}"},
+    )
+    assert isinstance(tool, FunctionTool)
+    assert tool.name == "create_ticket"
+    assert tool.description == "Creates a ticket."
+    assert tool.tool_type == ToolType.GENERAL
+    # constant_value properties are hidden
+    assert "subject" in tool.parameters
+    assert "source" not in tool.parameters
+
+
+def test_http_server_tool_required_and_optional(anyio_backend):
+    tool = http_server_tool(
+        name="t",
+        description="d",
+        url="https://example.com",
+        request_body_schema={
+            "type": "object",
+            "required": ["a"],
+            "properties": {
+                "a": {"type": "string"},
+                "b": {"type": "string"},
+            },
+        },
+    )
+    assert tool.parameters["a"].required is True
+    assert tool.parameters["b"].required is False
+
+
+def test_http_server_tool_auth_missing_env_raises(anyio_backend, monkeypatch):
+    monkeypatch.delenv("MISSING_VAR", raising=False)
+    with pytest.raises(ValueError, match="MISSING_VAR"):
+        http_server_tool(
+            name="t",
+            description="d",
+            url="https://example.com",
+            auth={"Authorization": "Bearer ${MISSING_VAR}"},
+        )
+
+
+def test_http_server_tool_url_template_params(anyio_backend):
+    tool = http_server_tool(
+        name="t",
+        description="d",
+        url="https://example.com/orders/{order_id}/items/{item_id}",
+    )
+    assert "order_id" in tool.parameters
+    assert "item_id" in tool.parameters
+    assert tool.parameters["order_id"].required is True
+    assert tool.parameters["item_id"].required is True
+
+
+def test_http_server_tool_query_params_schema(anyio_backend):
+    tool = http_server_tool(
+        name="t",
+        description="d",
+        url="https://example.com/search",
+        method="GET",
+        query_params_schema={
+            "type": "object",
+            "required": ["q"],
+            "properties": {
+                "q": {"type": "string", "description": "Search query"},
+                "limit": {"type": "integer", "description": "Max results"},
+            },
+        },
+    )
+    assert "q" in tool.parameters
+    assert "limit" in tool.parameters
+    assert tool.parameters["q"].required is True
+    assert tool.parameters["limit"].required is False
+    # Description is carried by Annotated on type_annotation, verified via schema output
+    from line.llm_agent.schema_converter import function_tool_to_litellm
+
+    schema = function_tool_to_litellm(tool, strict=False)
+    props = schema["function"]["parameters"]["properties"]
+    assert props["q"]["description"] == "Search query"
+
+
+def test_http_server_tool_combined_params(anyio_backend):
+    """URL template + body + query params all appear in parameters."""
+    tool = http_server_tool(
+        name="t",
+        description="d",
+        url="https://example.com/{tenant_id}/tickets",
+        request_body_schema={
+            "type": "object",
+            "required": ["subject"],
+            "properties": {
+                "subject": {"type": "string"},
+                "source": {"type": "string", "constant_value": "voice"},
+            },
+        },
+        query_params_schema={
+            "type": "object",
+            "required": ["priority"],
+            "properties": {
+                "priority": {"type": "string"},
+            },
+        },
+    )
+    assert set(tool.parameters.keys()) == {"tenant_id", "subject", "priority"}
+
+
+def test_http_server_tool_normalize_tools(anyio_backend, monkeypatch):
+    """http_server_tool is already a FunctionTool and passes through _normalize_tools."""
+    from line.llm_agent.tools.utils import _normalize_tools
+
+    monkeypatch.setenv("K", "v")
+    tool = http_server_tool(
+        name="wh",
+        description="d",
+        url="https://example.com",
+        auth={"X": "${K}"},
+    )
+    function_tools, _ = _normalize_tools([tool], model_id=parse_model_id("gpt-4o"))
+    assert len(function_tools) == 1
+    assert function_tools[0].name == "wh"
+
+
+async def test_http_server_tool_http_call(mock_ctx, anyio_backend, monkeypatch):
+    """Test that the impl function makes the correct aiohttp request."""
+    monkeypatch.setenv("API_KEY", "sk-test")
+
+    tool = http_server_tool(
+        name="create_ticket",
+        description="Creates a ticket.",
+        url="https://example.com/api/{tenant}/tickets",
+        method="POST",
+        request_body_schema=_TICKET_BODY_SCHEMA,
+        query_params_schema={
+            "type": "object",
+            "required": ["notify"],
+            "properties": {"notify": {"type": "boolean"}},
+        },
+        auth={"Authorization": "Bearer ${API_KEY}"},
+        headers={"X-Custom": "value"},
+        timeout=5.0,
+    )
+
+    captured = {}
+    _fake_aiohttp(monkeypatch, status=201, body='{"id": "t-1"}', capture=captured)
+
+    result = await tool.func(
+        mock_ctx,
+        tenant="acme",
+        subject="Help me",
+        notify=True,
+    )
+
+    assert captured["method"] == "POST"
+    assert captured["url"] == "https://example.com/api/acme/tickets"
+    assert captured["json"] == {"source": "voice_agent", "subject": "Help me"}
+    assert captured["params"] == {"notify": "true"}
+    assert captured["headers"]["Authorization"] == "Bearer sk-test"
+    assert captured["headers"]["X-Custom"] == "value"
+    assert captured["timeout"].total == 5.0
+    parsed = json.loads(result)
+    assert parsed["ok"] is True
+    assert parsed["status"] == 201
+    assert '"id": "t-1"' in parsed["body"]
+
+
+async def test_http_server_tool_http_error_handling(mock_ctx, anyio_backend, monkeypatch):
+    """HTTP errors return a structured error string instead of raising."""
+    import aiohttp
+
+    tool = http_server_tool(
+        name="t",
+        description="d",
+        url="https://example.com",
+    )
+
+    class _ErrorSession:
+        def request(self, **kwargs):
+            raise aiohttp.ClientConnectionError("Connection refused")
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            pass
+
+    monkeypatch.setattr("aiohttp.ClientSession", lambda: _ErrorSession())
+
+    result = await tool.func(mock_ctx)
+    parsed = json.loads(result)
+    assert parsed["ok"] is False
+    assert parsed["status"] is None
+    assert "ClientConnectionError" in parsed["error"]
+
+
+async def test_http_server_tool_timeout_without_configured_value(mock_ctx, anyio_backend, monkeypatch):
+    """Timeout errors omit the duration when no timeout was configured."""
+    import asyncio
+
+    tool = http_server_tool(
+        name="t",
+        description="d",
+        url="https://example.com",
+    )
+
+    class _TimeoutSession:
+        def request(self, **kwargs):
+            raise asyncio.TimeoutError
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            pass
+
+    monkeypatch.setattr("aiohttp.ClientSession", lambda: _TimeoutSession())
+
+    result = await tool.func(mock_ctx)
+
+    parsed = json.loads(result)
+    assert parsed["ok"] is False
+    assert parsed["status"] is None
+    assert parsed["error"] == "Request timed out."
+
+
+async def test_http_server_tool_response_truncation(mock_ctx, anyio_backend, monkeypatch):
+    """Large response bodies are truncated."""
+    tool = http_server_tool(name="t", description="d", url="https://example.com")
+    _fake_aiohttp(monkeypatch, body="x" * 10_000)
+
+    result = await tool.func(mock_ctx)
+    parsed = json.loads(result)
+    assert parsed["ok"] is True
+    assert parsed["body"].endswith("... (truncated)")
+    assert len(parsed["body"]) < 5000
+
+
+async def test_http_server_tool_unknown_kwargs_ignored(mock_ctx, anyio_backend, monkeypatch):
+    """Kwargs not in any param set are not sent in the request body."""
+    tool = http_server_tool(
+        name="t",
+        description="d",
+        url="https://example.com",
+        request_body_schema={
+            "type": "object",
+            "required": ["a"],
+            "properties": {"a": {"type": "string"}},
+        },
+    )
+    captured = {}
+    _fake_aiohttp(monkeypatch, capture=captured)
+
+    await tool.func(mock_ctx, a="hello", hallucinated_param="bad")
+    assert "hallucinated_param" not in captured.get("json", {})
+
+
+def test_http_server_tool_param_name_collision_raises(anyio_backend):
+    """Duplicate parameter names across URL/body/query raise ValueError."""
+    with pytest.raises(ValueError, match="order_id"):
+        http_server_tool(
+            name="t",
+            description="d",
+            url="https://example.com/{order_id}",
+            request_body_schema={
+                "type": "object",
+                "required": ["order_id"],
+                "properties": {"order_id": {"type": "string"}},
+            },
+        )
+
+
+async def test_http_server_tool_get_request_no_body(mock_ctx, anyio_backend, monkeypatch):
+    """GET requests with only query params should not send a json body."""
+    tool = http_server_tool(
+        name="lookup",
+        description="Look up order.",
+        url="https://example.com/orders",
+        method="GET",
+        query_params_schema={
+            "type": "object",
+            "required": ["order_id"],
+            "properties": {"order_id": {"type": "string"}},
+        },
+    )
+    captured = {}
+    _fake_aiohttp(monkeypatch, body='{"status": "shipped"}', capture=captured)
+
+    result = await tool.func(mock_ctx, order_id="ORD-123")
+
+    assert captured["method"] == "GET"
+    assert captured["params"] == {"order_id": "ORD-123"}
+    assert "json" not in captured
+    parsed = json.loads(result)
+    assert parsed["ok"] is True
+    assert parsed["status"] == 200
+    assert "shipped" in parsed["body"]
+
+
+async def test_http_server_tool_url_params_are_encoded(mock_ctx, anyio_backend, monkeypatch):
+    """URL template params are percent-encoded to prevent broken URLs."""
+    tool = http_server_tool(
+        name="t",
+        description="d",
+        url="https://example.com/items/{item_id}",
+    )
+    captured = {}
+    _fake_aiohttp(monkeypatch, capture=captured)
+
+    await tool.func(mock_ctx, item_id="has spaces/and slashes")
+    assert captured["url"] == "https://example.com/items/has%20spaces%2Fand%20slashes"
+
+
+async def test_http_server_tool_url_params_allow_hyphens(mock_ctx, anyio_backend, monkeypatch):
+    """URL template params can contain non-word characters like hyphens."""
+    tool = http_server_tool(
+        name="t",
+        description="d",
+        url="https://example.com/{tenant-id}/tickets",
+    )
+    captured = {}
+    _fake_aiohttp(monkeypatch, capture=captured)
+
+    assert "tenant-id" in tool.parameters
+
+    await tool.func(mock_ctx, **{"tenant-id": "acme corp"})
+    assert captured["url"] == "https://example.com/acme%20corp/tickets"
+
+
+def test_http_server_tool_enum_passthrough(anyio_backend):
+    """Enum constraints from JSON schema are preserved in ParameterInfo."""
+    tool = http_server_tool(
+        name="t",
+        description="d",
+        url="https://example.com",
+        request_body_schema={
+            "type": "object",
+            "required": ["priority"],
+            "properties": {
+                "priority": {
+                    "type": "string",
+                    "enum": ["low", "medium", "high"],
+                    "description": "Ticket priority.",
+                },
+            },
+        },
+    )
+    # Enum is carried by Literal on type_annotation, verified via schema output
+    from line.llm_agent.schema_converter import function_tool_to_litellm
+
+    schema = function_tool_to_litellm(tool)
+    props = schema["function"]["parameters"]["properties"]
+    assert props["priority"]["enum"] == ["low", "medium", "high"]
+    assert props["priority"]["description"] == "Ticket priority."
+
+
+def test_http_server_tool_nested_constant_value(anyio_backend):
+    """constant_value inside nested objects is hidden from parameters."""
+    tool = http_server_tool(
+        name="t",
+        description="d",
+        url="https://example.com",
+        request_body_schema={
+            "type": "object",
+            "required": ["ticket"],
+            "properties": {
+                "ticket": {
+                    "type": "object",
+                    "required": ["subject", "channel"],
+                    "properties": {
+                        "subject": {"type": "string", "description": "Summary."},
+                        "channel": {"type": "string", "constant_value": "voice"},
+                    },
+                },
+            },
+        },
+    )
+    # ticket is still visible (has non-constant children)
+    assert "ticket" in tool.parameters
+    assert tool.parameters["ticket"].required is True
+    # Verify the generated schema has the right structure
+    from line.llm_agent.schema_converter import function_tool_to_litellm
+
+    schema = function_tool_to_litellm(tool)
+    ticket_schema = schema["function"]["parameters"]["properties"]["ticket"]
+    assert ticket_schema["type"] == "object"
+    assert set(ticket_schema["properties"]) == {"subject"}
+    assert ticket_schema["required"] == ["subject"]
+
+
+async def test_http_server_tool_nested_constant_injected(mock_ctx, anyio_backend, monkeypatch):
+    """Nested constant_value fields are deep-merged into the request body."""
+    tool = http_server_tool(
+        name="t",
+        description="d",
+        url="https://example.com",
+        request_body_schema={
+            "type": "object",
+            "required": ["ticket"],
+            "properties": {
+                "ticket": {
+                    "type": "object",
+                    "required": ["subject", "channel"],
+                    "properties": {
+                        "subject": {"type": "string"},
+                        "channel": {"type": "string", "constant_value": "voice"},
+                    },
+                },
+                "source": {"type": "string", "constant_value": "agent"},
+            },
+        },
+    )
+    captured = {}
+    _fake_aiohttp(monkeypatch, capture=captured)
+
+    await tool.func(mock_ctx, ticket={"subject": "Help"})
+
+    body = captured["json"]
+    assert body["source"] == "agent"
+    assert body["ticket"]["channel"] == "voice"
+    assert body["ticket"]["subject"] == "Help"
+
+
+def test_http_server_tool_all_constant_nested_object_hidden(anyio_backend):
+    """A nested object with only constant_value children is fully hidden."""
+    tool = http_server_tool(
+        name="t",
+        description="d",
+        url="https://example.com",
+        request_body_schema={
+            "type": "object",
+            "required": ["name"],
+            "properties": {
+                "name": {"type": "string"},
+                "metadata": {
+                    "type": "object",
+                    "properties": {
+                        "source": {"type": "string", "constant_value": "voice"},
+                        "version": {"type": "string", "constant_value": "1"},
+                    },
+                },
+            },
+        },
+    )
+    assert "name" in tool.parameters
+    assert "metadata" not in tool.parameters
+
+
+def test_http_server_tool_auth_headers_collision_raises(anyio_backend, monkeypatch):
+    """Overlapping keys in auth and headers raise ValueError."""
+    monkeypatch.setenv("KEY", "from-env")
+    with pytest.raises(ValueError, match="X-Header"):
+        http_server_tool(
+            name="t",
+            description="d",
+            url="https://example.com",
+            auth={"X-Header": "${KEY}"},
+            headers={"X-Header": "static-override"},
+        )
+
+
+# =============================================================================
+# Tests: http_server_tool — path_params_schema
+# =============================================================================
+
+
+def test_http_server_tool_path_params_schema_description(anyio_backend):
+    """path_params_schema provides custom descriptions for path params."""
+    tool = http_server_tool(
+        name="t",
+        description="d",
+        url="https://example.com/{tenant_id}/items/{item_id}",
+        path_params_schema={
+            "tenant_id": {"type": "string", "description": "The tenant identifier."},
+            "item_id": {"type": "integer", "description": "Numeric item ID."},
+        },
+    )
+    assert tool.parameters["tenant_id"].required is True
+    assert tool.parameters["item_id"].required is True
+    # Descriptions and types carried by Annotated on type_annotation
+    from line.llm_agent.schema_converter import function_tool_to_litellm
+
+    schema = function_tool_to_litellm(tool, strict=False)
+    props = schema["function"]["parameters"]["properties"]
+    assert props["tenant_id"]["description"] == "The tenant identifier."
+    assert props["tenant_id"]["type"] == "string"
+    assert props["item_id"]["description"] == "Numeric item ID."
+    assert props["item_id"]["type"] == "integer"
+
+
+def test_http_server_tool_path_params_schema_extra_key_raises(anyio_backend):
+    """path_params_schema with keys not in URL raises ValueError."""
+    with pytest.raises(ValueError, match="not in URL"):
+        http_server_tool(
+            name="t",
+            description="d",
+            url="https://example.com/{tenant_id}",
+            path_params_schema={
+                "tenant_id": {"type": "string"},
+                "ghost": {"type": "string"},
+            },
+        )
+
+
+def test_http_server_tool_path_params_schema_missing_key_raises(anyio_backend):
+    """path_params_schema missing a URL param raises ValueError."""
+    with pytest.raises(ValueError, match="missing keys"):
+        http_server_tool(
+            name="t",
+            description="d",
+            url="https://example.com/{tenant_id}/{item_id}",
+            path_params_schema={
+                "tenant_id": {"type": "string"},
+            },
+        )
+
+
+def test_http_server_tool_path_params_schema_invalid_type_raises(anyio_backend):
+    """path_params_schema with object/array/boolean type raises."""
+    with pytest.raises(ValueError, match="must be string, integer, or number"):
+        http_server_tool(
+            name="t",
+            description="d",
+            url="https://example.com/{data}",
+            path_params_schema={
+                "data": {"type": "object"},
+            },
+        )
+
+
+# =============================================================================
+# Tests: http_server_tool — content_type
+# =============================================================================
+
+
+def test_http_server_tool_freeform_object_does_not_crash_strict(anyio_backend):
+    """Freeform object property auto-disables strict instead of raising."""
+    from line.llm_agent.schema_converter import function_tool_to_litellm
+
+    tool = http_server_tool(
+        name="t",
+        description="d",
+        url="https://example.com",
+        request_body_schema={
+            "type": "object",
+            "required": ["data"],
+            "properties": {
+                "data": {"type": "object"},
+            },
+        },
+    )
+    # Should not raise — strict auto-disabled for freeform dict
+    schema = function_tool_to_litellm(tool)
+    assert schema["function"]["parameters"]["properties"]["data"] == {"type": "object"}
+    assert schema["function"].get("strict") is not True
+
+
+def test_http_server_tool_content_type_invalid_raises(anyio_backend):
+    """Invalid content_type raises ValueError."""
+    with pytest.raises(ValueError, match="content_type.*not supported"):
+        http_server_tool(
+            name="t",
+            description="d",
+            url="https://example.com",
+            content_type="text/plain",
+        )
+
+
+async def test_http_server_tool_form_urlencoded(mock_ctx, anyio_backend, monkeypatch):
+    """content_type=form-urlencoded sends body as form data."""
+    tool = http_server_tool(
+        name="t",
+        description="d",
+        url="https://example.com/submit",
+        method="POST",
+        request_body_schema={
+            "type": "object",
+            "required": ["name"],
+            "properties": {"name": {"type": "string"}},
+        },
+        content_type="application/x-www-form-urlencoded",
+        is_background=False,
+    )
+    captured = {}
+    _fake_aiohttp(monkeypatch, status=200, body='{"ok": true}', capture=captured)
+
+    await tool.func(mock_ctx, name="Alice")
+
+    assert "data" in captured
+    assert "json" not in captured
+    assert captured["data"]["name"] == "Alice"

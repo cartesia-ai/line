@@ -11,6 +11,7 @@ from line.llm_agent.provider import (
     Message,
     ParsedModelId,
     ToolCall,
+    _coerce_reasoning_effort,
     _extract_instructions_and_messages,
     _get_model_config,
     _is_realtime_model,
@@ -493,12 +494,84 @@ class TestGetModelConfig:
         assert cfg.supports_reasoning_effort is False
         assert cfg.default_reasoning_effort is None
 
-    def test_anthropic_model_reasoning_default_is_none(self):
-        """Anthropic models use None (not 'low') to skip the thinking block."""
-        cfg = _get_model_config(parse_model_id("anthropic/claude-sonnet-4-20250514"))
-        assert cfg.backend == "http"
-        assert cfg.supports_reasoning_effort is True
-        assert cfg.default_reasoning_effort is None
+    def test_http_reasoning_models_default_to_none(self):
+        """HTTP reasoning models get the semantic 'none' default; resolution
+        coerces it to each model's wire-safe equivalent."""
+        for model in (
+            "anthropic/claude-sonnet-4-20250514",
+            "openai/gpt-5-mini",
+            "openai/gpt-5.2",
+        ):
+            cfg = _get_model_config(parse_model_id(model))
+            assert cfg.backend == "http"
+            assert cfg.supports_reasoning_effort is True
+            assert cfg.default_reasoning_effort == "none"
+
+
+def test_coerce_reasoning_none_for_gpt5_mini():
+    model_id = parse_model_id("openai/gpt-5-mini")
+    assert _coerce_reasoning_effort(model_id, "none") == "minimal"
+    assert _coerce_reasoning_effort(model_id, "low") == "low"
+
+
+def test_coerce_reasoning_none_for_non_reasoning_model():
+    model_id = parse_model_id("openai/gpt-4o-mini")
+    assert _coerce_reasoning_effort(model_id, "none") is None
+
+
+def test_llm_provider_resolves_default_reasoning_effort_for_gpt5_mini():
+    """With reasoning_effort unset, the 'none' default resolves to 'minimal'."""
+    provider = LlmProvider(model="openai/gpt-5-mini", api_key="test-key")
+    stream = provider.chat([Message(role="user", content="hi")])
+    assert stream._kwargs["reasoning_effort"] == "minimal"
+
+
+def test_llm_provider_omits_default_reasoning_effort_for_anthropic():
+    """With reasoning_effort unset, Anthropic models omit the parameter."""
+    provider = LlmProvider(model="anthropic/claude-sonnet-4-20250514", api_key="test-key")
+    stream = provider.chat([Message(role="user", content="hi")])
+    assert "reasoning_effort" not in stream._kwargs
+
+
+def test_llm_provider_coerces_init_reasoning_effort_for_gpt5_mini():
+    """The LlmProvider facade coerces 'none' before it reaches the backend."""
+    provider = LlmProvider(
+        model="openai/gpt-5-mini",
+        api_key="test-key",
+        config=LlmConfig(reasoning_effort="none"),
+    )
+    stream = provider.chat([Message(role="user", content="hi")])
+    assert stream._kwargs["reasoning_effort"] == "minimal"
+
+
+def test_llm_provider_coerces_per_call_reasoning_effort_for_gpt5_mini():
+    """Per-call config overrides are also coerced by the facade."""
+    provider = LlmProvider(model="openai/gpt-5-mini", api_key="test-key")
+    stream = provider.chat(
+        [Message(role="user", content="hi")],
+        config=LlmConfig(reasoning_effort="none"),
+    )
+    assert stream._kwargs["reasoning_effort"] == "minimal"
+
+
+def test_llm_provider_omits_reasoning_effort_for_non_reasoning_model():
+    provider = LlmProvider(
+        model="openai/gpt-4o-mini",
+        api_key="test-key",
+        config=LlmConfig(reasoning_effort="none"),
+    )
+    stream = provider.chat([Message(role="user", content="hi")])
+    assert "reasoning_effort" not in stream._kwargs
+
+
+def test_http_provider_sends_reasoning_effort_verbatim():
+    """Backends perform no resolution — they send the facade-resolved value as-is."""
+    provider = _HttpProvider(model_id=parse_model_id("openai/gpt-5-mini"))
+    stream = provider.chat([], config=_normalize_config(LlmConfig(reasoning_effort="minimal")))
+    assert stream._kwargs["reasoning_effort"] == "minimal"
+
+    stream = provider.chat([], config=_normalize_config(LlmConfig()))
+    assert "reasoning_effort" not in stream._kwargs
 
 
 def test_is_websocket_model_matches_gpt52_variants():
