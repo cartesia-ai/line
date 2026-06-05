@@ -161,6 +161,18 @@ async def test_aclose_closes_provider():
     assert detector._provider.closed is True
 
 
+def test_detector_omits_temperature_for_reasoning_models():
+    """Reasoning models (e.g. gpt-5) reject temperature=0, so it must be omitted."""
+    detector = _VoicemailDetector(VoicemailDetectionConfig(model="openai/gpt-5", api_key="test-key"))
+    assert detector._provider._config.temperature is None
+
+
+def test_detector_uses_zero_temperature_for_non_reasoning_models():
+    """Non-reasoning models (e.g. gpt-4o-mini) get temperature=0 for determinism."""
+    detector = _VoicemailDetector(VoicemailDetectionConfig(model="openai/gpt-4o-mini", api_key="test-key"))
+    assert detector._provider._config.temperature == 0
+
+
 def test_detector_system_prompt_is_self_contained():
     """The detection prompt mentions voicemail/human/unknown and strict JSON."""
     prompt = _DETECTOR_SYSTEM_PROMPT.lower()

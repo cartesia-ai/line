@@ -21,7 +21,7 @@ from typing import Literal, Optional
 from loguru import logger
 
 from line.llm_agent.config import LlmConfig
-from line.llm_agent.provider import LlmProvider, Message
+from line.llm_agent.provider import LlmProvider, Message, _get_model_config, parse_model_id
 
 # Result of a single classification. "unknown" is the conservative fail-open
 # verdict used whenever evidence is ambiguous or the detector errors.
@@ -125,13 +125,20 @@ class _VoicemailDetector:
 
     def __init__(self, config: VoicemailDetectionConfig):
         self._config = config
+
+        # Reasoning models (e.g. gpt-5, o-series) only allow their default
+        # temperature and reject temperature=0; non-reasoning models (e.g.
+        # gpt-4o-mini) take temperature=0 for determinism. Use reasoning-effort
+        # support as the proxy and omit temperature when it isn't honored.
+        is_reasoning_model = _get_model_config(parse_model_id(config.model)).supports_reasoning_effort
+
         # Deterministic config. We only need a short JSON object back, but the
-        # budget must also cover reasoning tokens on reasoning models (e.g. gpt-5),
-        # where max_tokens caps completion + reasoning — too small and the model
-        # spends it all thinking and returns nothing (→ fail-open "unknown").
+        # budget must also cover reasoning tokens on reasoning models, where
+        # max_tokens caps completion + reasoning — too small and the model spends
+        # it all thinking and returns nothing (→ fail-open "unknown").
         detector_config = LlmConfig(
             system_prompt=_DETECTOR_SYSTEM_PROMPT,
-            temperature=0,
+            temperature=None if is_reasoning_model else 0,
             max_tokens=512,
             reasoning_effort="none",
             timeout=config.timeout,
