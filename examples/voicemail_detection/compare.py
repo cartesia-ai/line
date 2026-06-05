@@ -47,6 +47,9 @@ MAIN_MODEL = os.getenv("MAIN_MODEL", "anthropic/claude-haiku-4-5-20251001")
 MAIN_API_KEY = os.getenv("MAIN_API_KEY") or os.getenv("ANTHROPIC_API_KEY")
 DETECTOR_MODEL = os.getenv("DETECTOR_MODEL", "openai/gpt-5-nano")
 DETECTOR_API_KEY = os.getenv("DETECTOR_API_KEY") or os.getenv("OPENAI_API_KEY")
+# Skip detection until the turn has at least this many words, so the sidecar
+# never hangs up on a too-short greeting. Tune to trade FPs vs. terse-voicemail recall.
+DETECTOR_MIN_WORDS = int(os.getenv("DETECTOR_MIN_WORDS", "0"))
 
 SYSTEM_PROMPT = (
     "You are an outbound voice agent calling a customer about their recent order. "
@@ -92,6 +95,9 @@ async def run_approach1(sample: Sample) -> Outcome:
 
 async def run_approach2(detector: _VoicemailDetector, sample: Sample) -> Outcome:
     """Run the cheap-LM classifier over the call's opening line."""
+    # Mirror the agent: too-short turns are skipped (never hang up, wait for more).
+    if len(sample.transcript.split()) < DETECTOR_MIN_WORDS:
+        return Outcome(False, f"deferred (<{DETECTOR_MIN_WORDS}w)", 0.0)
     start = time.perf_counter()
     result = await detector.classify(sample.transcript)
     latency_ms = (time.perf_counter() - start) * 1000
@@ -195,7 +201,11 @@ async def main() -> None:
     if missing:
         raise SystemExit(f"Missing API key(s): {missing}")
 
-    detector = _VoicemailDetector(VoicemailDetectionConfig(model=DETECTOR_MODEL, api_key=DETECTOR_API_KEY))
+    detector = _VoicemailDetector(
+        VoicemailDetectionConfig(
+            model=DETECTOR_MODEL, api_key=DETECTOR_API_KEY, min_transcript_words=DETECTOR_MIN_WORDS
+        )
+    )
 
     a1: List[Outcome] = []
     a2: List[Outcome] = []

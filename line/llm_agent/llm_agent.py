@@ -309,10 +309,12 @@ class LlmAgent:
             env, event, effective_tools, effective_config, context=context, history=history
         )
         # Approach 2: gate the main response behind the voicemail detector for
-        # completed user turns that carry a non-empty transcript.
+        # completed user turns that carry enough transcript content. Turns with
+        # fewer than `min_transcript_words` words are too short to judge, so we
+        # skip detection (never hang up) and wait to hear more on a later turn.
         if self._voicemail_detector is not None and isinstance(event, UserTurnEnded):
             transcript = _extract_user_transcript(event)
-            if transcript:
+            if transcript and len(transcript.split()) >= self._voicemail_detection.min_transcript_words:
                 gen = self._wrap_with_voicemail_detection(gen, transcript)
 
         async for output in gen:

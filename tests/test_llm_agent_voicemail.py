@@ -179,7 +179,9 @@ async def test_voicemail_tool_kept_when_active_turns_none():
 # =============================================================================
 
 
-def _detection_agent(detector: _FakeDetector, responses, *, message="Call us back.", gate_ms=200):
+def _detection_agent(
+    detector: _FakeDetector, responses, *, message="Call us back.", gate_ms=200, min_words=0
+):
     agent = LlmAgent(
         model="gpt-4o",
         api_key="test-key",
@@ -189,6 +191,7 @@ def _detection_agent(detector: _FakeDetector, responses, *, message="Call us bac
             api_key="test-key",
             message=message,
             initial_gate_ms=gate_ms,
+            min_transcript_words=min_words,
         ),
     )
     agent._llm = _MockLLM(responses)
@@ -297,6 +300,28 @@ async def test_empty_user_turn_skips_detection():
 
     assert detector.calls == []
     assert [o.text for o in outputs if isinstance(o, AgentSendText)] == ["normal"]
+
+
+async def test_short_turn_below_min_words_skips_detection():
+    """A turn shorter than min_transcript_words is not classified (never hangs up)."""
+    detector = _FakeDetector(VoicemailDetectionResult("voicemail"))
+    agent = _detection_agent(detector, [[StreamChunk(text="Hi there!", is_final=True)]], min_words=5)
+    # "Hello?" is one word — below the threshold, so detection is skipped.
+    outputs = await _collect(agent, _env(), _turn("Hello?"))
+
+    assert detector.calls == []
+    assert [o.text for o in outputs if isinstance(o, AgentSendText)] == ["Hi there!"]
+    assert [o for o in outputs if isinstance(o, AgentEndCall)] == []
+
+
+async def test_turn_at_min_words_runs_detection():
+    """A turn meeting min_transcript_words is classified normally."""
+    detector = _FakeDetector(VoicemailDetectionResult("voicemail"))
+    agent = _detection_agent(detector, [[StreamChunk(text="main", is_final=True)]], min_words=5)
+    outputs = await _collect(agent, _env(), _turn("please leave a message after the tone"))
+
+    assert detector.calls == ["please leave a message after the tone"]
+    assert [o for o in outputs if isinstance(o, AgentEndCall)][0].reason == "voicemail_detected"
 
 
 async def test_cleanup_closes_detector_provider():

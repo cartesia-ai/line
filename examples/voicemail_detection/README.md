@@ -87,6 +87,26 @@ MAIN_MODEL=openai/gpt-4o DETECTOR_MODEL=openai/gpt-5-mini \
     uv run python examples/voicemail_detection/compare.py
 ```
 
+### Tuning the sidecar: hear more before deciding
+
+A cheap classifier can jump the gun on a short opening line and hang up on a
+real person. Two `VoicemailDetectionConfig` knobs control this:
+
+- **`min_transcript_words`** — skip detection until the turn has at least this
+  many words. Below the threshold the agent never hangs up and waits to hear more
+  on a later turn. This is the lever for "listen to more content first": raising
+  it cuts false positives on short greetings, at the cost of possibly deferring
+  on *terse* voicemails ("Leave a message."). In the harness, set it with
+  `DETECTOR_MIN_WORDS`:
+
+  ```bash
+  DETECTOR_MIN_WORDS=5 uv run python examples/voicemail_detection/compare.py
+  ```
+
+- **`initial_gate_ms`** — how long the main reply is buffered while waiting for
+  the verdict. This is a *timing* knob (latency vs. catching the verdict in
+  time); it does **not** give the detector more transcript to read.
+
 ## Running the agent
 
 ```bash

@@ -61,6 +61,11 @@ class VoicemailDetectionConfig:
             detected. If omitted, the call ends silently.
         initial_gate_ms: How long to buffer the main LM's first user-visible output while
             waiting for the detector. Advanced latency/accuracy tradeoff; default ``200``.
+        min_transcript_words: Minimum number of words in the user turn before detection runs
+            at all. Below this the agent skips detection and continues normally — so the
+            sidecar never hangs up on a too-short greeting (e.g. "Hello?", "Yep?") and
+            effectively waits to hear more content first. ``0`` (default) runs on any
+            non-empty transcript.
         timeout: Hard timeout (seconds) for a single classifier request.
     """
 
@@ -68,6 +73,7 @@ class VoicemailDetectionConfig:
     api_key: str
     message: Optional[str] = None
     initial_gate_ms: int = 200
+    min_transcript_words: int = 0
     timeout: float = 5.0
 
 
