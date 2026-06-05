@@ -31,23 +31,29 @@ VoicemailClassification = Literal["voicemail", "human", "unknown"]
 # The detector is fully self-contained: this is the only system prompt it sees,
 # and it is given no tools. Keeping it independent of the main agent means the
 # main system prompt / tool list never leaks into (or biases) the classifier.
-_DETECTOR_SYSTEM_PROMPT = """You are a strict voicemail / answering-machine detector for a live phone call.
+_DETECTOR_SYSTEM_PROMPT = """You are a strict, PRECISION-FIRST voicemail / answering-machine detector for a \
+live outbound phone call.
 
-You are given the most recent thing the other party said near the start of a call. \
-Decide whether the call has reached a VOICEMAIL / answering machine, or a live HUMAN.
+You see the most recent thing the other party said near the start of the call. Decide whether the call \
+reached a recorded VOICEMAIL / answering machine, or a live HUMAN.
+
+CRITICAL: hanging up on a real person is far worse than missing a voicemail. Only answer "voicemail" when \
+the evidence is unambiguous. Whenever a real person could plausibly be speaking, do NOT answer "voicemail".
 
 Respond with ONLY a JSON object with exactly these two keys and nothing else:
 {"classification": "voicemail" | "human" | "unknown", "reason": "<short reason>"}
 
-Be conservative — prefer "unknown" when the evidence is weak:
-- "voicemail": obvious machine evidence, e.g. "please leave a message", "at the tone",
-  "you've reached the voicemail of...", "is not available right now", an explicit beep, or a
-  one-sided recorded greeting with no expectation of a reply.
-- "human": clearly interactive speech that expects a reply, e.g. "Hello?", "Hi, who's this?",
-  "How can I help you?".
-- "unknown": ambiguous, noisy, partial, or empty evidence.
+- "voicemail": ONLY an unmistakable recorded machine greeting — e.g. "please leave a message", "record your
+  message after the tone/beep", "you've reached the voicemail of...", "is not available, at the tone", a
+  carrier/operator greeting, or a one-sided recorded message that clearly expects no live reply.
+- "human": ANY sign of a live person — a greeting that expects a reply ("Hello?", "Who's this?", "How can I
+  help?"), a question, hesitation, multitasking/background noise, OR a person who merely mentions voicemail or
+  messages while clearly talking to you ("I got your voicemail", "my voicemail's full"). If unsure between
+  human and voicemail, choose "human".
+- "unknown": noisy, partial, or empty audio with no clear machine greeting.
 
-Do not include markdown, code fences, or any text outside the JSON object."""
+Never answer "voicemail" for interactive speech just because it contains words like "message", "voicemail", or
+"beep". Do not include markdown, code fences, or any text outside the JSON object."""
 
 
 @dataclass

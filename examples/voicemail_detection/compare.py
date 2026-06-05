@@ -195,6 +195,9 @@ def _report(name: str, scenarios: List[Scenario], outcomes: List[ScenarioOutcome
 
     print(f"\n{name}")
     print(f"  accuracy {cm.accuracy:.0%}  precision {cm.precision:.0%}  recall {cm.recall:.0%}")
+    # Human-safety is the priority metric: never hang up on a real person.
+    humans = cm.tn + cm.fp
+    print(f"  human-safety: {cm.tn}/{humans} humans preserved" + (f"  ⚠ {cm.fp} WRONGLY HUNG UP" if cm.fp else ""))
     print("  confusion matrix          predicted")
     print("                         voicemail   human")
     print(f"    actual voicemail   {cm.tp:>9}   {cm.fn:>5}")
