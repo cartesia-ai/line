@@ -35,6 +35,7 @@ from line.agent import AgentEnv, TurnEnv
 from line.events import AgentEndCall, AgentSendText, AgentTextSent, UserTextSent, UserTurnEnded
 from line.llm_agent import LlmAgent, LlmConfig, VoicemailDetectionConfig, voicemail
 from line.llm_agent.tools.system import end_call
+from line.llm_agent.voicemail_detection import _VoicemailDetector
 
 # Models (override via env). Approach 1 uses a full conversational model; Approach 2
 # uses a cheap classifier.
@@ -245,6 +246,12 @@ async def main() -> None:
     )
     a1: List[ScenarioOutcome] = []
     a2: List[ScenarioOutcome] = []
+    a2_raw: List[ScenarioOutcome] = []  # detector verdict with a full await (no gate)
+    # Standalone detector to measure the model's *raw* verdict + latency, so we can
+    # tell model quality apart from the gate dropping late verdicts.
+    raw_detector = _VoicemailDetector(
+        VoicemailDetectionConfig(model=DETECTOR_MODEL, api_key=DETECTOR_API_KEY)
+    )
     try:
         header = f"{'truth':<10} {'A1':<7} {'A2':<7} {'turns':>5}  scenario"
         print(header)
@@ -252,18 +259,40 @@ async def main() -> None:
         for scenario in SCENARIOS:
             o1 = await _run_scenario(_approach1_agent(), scenario)
             o2 = await _run_scenario(_approach2_agent(), scenario)
+            # Raw detector verdict on the opening line, fully awaited (no gate).
+            start = time.perf_counter()
+            res = await raw_detector.classify(scenario.turns[0])
+            raw_ms = (time.perf_counter() - start) * 1000
             a1.append(o1)
             a2.append(o2)
+            a2_raw.append(ScenarioOutcome(res.classification == "voicemail", [raw_ms]))
             m1 = "vm" if o1.detected_voicemail else "human"
             m2 = "vm" if o2.detected_voicemail else "human"
             print(f"{scenario.label:<10} {m1:<7} {m2:<7} {len(scenario.turns):>5}  {scenario.name}")
     finally:
+        await raw_detector.aclose()
         # litellm caches async HTTP clients globally; close them before the event
         # loop tears down or their SSL transports raise "Event loop is closed".
         await litellm.close_litellm_async_clients()
 
     _report("Approach 1 (voicemail tool)", SCENARIOS, a1)
-    _report("Approach 2 (detection sidecar)", SCENARIOS, a2)
+    _report("Approach 2 (detection sidecar, as the agent applied it)", SCENARIOS, a2)
+    _report("Approach 2 (raw detector verdict, full await — no gate)", SCENARIOS, a2_raw)
+
+    # Diagnostic: separate model quality from the gate. If the detector's raw
+    # latency exceeds the gate, its verdicts arrive too late and are dropped —
+    # which shows up as the "applied" matrix being all-negative regardless of model.
+    raw_lat = [o.per_turn_ms[0] for o in a2_raw if o.per_turn_ms]
+    avg_lat = sum(raw_lat) / len(raw_lat) if raw_lat else 0.0
+    fits = avg_lat <= DETECTOR_GATE_MS
+    print(
+        f"\ndetector raw latency avg {avg_lat:.0f}ms vs gate {DETECTOR_GATE_MS}ms — "
+        + (
+            "fits the gate."
+            if fits
+            else "EXCEEDS the gate, so verdicts are dropped (raise DETECTOR_GATE_MS or use a faster detector)."
+        )
+    )
     _category_breakdown(SCENARIOS, a1, a2)
 
 
