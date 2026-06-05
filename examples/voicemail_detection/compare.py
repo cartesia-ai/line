@@ -57,6 +57,10 @@ def _opt_int(name: str) -> Optional[int]:
 TOOL_ACTIVE_TURNS = _opt_int("TOOL_ACTIVE_TURNS")
 DETECTOR_ACTIVE_TURNS = _opt_int("DETECTOR_ACTIVE_TURNS")
 DETECTOR_MIN_WORDS = int(os.getenv("DETECTOR_MIN_WORDS", "0"))
+# The sidecar only acts on a verdict that returns within this gate. A slow detector
+# (e.g. a reasoning model like gpt-5-nano, ~1s) will miss a 200ms gate every time and
+# never hang up — widen the gate or use a fast non-reasoning detector (gpt-4o-mini).
+DETECTOR_GATE_MS = int(os.getenv("DETECTOR_GATE_MS", "200"))
 
 SYSTEM_PROMPT = (
     "You are an outbound voice agent calling a customer about their recent order. "
@@ -92,7 +96,7 @@ def _approach2_agent() -> LlmAgent:
             model=DETECTOR_MODEL,
             api_key=DETECTOR_API_KEY,
             message=VOICEMAIL_MESSAGE,
-            initial_gate_ms=200,
+            initial_gate_ms=DETECTOR_GATE_MS,
             active_turns=DETECTOR_ACTIVE_TURNS,
             min_transcript_words=DETECTOR_MIN_WORDS,
         ),
@@ -235,7 +239,7 @@ async def main() -> None:
         raise SystemExit(f"Missing API key(s): {missing}")
 
     print(
-        f"main={MAIN_MODEL}  detector={DETECTOR_MODEL}  "
+        f"main={MAIN_MODEL}  detector={DETECTOR_MODEL}  gate_ms={DETECTOR_GATE_MS}  "
         f"tool_active_turns={TOOL_ACTIVE_TURNS}  detector_active_turns={DETECTOR_ACTIVE_TURNS}  "
         f"min_words={DETECTOR_MIN_WORDS}"
     )

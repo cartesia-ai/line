@@ -103,6 +103,23 @@ TOOL_ACTIVE_TURNS=1 DETECTOR_ACTIVE_TURNS=1 \
     uv run python examples/voicemail_detection/compare.py
 ```
 
+> **The detector must answer within the gate.** The sidecar only acts on a
+> `voicemail` verdict that returns within `initial_gate_ms` (`DETECTOR_GATE_MS`,
+> default 200). A *reasoning* model — including the small `gpt-5-nano` — takes
+> ~1s per classification, so it misses a 200ms gate every time and **never hangs
+> up** (you'll see Approach 2 predict voicemail 0 times). Either use a fast,
+> non-reasoning detector or widen the gate:
+>
+> ```bash
+> # Fast non-reasoning classifier (recommended) — fits the default gate:
+> DETECTOR_MODEL=openai/gpt-4o-mini TOOL_ACTIVE_TURNS=1 DETECTOR_ACTIVE_TURNS=1 \
+>     uv run python examples/voicemail_detection/compare.py
+>
+> # Or keep a reasoning detector but give it time (adds first-reply latency):
+> DETECTOR_GATE_MS=1500 TOOL_ACTIVE_TURNS=1 DETECTOR_ACTIVE_TURNS=1 \
+>     uv run python examples/voicemail_detection/compare.py
+> ```
+
 ### Tuning the sidecar: hear more before deciding
 
 A cheap classifier can jump the gun on a short opening line and hang up on a
