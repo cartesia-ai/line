@@ -19,17 +19,27 @@ history, same ``previous_response_id`` continuation, same
 endpoint — useful when the ``wss://api.openai.com/v1/responses``
 endpoint is less reliable than HTTPS in practice.
 
-Phase handling
---------------
-The Responses API can emit two ``message`` items per response: one
-with ``phase: "commentary"`` (preamble before tool calls) and one with
-``phase: "final_answer"`` (the completed answer).  For a voice/TTS
-context, the commentary item's text is almost always undesirable to
-speak — and when it is similar/identical to the final answer it causes
-double-speak.  This provider tracks ``output_index → phase`` from
-``response.output_item.added`` events and suppresses
-``response.output_text.delta`` events for items marked
-``"commentary"``.
+Multiple message items per response
+-----------------------------------
+The Responses API can emit more than one ``message`` item in a single
+response — commonly a ``phase: "commentary"`` item (intermediate
+user-visible update, including preambles before tool calls) followed
+by a ``phase: "final_answer"`` item (the completed answer). For
+``gpt-5.4+`` reasoning models, the texts often duplicate; sometimes the
+second item is empty. Speaking everything would produce double-speak
+over TTS; suppressing commentary outright (as earlier versions did)
+silences turns where commentary is the entire reply or the preamble
+before a tool call.
+
+Strategy: phase-blind, "first textual message item wins". The first
+non-empty ``output_text.delta`` claims an ``output_index``; all deltas
+for that index stream as they arrive, and deltas from any later
+message item in the same response are dropped. Tool calls and
+single-message responses are unaffected. Phase is recorded only for
+log clarity.
+
+See the consumer repo's ``cartesia-examples/`` for standalone
+reproductions of the duplicate-text and preamble-before-tool patterns.
 """
 
 import asyncio
@@ -61,10 +71,11 @@ class _HttpResponseEventStream:
     """Reads Responses-API streaming events from ``litellm.aresponses`` and
     yields :class:`StreamChunk` objects.
 
-    Phase filtering: when an ``output_item.added`` event arrives with
-    ``item.type == "message"`` and ``item.phase == "commentary"``, all
-    subsequent ``output_text.delta`` events with that ``output_index``
-    are dropped.  Tool calls and final-answer text pass through.
+    First-message-wins filtering: the first ``output_text.delta`` claims
+    an ``output_index``; all subsequent deltas for that index stream as
+    they arrive. Deltas from any later message item in the same response
+    are dropped (see the module docstring for why). Tool calls pass
+    through unaffected.
 
     On terminal events the ``on_response_done`` callback is invoked
     with the response dict so the provider can update its history.
@@ -81,7 +92,14 @@ class _HttpResponseEventStream:
 
     async def __aiter__(self) -> AsyncIterator[StreamChunk]:
         tool_calls: Dict[str, ToolCall] = {}
-        commentary_indices: set[int] = set()
+        # output_index -> phase tag, kept for log clarity only. The streaming
+        # decision below is phase-blind — first textual message item in a
+        # response wins; subsequent textual items are dropped.
+        message_phases: Dict[int, str] = {}
+        # output_index whose deltas are being streamed this response. Set on
+        # the first non-empty delta of any message item.
+        streaming_index: Optional[int] = None
+        dropped_indices_logged: set[int] = set()
         received_content = False
 
         async for event in self._iter:
@@ -95,13 +113,8 @@ class _HttpResponseEventStream:
                 output_index = event.output_index
                 item_type = item.type
                 if item_type == "message":
-                    phase = getattr(item, "phase", None)
-                    if phase == "commentary":
-                        commentary_indices.add(int(output_index))
-                        logger.debug(
-                            "Responses HTTP: suppressing commentary message at output_index=%d",
-                            int(output_index),
-                        )
+                    phase = getattr(item, "phase", None) or "final_answer"
+                    message_phases[int(output_index)] = phase
                 elif item_type == "function_call":
                     call_id = item.call_id
                     name = item.name
@@ -109,13 +122,35 @@ class _HttpResponseEventStream:
                         tool_calls[call_id] = ToolCall(id=call_id, name=name, arguments="")
 
             elif event_type == "response.output_text.delta":
-                output_index = event.output_index
-                if int(output_index) in commentary_indices:
-                    continue
+                output_index = int(event.output_index)
                 delta = event.delta
-                if delta:
+                if not delta:
+                    continue
+                if streaming_index is None:
+                    streaming_index = output_index
+                    logger.debug(
+                        "Responses HTTP: streaming text from output_index={i} phase={p}",
+                        i=output_index,
+                        p=message_phases.get(output_index, "(unknown)"),
+                    )
+                if output_index == streaming_index:
                     received_content = True
                     yield StreamChunk(text=delta)
+                elif output_index not in dropped_indices_logged:
+                    # A second message item is producing text in this response —
+                    # log once per dropped index, then silently swallow its
+                    # remaining deltas. Avoids TTS double-speak (the model
+                    # often emits commentary + final_answer with identical
+                    # text) and respects "one reply per turn".
+                    dropped_indices_logged.add(output_index)
+                    logger.debug(
+                        "Responses HTTP: dropping text from output_index={i} phase={p} "
+                        "(already streaming output_index={s} phase={sp})",
+                        i=output_index,
+                        p=message_phases.get(output_index, "(unknown)"),
+                        s=streaming_index,
+                        sp=message_phases.get(streaming_index, "(unknown)"),
+                    )
 
             elif event_type == "response.function_call_arguments.delta":
                 # The Responses streaming protocol identifies the active
@@ -175,10 +210,10 @@ class _HttpResponseEventStream:
                 else:
                     details = response_dict.get("incomplete_details")
                     logger.warning(
-                        "Non-completed response from Responses API: status=%s, reason=%s, response_id=%s",
-                        status,
-                        details.get("reason", "") if isinstance(details, dict) else "",
-                        response_dict.get("id", ""),
+                        "Non-completed response from Responses API: status={s} reason={r} response_id={i}",
+                        s=status,
+                        r=details.get("reason", "") if isinstance(details, dict) else "",
+                        i=response_dict.get("id", ""),
                     )
 
                 yield StreamChunk(
@@ -343,8 +378,8 @@ class _HttpResponsesProvider:
                     self._history = []
                     attempt += 1
                     logger.debug(
-                        "Responses API lost previous_response_id (via %s); retrying current turn",
-                        type(exc).__name__,
+                        "Responses API lost previous_response_id (via {n}); retrying current turn",
+                        n=type(exc).__name__,
                     )
 
         return _AsyncIterableContext(_iter)

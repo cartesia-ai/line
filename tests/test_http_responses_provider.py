@@ -52,12 +52,14 @@ async def _drive(events: List[Dict[str, Any]]) -> List[StreamChunk]:
     return chunks
 
 
-def test_commentary_message_is_suppressed_final_answer_passes_through():
-    """The duplication-fix regression test.
+def test_commentary_streams_and_subsequent_final_answer_is_dropped():
+    """Duplicate-text avoidance: commentary streams live, the duplicate
+    final_answer that follows is dropped to prevent TTS double-speak.
 
     Two message items in one response: commentary (output_index=0) and
-    final_answer (output_index=1) with the same text.  Only the
-    final_answer's deltas should reach the caller.
+    final_answer (output_index=1) with the same text. Only the commentary
+    deltas should reach the caller; final_answer deltas are silently dropped
+    because commentary already covered the turn's reply.
     """
     events = [
         # Commentary message item starts at output_index 0.
@@ -131,9 +133,147 @@ def test_commentary_message_is_suppressed_final_answer_passes_through():
     chunks = _run(_drive(events))
     text_chunks = [c.text for c in chunks if c.text is not None]
     assert text_chunks == ["Hello there!"], (
-        f"expected exactly one 'Hello there!' (commentary suppressed); got {text_chunks!r}"
+        f"expected the commentary text once (final_answer dropped as duplicate); got {text_chunks!r}"
     )
     assert chunks[-1].is_final is True
+
+
+def test_commentary_only_response_streams_live():
+    """When commentary is the ONLY output (no final_answer, no tool calls),
+    its deltas stream live as they arrive — no buffering. Real-world trigger:
+    gpt-5.4-mini tags some conversational read-back turns as commentary."""
+    events = [
+        {
+            "type": "response.output_item.added",
+            "output_index": 0,
+            "item": {"type": "message", "phase": "commentary", "id": "msg_0"},
+        },
+        {
+            "type": "response.output_text.delta",
+            "output_index": 0,
+            "item_id": "msg_0",
+            "content_index": 0,
+            "delta": "Your zip code is ",
+        },
+        {
+            "type": "response.output_text.delta",
+            "output_index": 0,
+            "item_id": "msg_0",
+            "content_index": 0,
+            "delta": "60007. Right?",
+        },
+        {
+            "type": "response.output_item.done",
+            "output_index": 0,
+            "item": {
+                "type": "message",
+                "phase": "commentary",
+                "id": "msg_0",
+                "content": [{"type": "output_text", "text": "Your zip code is 60007. Right?"}],
+            },
+        },
+        {
+            "type": "response.completed",
+            "response": {
+                "id": "resp_co",
+                "status": "completed",
+                "output": [
+                    {
+                        "type": "message",
+                        "phase": "commentary",
+                        "content": [{"type": "output_text", "text": "Your zip code is 60007. Right?"}],
+                    },
+                ],
+            },
+        },
+    ]
+    chunks = _run(_drive(events))
+    text_chunks = [c.text for c in chunks if c.text]
+    # Two deltas in → two deltas out, in order. No buffering, no flush.
+    assert text_chunks == ["Your zip code is ", "60007. Right?"], (
+        f"expected commentary deltas to stream live; got {text_chunks!r}"
+    )
+    assert chunks[-1].is_final is True
+
+
+def test_commentary_streams_as_preamble_before_tool_call():
+    """When commentary precedes a tool call (the OpenAI-documented preamble-
+    before-tool pattern), the commentary text streams live so the user hears
+    the acknowledgment while the tool runs. Without this, the tool execution
+    is a silent dead-zone for voice agents."""
+    events = [
+        {
+            "type": "response.output_item.added",
+            "output_index": 0,
+            "item": {"type": "message", "phase": "commentary", "id": "msg_0"},
+        },
+        {
+            "type": "response.output_text.delta",
+            "output_index": 0,
+            "item_id": "msg_0",
+            "content_index": 0,
+            "delta": "Let me look that up for you...",
+        },
+        {
+            "type": "response.output_item.done",
+            "output_index": 0,
+            "item": {
+                "type": "message",
+                "phase": "commentary",
+                "id": "msg_0",
+                "content": [{"type": "output_text", "text": "Let me look that up for you..."}],
+            },
+        },
+        {
+            "type": "response.output_item.added",
+            "output_index": 1,
+            "item": {
+                "type": "function_call",
+                "call_id": "call_1",
+                "name": "lookup",
+                "id": "fn_item_1",
+            },
+        },
+        {
+            "type": "response.function_call_arguments.delta",
+            "output_index": 1,
+            "item_id": "fn_item_1",
+            "delta": "{}",
+        },
+        {
+            "type": "response.output_item.done",
+            "output_index": 1,
+            "item": {
+                "type": "function_call",
+                "call_id": "call_1",
+                "name": "lookup",
+                "id": "fn_item_1",
+                "arguments": "{}",
+            },
+        },
+        {
+            "type": "response.completed",
+            "response": {
+                "id": "resp_tc",
+                "status": "completed",
+                "output": [
+                    {
+                        "type": "message",
+                        "phase": "commentary",
+                        "content": [{"type": "output_text", "text": "Let me look that up for you..."}],
+                    },
+                    {"type": "function_call", "call_id": "call_1", "name": "lookup", "arguments": "{}"},
+                ],
+            },
+        },
+    ]
+    chunks = _run(_drive(events))
+    text_chunks = [c.text for c in chunks if c.text]
+    assert text_chunks == ["Let me look that up for you..."], (
+        f"expected commentary preamble to stream; got {text_chunks!r}"
+    )
+    assert chunks[-1].is_final is True
+    assert [tc.name for tc in chunks[-1].tool_calls] == ["lookup"]
 
 
 def test_text_passes_through_when_phase_is_missing():
