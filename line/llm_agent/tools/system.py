@@ -216,8 +216,7 @@ is possible."""
             ctx: ToolEnv,
             reason: Annotated[str, "The reason for ending the call"],
         ):
-            # end_call always reports a normal agent hangup; the voicemail tool is
-            # the only path to reason="voicemail_detected".
+            # end_call always reports a normal agent hangup reason.
             yield AgentEndCall(reason="agent_ended", interruptible=self.interruptible)
 
         return construct_function_tool(
