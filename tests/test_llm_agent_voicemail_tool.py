@@ -129,6 +129,15 @@ def test_active_turns_defaults_and_chaining():
     assert end_call(active_turns=3).active_turns == 3
 
 
+def test_voicemail_chaining_preserves_prior_config():
+    """Re-configuring voicemail inherits omitted fields (chain-safe)."""
+    configured = voicemail(message="Call us back.", interruptible=True, active_turns=5)
+    rechained = configured(active_turns=1)  # only change active_turns
+    assert rechained.message == "Call us back."
+    assert rechained.interruptible is True
+    assert rechained.active_turns == 1
+
+
 def test_normalize_tools_resolves_voicemail():
     """VoicemailTool must resolve to a FunctionTool named 'voicemail' (not a loopback callable)."""
     fts, _ = _normalize_tools([voicemail(message="hi"), end_call], parse_model_id("gpt-4o"))

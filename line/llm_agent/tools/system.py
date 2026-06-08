@@ -534,11 +534,15 @@ first; this tool ends the call."""
     def __call__(
         self,
         message: Optional[str] = None,
-        interruptible: bool = False,
+        interruptible: Optional[bool] = None,
         description: Optional[str] = None,
         active_turns: Any = _INHERIT,
     ) -> "VoicemailTool":
         """Create a configured VoicemailTool instance.
+
+        Unset arguments inherit from this instance, so re-configuring a tool
+        doesn't silently reset prior settings (e.g.
+        ``voicemail(message="…")(active_turns=5)`` keeps the message).
 
         Args:
             message: Optional message spoken (uninterruptible by default) before the call ends.
@@ -548,9 +552,9 @@ first; this tool ends the call."""
                 (default 2; ``None`` = whole call). Omit to inherit the current value.
         """
         return VoicemailTool(
-            message=message,
-            interruptible=interruptible,
-            description=description,
+            message=message if message is not None else self.message,
+            interruptible=interruptible if interruptible is not None else self.interruptible,
+            description=description if description is not None else self.description,
             active_turns=self.active_turns if active_turns is _INHERIT else active_turns,
         )
 
