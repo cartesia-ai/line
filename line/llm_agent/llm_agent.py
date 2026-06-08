@@ -52,7 +52,7 @@ from line.llm_agent.provider import (
     _get_model_config,
     parse_model_id,
 )
-from line.llm_agent.tools.system import EndCallTool, TransferCallTool, WebSearchTool
+from line.llm_agent.tools.system import EndCallTool, TransferCallTool, VoicemailTool, WebSearchTool
 from line.llm_agent.tools.utils import (
     FunctionTool,
     ToolEnv,
@@ -68,7 +68,14 @@ _OUTPUT_EVENT_TYPES: Tuple[type, ...] = get_args(OutputEvent)
 
 # Type alias for tools that can be passed to LlmAgent.
 # Plain callables are automatically wrapped via the @tool decorator.
-ToolSpec = Union[FunctionTool, WebSearchTool, EndCallTool, TransferCallTool, Callable]
+ToolSpec = Union[FunctionTool, WebSearchTool, EndCallTool, TransferCallTool, VoicemailTool, Callable]
+
+
+def _is_voicemail_tool(tool: Any) -> bool:
+    """Return True if *tool* is the built-in voicemail tool (instance or FunctionTool)."""
+    if isinstance(tool, VoicemailTool):
+        return True
+    return getattr(tool, "name", None) == "voicemail"
 
 
 class LlmAgent:
@@ -89,7 +96,18 @@ class LlmAgent:
         config: Optional[LlmConfig] = None,
         max_tool_iterations: int = 10,
         backend: Optional[str] = None,
+        voicemail_tool_active_turns: Optional[int] = 1,
     ):
+        """
+        Args:
+            voicemail_tool_active_turns: How many completed user turns the built-in
+                ``voicemail`` tool stays available before the agent drops it from its
+                options. Voicemail is only worth detecting at the start of a call, so
+                once the conversation is "deemed started" the tool is removed and the
+                LM can no longer hang up mid-conversation. Defaults to ``1`` (available
+                only for the opening turn). ``None`` keeps it for the whole call. No-op
+                when no voicemail tool is in ``tools``.
+        """
         if not api_key:
             raise ValueError("Missing API key in LLmAgent initialization")
 
@@ -123,6 +141,12 @@ class LlmAgent:
             tools=self._tools,
             backend=backend,
         )
+
+        # Drop the built-in voicemail tool once the conversation is "deemed
+        # started" (after `voicemail_tool_active_turns` completed turns).
+        self._voicemail_tool_active_turns = voicemail_tool_active_turns
+        self._user_turns_seen = 0
+        self._voicemail_tool_removed = False
 
         self._introduction_sent = False
         self.history = History()
@@ -246,6 +270,13 @@ class LlmAgent:
             await self.cleanup()
             yield LogMetric(name="agent_turn_ms", value=(time.perf_counter() - turn_start_time) * 1000)
             return
+
+        # A non-handoff, non-lifecycle event drives an agent response turn. Count
+        # it and drop the voicemail tool once the conversation is "deemed started".
+        self._user_turns_seen += 1
+        self._maybe_remove_voicemail_tool()
+        # Recompute in case the voicemail tool was just removed.
+        effective_tools = _merge_tools(self._tools, tools)
 
         async for output in self._generate_response(
             env, event, effective_tools, effective_config, context=context, history=history
@@ -689,6 +720,32 @@ class LlmAgent:
         await self._get_background_event_queue().wait()
         await self._llm.aclose()
 
+    def _maybe_remove_voicemail_tool(self) -> None:
+        """Drop the built-in voicemail tool once enough user turns have elapsed.
+
+        The voicemail tool is only useful at the very start of a call (the
+        greeting). Once the conversation is "deemed started" — after
+        ``voicemail_tool_active_turns`` completed user turns — we remove it so the
+        main LM can't accidentally hang up mid-conversation. No-op when no
+        voicemail tool is configured or when removal is disabled (``None``).
+        """
+        if (
+            self._voicemail_tool_removed
+            or self._voicemail_tool_active_turns is None
+            or self._user_turns_seen <= self._voicemail_tool_active_turns
+        ):
+            return
+
+        remaining = [t for t in self._tools if not _is_voicemail_tool(t)]
+        if len(remaining) != len(self._tools):
+            logger.info(
+                f"Removing voicemail tool after {self._voicemail_tool_active_turns} user turn(s) "
+                "(conversation deemed started)"
+            )
+            self.set_tools(remaining)
+        # Set the flag regardless so we only ever attempt removal once.
+        self._voicemail_tool_removed = True
+
     # ------------------------------------------------------------------
     # Validation helpers
     # ------------------------------------------------------------------
@@ -713,12 +770,14 @@ class LlmAgent:
                 raise TypeError(f"tools must be a list, got {type(tools).__name__}")
             for i, tool in enumerate(tools):
                 if not (
-                    isinstance(tool, (FunctionTool, WebSearchTool, EndCallTool, TransferCallTool))
+                    isinstance(
+                        tool, (FunctionTool, WebSearchTool, EndCallTool, TransferCallTool, VoicemailTool)
+                    )
                     or callable(tool)
                 ):
                     raise TypeError(
                         f"tools[{i}] must be a FunctionTool, WebSearchTool, EndCallTool, "
-                        f"TransferCallTool, or callable, got {type(tool).__name__}"
+                        f"TransferCallTool, VoicemailTool, or callable, got {type(tool).__name__}"
                     )
 
     @staticmethod

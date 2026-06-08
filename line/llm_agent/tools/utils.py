@@ -59,6 +59,7 @@ if TYPE_CHECKING:
         EndCallTool,
         KnowledgeBaseTool,
         TransferCallTool,
+        VoicemailTool,
         WebSearchTool,
     )
 
@@ -159,6 +160,7 @@ ToolSpec = Union[
     "EndCallTool",
     "TransferCallTool",
     "KnowledgeBaseTool",
+    "VoicemailTool",
     Callable,
 ]
 
@@ -354,6 +356,7 @@ def _normalize_tools(
         EndCallTool,
         KnowledgeBaseTool,
         TransferCallTool,
+        VoicemailTool,
         WebSearchTool,
     )
 
@@ -363,7 +366,7 @@ def _normalize_tools(
     for tool in tool_specs:
         if isinstance(tool, FunctionTool):
             function_tools.append(tool)
-        elif isinstance(tool, (EndCallTool, TransferCallTool, KnowledgeBaseTool)):
+        elif isinstance(tool, (EndCallTool, TransferCallTool, KnowledgeBaseTool, VoicemailTool)):
             function_tools.append(tool.as_function_tool())
         elif isinstance(tool, WebSearchTool):
             web_search_tool = tool
