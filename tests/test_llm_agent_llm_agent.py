@@ -1591,8 +1591,12 @@ async def test_process_replaces_tools_with_same_name(turn_env):
     assert "Original" not in tool_result.result
 
 
-async def test_set_tools_forwards_to_provider(turn_env):
-    """Test that set_tools() updates both the agent and the underlying provider."""
+async def test_set_tools_updates_agent_tools(turn_env):
+    """set_tools() replaces the agent's tools and they take effect on the next turn.
+
+    The provider is not seeded with tools (the agent passes the resolved list to
+    each chat()), so there is no provider-side copy to forward to.
+    """
 
     @loopback_tool
     async def original_tool(ctx) -> str:
@@ -1604,12 +1608,18 @@ async def test_set_tools_forwards_to_provider(turn_env):
         """Replacement tool."""
         return "replacement"
 
-    agent, mock_llm = create_agent_with_mock([], tools=[original_tool])
+    agent, mock_llm = create_agent_with_mock([[StreamChunk(text="hi", is_final=True)]], tools=[original_tool])
 
     agent.set_tools([replacement_tool])
-
     assert agent._tools == [replacement_tool]
-    assert mock_llm._tools == [replacement_tool]
+
+    # The next turn sends the replacement tool to the LLM, not the original.
+    event = UserTextSent(content="hi", history=[UserTextSent(content="hi")])
+    async for _ in agent.process(turn_env, event):
+        pass
+    sent = [t.name for t in (mock_llm._recorded_tools[0] or [])]
+    assert "replacement_tool" in sent
+    assert "original_tool" not in sent
 
 
 async def test_process_replaces_config(turn_env):

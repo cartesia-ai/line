@@ -30,6 +30,7 @@ from line.events import (
     CallStarted,
     # Custom events
     CustomHistoryEntry,
+    EndCallReason,
     HistoryEvent,
     InputEvent,
     LogMessage,
@@ -71,6 +72,7 @@ __all__ = [
     "AgentSendText",
     "AgentSendDtmf",
     "AgentEndCall",
+    "EndCallReason",
     "AgentTransferCall",
     "AgentToolCalled",
     "AgentToolReturned",
