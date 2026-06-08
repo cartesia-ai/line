@@ -73,10 +73,13 @@ class WebSearchTool:
 
     def __call__(
         self,
-        search_context_size: Literal["low", "medium", "high"] = "medium",
+        search_context_size: Optional[Literal["low", "medium", "high"]] = None,
         **extra: Any,
     ) -> "WebSearchTool":
         """Create a configured WebSearchTool instance.
+
+        Unset arguments inherit from this instance, so re-configuring a tool
+        doesn't silently reset prior settings.
 
         Args:
             search_context_size: Amount of search context to include.
@@ -91,8 +94,10 @@ class WebSearchTool:
         """
         return WebSearchTool(
             name=self.name,
-            search_context_size=search_context_size,
-            extra=extra,
+            search_context_size=(
+                search_context_size if search_context_size is not None else self.search_context_size
+            ),
+            extra=extra if extra else self.extra,
         )
 
     def get_web_search_options(self) -> Dict[str, Any]:
@@ -232,9 +237,12 @@ is possible."""
     def __call__(
         self,
         description: Optional[str] = None,
-        interruptible: bool = True,
+        interruptible: Optional[bool] = None,
     ) -> "EndCallTool":
         """Create a configured EndCallTool instance.
+
+        Unset arguments inherit from this instance, so re-configuring a tool
+        doesn't silently reset prior settings.
 
         Args:
             description: Description that replaces the default. Use this to customize
@@ -243,7 +251,10 @@ is possible."""
         Returns:
             A new EndCallTool instance with the specified configuration.
         """
-        return EndCallTool(description=description, interruptible=interruptible)
+        return EndCallTool(
+            description=description if description is not None else self.description,
+            interruptible=interruptible if interruptible is not None else self.interruptible,
+        )
 
 
 # Default instance - can be used directly or called to configure
