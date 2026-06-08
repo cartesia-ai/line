@@ -397,9 +397,14 @@ class TransferCallTool:
         self,
         target_phone_number: Optional[str] = None,
         message: Optional[str] = None,
-        interruptible: bool = True,
+        interruptible: Optional[bool] = None,
     ) -> "TransferCallTool":
         """Create a configured TransferCallTool instance.
+
+        Unset arguments inherit from this instance, so a configured tool can be
+        refined without silently losing prior config — e.g.
+        ``transfer_call(target_phone_number="+1...")(interruptible=False)`` keeps
+        the pinned destination.
 
         Args:
             target_phone_number: Optional pinned destination (E.164). When set,
@@ -408,9 +413,11 @@ class TransferCallTool:
             interruptible: Whether the transfer_call tool is interruptible.
         """
         return TransferCallTool(
-            target_phone_number=target_phone_number,
-            message=message,
-            interruptible=interruptible,
+            target_phone_number=(
+                target_phone_number if target_phone_number is not None else self.target_phone_number
+            ),
+            message=message if message is not None else self.message,
+            interruptible=interruptible if interruptible is not None else self.interruptible,
         )
 
 

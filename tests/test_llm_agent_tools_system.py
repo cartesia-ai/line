@@ -596,6 +596,19 @@ async def test_transfer_call_pinned_interruptible_false(mock_ctx, anyio_backend)
     assert events[1].interruptible is False
 
 
+async def test_transfer_call_call_inherits_prior_config(mock_ctx, anyio_backend):
+    """Re-configuring a pinned instance inherits unset fields (chain-safe)."""
+    pinned = transfer_call(target_phone_number="+14155551234", message="Hold on")
+    # Refine only interruptible; the pinned number and message must carry over.
+    refined = pinned(interruptible=False)
+
+    assert refined.target_phone_number == "+14155551234"
+    assert refined.message == "Hold on"
+    assert refined.interruptible is False
+    events = await collect_events(refined.as_function_tool().func(mock_ctx))
+    assert events[-1].target_phone_number == "+14155551234"
+
+
 async def test_transfer_call_pinned_invalid_number_raises(anyio_backend):
     """An invalid pinned number fails fast at construction."""
     with pytest.raises(ValueError):
