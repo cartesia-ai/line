@@ -755,9 +755,7 @@ class LlmAgent:
             if not isinstance(tools, list):
                 raise TypeError(f"tools must be a list, got {type(tools).__name__}")
             for i, tool in enumerate(tools):
-                if not (
-                    isinstance(tool, (FunctionTool, WebSearchTool, ClassTool)) or callable(tool)
-                ):
+                if not (isinstance(tool, (FunctionTool, WebSearchTool, ClassTool)) or callable(tool)):
                     raise TypeError(
                         f"tools[{i}] must be a FunctionTool, WebSearchTool, a built-in ClassTool "
                         f"(end_call/transfer_call/voicemail/knowledge_base), or callable, "
