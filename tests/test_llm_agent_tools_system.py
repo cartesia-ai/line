@@ -17,11 +17,13 @@ from line.llm_agent.tools.system import (
     EndCallTool,
     KnowledgeBaseTool,
     TransferCallTool,
+    WebSearchTool,
     end_call,
     http_server_tool,
     knowledge_base,
     send_dtmf,
     transfer_call,
+    web_search,
 )
 from line.llm_agent.tools.utils import FunctionTool, ToolType
 
@@ -413,6 +415,17 @@ async def test_end_call_callable_returns_new_instance(mock_ctx, anyio_backend):
     assert end_call.description == EndCallTool.DEFAULT_DESCRIPTION
     # Configured should have custom description
     assert configured.description == custom_desc
+
+
+async def test_end_call_call_inherits_prior_config(mock_ctx, anyio_backend):
+    """Re-configuring an instance inherits unset fields (chain-safe)."""
+    configured = end_call(description="Bye now", interruptible=False)
+    # Refine nothing relevant; description and interruptible must carry over.
+    refined = configured()
+    assert refined.description == "Bye now"
+    assert refined.interruptible is False
+    # Per-arg override wins, the rest inherited.
+    assert configured(interruptible=True).description == "Bye now"
 
 
 # =============================================================================
@@ -1496,3 +1509,24 @@ async def test_http_server_tool_form_urlencoded(mock_ctx, anyio_backend, monkeyp
     assert "data" in captured
     assert "json" not in captured
     assert captured["data"]["name"] == "Alice"
+
+
+# =============================================================================
+# Tests: web_search
+# =============================================================================
+
+
+def test_web_search_call_inherits_prior_config(anyio_backend):
+    """Re-configuring a WebSearchTool inherits unset fields (chain-safe)."""
+    configured = web_search(search_context_size="high", foo="bar")
+    assert isinstance(configured, WebSearchTool)
+
+    # Calling again with no overrides preserves prior config.
+    rechained = configured()
+    assert rechained.search_context_size == "high"
+    assert rechained.extra == {"foo": "bar"}
+
+    # Per-arg override wins; the rest are inherited.
+    overridden = configured(search_context_size="low")
+    assert overridden.search_context_size == "low"
+    assert overridden.extra == {"foo": "bar"}
