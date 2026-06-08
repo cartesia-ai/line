@@ -499,16 +499,22 @@ first; this tool ends the call."""
         message: Optional[str] = None,
         interruptible: bool = False,
         description: Optional[str] = None,
-        active_turns: Optional[int] = 2,
+        active_turns: Optional[int] = None,
     ):
         # interruptible defaults to False: on a voicemail there's no human to interrupt
         # and we want the message left in full.
         self.message = message
         self.interruptible = interruptible
         self.description = description if description else self.DEFAULT_DESCRIPTION
-        # Voicemail is only worth checking at the start of a call, so the agent drops
-        # this tool after `active_turns` user turns (default 2, covering a greeting that
-        # arrives over a couple of turns). None keeps it for the whole call.
+        # active_turns bounds how long the tool stays available (the agent drops it
+        # after that many user turns). Default None = available for the whole call.
+        # A finite window is unreliable for voicemail because greetings transcribe
+        # into a variable, often large number of short turns ("…forwarded to
+        # voicemail.", "…not available.", "At the tone…", "…you may hang up.") that
+        # can all arrive before the agent first responds — exhausting a small window
+        # so the tool is gone by the time the LLM acts. The tool's description still
+        # tells the model not to use it once a real person is talking, so keeping it
+        # available is safe; set a finite value to force removal after N turns.
         self.active_turns = active_turns
         self._function_tool = self._create_function_tool()
 
@@ -557,7 +563,7 @@ first; this tool ends the call."""
             interruptible: Whether the message/end are interruptible.
             description: Override the default LLM-facing description (when to invoke).
             active_turns: User turns the tool stays available before the agent drops it
-                (default 2; ``None`` = whole call). Omit to inherit the current value.
+                (``None`` = whole call, the default). Omit to inherit the current value.
         """
         return VoicemailTool(
             message=message if message is not None else self.message,

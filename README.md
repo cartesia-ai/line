@@ -170,20 +170,25 @@ voicemail(interruptible=True)              # allow the message/hangup to be inte
 voicemail(description="…")                 # override the LLM-facing "when to call this" text
 ```
 
-**Automatic removal once the conversation starts.** Voicemail is only worth
-checking at the very start of a call, so the agent **drops the `voicemail` tool
-after its `active_turns`** (default `2`) — once the conversation is "deemed
-started" the LLM can no longer trigger a voicemail hangup mid-call. The default
-of `2` covers a greeting that arrives over a couple of turns (e.g. split by VAD);
-set it higher for heavily fragmented greetings, or `None` to keep the tool for
-the whole call:
+**Optionally remove the tool once the conversation starts.** Voicemail is only
+worth checking at the very start of a call, so you can have the agent **drop the
+`voicemail` tool after its `active_turns`** — once the conversation is "deemed
+started" the LLM can no longer trigger a voicemail hangup mid-call. This defaults
+to `None` (the tool stays available for the whole call), because a real voicemail
+greeting transcribes into a variable, often large number of short turns (split by
+VAD, e.g. "…forwarded to voicemail.", "…not available.", "At the tone…") that can
+all arrive before the agent first responds — a small window like `2` is exhausted
+and the tool is gone by the time the LLM acts. Keeping it available is safe (the
+tool's description tells the model not to use it once a real person is talking);
+set a finite value if you want it forced off after N turns:
 
 ```python
 agent = LlmAgent(
     model="anthropic/claude-haiku-4-5-20251001",
     api_key=os.getenv("ANTHROPIC_API_KEY"),
-    # active_turns lives on the tool. Default is 2; None keeps it for the whole call.
-    tools=[voicemail(message="Hi, please call us back.", active_turns=2), end_call],
+    # active_turns lives on the tool. Default None keeps it for the whole call;
+    # set a finite value to drop it after that many user turns.
+    tools=[voicemail(message="Hi, please call us back."), end_call],
     config=LlmConfig(system_prompt=SYSTEM_PROMPT, introduction=""),
 )
 ```
@@ -191,7 +196,7 @@ agent = LlmAgent(
 `active_turns` is a general feature of the built-in class tools (`end_call`,
 `transfer_call`, `voicemail`, `knowledge_base`): any of them can be set to drop
 after N user turns. It defaults to `None` (kept for the whole call) for every
-tool except `voicemail`, which defaults to `2`.
+tool.
 
 ### HTTP Tools — Connect to HTTP APIs Without Code
 

@@ -127,12 +127,12 @@ def test_class_tools_satisfy_protocol():
 
 
 def test_active_turns_defaults_and_chaining():
-    """voicemail defaults to active_turns=2; others default None; chaining inherits/overrides."""
-    assert voicemail.active_turns == 2
+    """active_turns defaults to None for all built-ins; chaining inherits/overrides."""
+    assert voicemail.active_turns is None
     assert end_call.active_turns is None
     assert voicemail(active_turns=5).active_turns == 5
     assert voicemail(active_turns=None).active_turns is None  # explicit None disables removal
-    assert voicemail(message="x").active_turns == 2  # omitted → inherited
+    assert voicemail(active_turns=2)(message="x").active_turns == 2  # omitted → inherited
     assert end_call(active_turns=3).active_turns == 3
 
 
@@ -206,15 +206,19 @@ async def test_voicemail_tool_removed_after_first_turn():
     assert "end_call" in _names(mock.recorded_tools[1])
 
 
-async def test_default_active_turns_is_two():
-    """Default voicemail (active_turns=2) stays for turns 1-2, dropped on turn 3."""
+async def test_default_active_turns_is_none():
+    """Default voicemail (active_turns=None) stays available for the whole call.
+
+    Real voicemail greetings fragment into a variable number of short turns that
+    can exhaust a small finite window before the agent first responds, so the
+    default keeps the tool available; set a finite active_turns to force removal.
+    """
     agent, mock = _agent([[StreamChunk(text="a", is_final=True)]] * 3, tools=[voicemail, end_call])
     for _ in range(3):
         await _collect(agent, _turn("hi"))
 
-    assert "voicemail" in _names(mock.recorded_tools[0])
-    assert "voicemail" in _names(mock.recorded_tools[1])
-    assert "voicemail" not in _names(mock.recorded_tools[2])
+    for recorded in mock.recorded_tools:
+        assert "voicemail" in _names(recorded)
 
 
 async def test_any_class_tool_with_active_turns_is_removed():
