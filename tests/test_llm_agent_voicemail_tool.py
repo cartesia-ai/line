@@ -13,7 +13,14 @@ These tests mock the LLM provider — no network. They cover:
 from typing import List, Optional
 
 from line.agent import AgentEnv, TurnEnv
-from line.events import AgentEndCall, AgentSendText, LogMetric, UserTextSent, UserTurnEnded
+from line.events import (
+    AgentEndCall,
+    AgentSendText,
+    CallStarted,
+    LogMetric,
+    UserTextSent,
+    UserTurnEnded,
+)
 from line.llm_agent.llm_agent import LlmAgent
 from line.llm_agent.provider import Message, StreamChunk, ToolCall, parse_model_id
 from line.llm_agent.tools.system import VoicemailTool, end_call, knowledge_base, transfer_call, voicemail
@@ -292,6 +299,23 @@ async def test_tools_without_active_turns_are_a_noop():
         await _collect(agent, _turn("hi"))
     for recorded in mock.recorded_tools:
         assert _names(recorded) == ["end_call"]
+
+
+async def test_call_started_resets_turn_window():
+    """A reused agent: CallStarted resets the window so voicemail is available again."""
+    agent, mock = _agent(
+        [[StreamChunk(text="a", is_final=True)]] * 5, tools=[voicemail(active_turns=1), end_call]
+    )
+    # First "call": tool present turn 1, dropped turn 2.
+    await _collect(agent, _turn("hi"))
+    await _collect(agent, _turn("hi"))
+    assert "voicemail" in _names(mock.recorded_tools[0])
+    assert "voicemail" not in _names(mock.recorded_tools[1])
+
+    # New call on the same instance resets the counter.
+    await _collect(agent, CallStarted())
+    await _collect(agent, _turn("new call opening"))
+    assert "voicemail" in _names(mock.recorded_tools[-1])  # available again on turn 1
 
 
 def test_constructor_accepts_voicemail_tool():

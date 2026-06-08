@@ -243,6 +243,10 @@ class LlmAgent:
 
         # Handle CallStarted
         if isinstance(event, CallStarted):
+            # Reset per-call turn state so tool-removal windows (active_turns) start
+            # fresh — a reused LlmAgent instance otherwise carries the count over and
+            # would drop windowed tools on the next call's opening turn.
+            self._user_turns_seen = 0
             warmup_task = asyncio.create_task(
                 self._llm.warmup(config=effective_config, tools=effective_tools)
             )
