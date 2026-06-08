@@ -96,7 +96,7 @@ class LlmAgent:
         config: Optional[LlmConfig] = None,
         max_tool_iterations: int = 10,
         backend: Optional[str] = None,
-        voicemail_tool_active_turns: Optional[int] = 1,
+        voicemail_tool_active_turns: Optional[int] = 2,
     ):
         """
         Args:
@@ -104,9 +104,10 @@ class LlmAgent:
                 ``voicemail`` tool stays available before the agent drops it from its
                 options. Voicemail is only worth detecting at the start of a call, so
                 once the conversation is "deemed started" the tool is removed and the
-                LM can no longer hang up mid-conversation. Defaults to ``1`` (available
-                only for the opening turn). ``None`` keeps it for the whole call. No-op
-                when no voicemail tool is in ``tools``.
+                LM can no longer hang up mid-conversation. Defaults to ``2`` — enough to
+                cover a greeting that arrives over a couple of turns (e.g. when VAD splits
+                it) while still retiring the tool early. ``None`` keeps it for the whole
+                call. No-op when no voicemail tool is in ``tools``.
         """
         if not api_key:
             raise ValueError("Missing API key in LLmAgent initialization")
@@ -146,7 +147,6 @@ class LlmAgent:
         # started" (after `voicemail_tool_active_turns` completed turns).
         self._voicemail_tool_active_turns = voicemail_tool_active_turns
         self._user_turns_seen = 0
-        self._voicemail_tool_removed = False
 
         self._introduction_sent = False
         self.history = History()
@@ -272,11 +272,18 @@ class LlmAgent:
             return
 
         # A non-handoff, non-lifecycle event drives an agent response turn. Count
-        # it and drop the voicemail tool once the conversation is "deemed started".
+        # it and, once the conversation is "deemed started", strip the voicemail
+        # tool from this turn's tools so the LM can't hang up mid-conversation.
         self._user_turns_seen += 1
-        self._maybe_remove_voicemail_tool()
-        # Recompute in case the voicemail tool was just removed.
         effective_tools = _merge_tools(self._tools, tools)
+        if self._voicemail_window_closed():
+            # Remove it from the provider's stored defaults (so it isn't merged
+            # back in) AND from this turn's effective set (so a per-call `tools`
+            # override can't reintroduce it). Re-checked every turn, so there is no
+            # sticky flag that could wrongly block a later re-added tool.
+            if any(_is_voicemail_tool(t) for t in self._tools):
+                self.set_tools([t for t in self._tools if not _is_voicemail_tool(t)])
+            effective_tools = [t for t in effective_tools if not _is_voicemail_tool(t)]
 
         async for output in self._generate_response(
             env, event, effective_tools, effective_config, context=context, history=history
@@ -720,31 +727,19 @@ class LlmAgent:
         await self._get_background_event_queue().wait()
         await self._llm.aclose()
 
-    def _maybe_remove_voicemail_tool(self) -> None:
-        """Drop the built-in voicemail tool once enough user turns have elapsed.
+    def _voicemail_window_closed(self) -> bool:
+        """Whether the voicemail tool should no longer be available.
 
-        The voicemail tool is only useful at the very start of a call (the
-        greeting). Once the conversation is "deemed started" — after
-        ``voicemail_tool_active_turns`` completed user turns — we remove it so the
-        main LM can't accidentally hang up mid-conversation. No-op when no
-        voicemail tool is configured or when removal is disabled (``None``).
+        True once more than ``voicemail_tool_active_turns`` user turns have been
+        seen. The voicemail tool is only useful at the start of a call (the
+        greeting); after that the conversation is "deemed started" and we strip
+        the tool so the main LM can't hang up mid-conversation. Always ``False``
+        when removal is disabled (``None``).
         """
-        if (
-            self._voicemail_tool_removed
-            or self._voicemail_tool_active_turns is None
-            or self._user_turns_seen <= self._voicemail_tool_active_turns
-        ):
-            return
-
-        remaining = [t for t in self._tools if not _is_voicemail_tool(t)]
-        if len(remaining) != len(self._tools):
-            logger.info(
-                f"Removing voicemail tool after {self._voicemail_tool_active_turns} user turn(s) "
-                "(conversation deemed started)"
-            )
-            self.set_tools(remaining)
-        # Set the flag regardless so we only ever attempt removal once.
-        self._voicemail_tool_removed = True
+        return (
+            self._voicemail_tool_active_turns is not None
+            and self._user_turns_seen > self._voicemail_tool_active_turns
+        )
 
     # ------------------------------------------------------------------
     # Validation helpers

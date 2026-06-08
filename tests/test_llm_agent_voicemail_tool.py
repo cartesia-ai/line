@@ -84,9 +84,9 @@ def _turn(text: str) -> UserTurnEnded:
     return UserTurnEnded(content=[UserTextSent(content=text)], history=[user_msg])
 
 
-async def _collect(agent: LlmAgent, event):
+async def _collect(agent: LlmAgent, event, tools=None):
     env = TurnEnv(agent_env=AgentEnv())
-    return [o async for o in agent.process(env, event) if not isinstance(o, LogMetric)]
+    return [o async for o in agent.process(env, event, tools=tools) if not isinstance(o, LogMetric)]
 
 
 def _names(recorded) -> List[str]:
@@ -167,6 +167,44 @@ async def test_voicemail_tool_removed_after_first_turn():
     assert "end_call" in _names(mock.recorded_tools[0])
     assert "voicemail" not in _names(mock.recorded_tools[1])
     assert "end_call" in _names(mock.recorded_tools[1])
+
+
+async def test_default_active_turns_is_two():
+    """Default (no active_turns passed) keeps the tool for turns 1-2, drops it on turn 3."""
+    agent = LlmAgent(model="gpt-4o", api_key="test-key", tools=[voicemail, end_call])
+    mock = _MockLLM([[StreamChunk(text="a", is_final=True)]] * 3)
+    agent._llm = mock
+    for _ in range(3):
+        await _collect(agent, _turn("hi"))
+
+    assert "voicemail" in _names(mock.recorded_tools[0])
+    assert "voicemail" in _names(mock.recorded_tools[1])
+    assert "voicemail" not in _names(mock.recorded_tools[2])
+
+
+async def test_per_call_tools_override_cannot_reintroduce_voicemail_after_window():
+    """A per-call `tools` override must not resurrect voicemail once the window closed."""
+    agent, mock = _agent([[StreamChunk(text="a", is_final=True)]] * 2, tools=[end_call], active_turns=1)
+    await _collect(agent, _turn("hi"), tools=[voicemail(message="x")])  # turn 1: within window
+    await _collect(agent, _turn("hi"), tools=[voicemail(message="x")])  # turn 2: window closed
+
+    assert "voicemail" in _names(mock.recorded_tools[0])
+    assert "voicemail" not in _names(mock.recorded_tools[1])
+
+
+async def test_voicemail_readded_after_window_is_stripped_again():
+    """No sticky flag: re-adding voicemail via set_tools after the window is re-stripped."""
+    agent, mock = _agent(
+        [[StreamChunk(text="a", is_final=True)]] * 3, tools=[voicemail, end_call], active_turns=1
+    )
+    await _collect(agent, _turn("hi"))  # turn 1: present
+    await _collect(agent, _turn("hi"))  # turn 2: window closed → stripped
+    agent.set_tools([voicemail, end_call])  # caller re-adds it dynamically
+    await _collect(agent, _turn("hi"))  # turn 3: still closed → stripped again
+
+    assert "voicemail" in _names(mock.recorded_tools[0])
+    assert "voicemail" not in _names(mock.recorded_tools[1])
+    assert "voicemail" not in _names(mock.recorded_tools[2])
 
 
 async def test_voicemail_tool_kept_for_two_turns():
