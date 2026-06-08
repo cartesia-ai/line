@@ -226,6 +226,15 @@ def _resolve_api_key(model: str) -> Optional[str]:
     return os.getenv("OPENAI_API_KEY")
 
 
+def _quiet_logs() -> None:
+    """Drop loguru INFO spam (one line per agent/turn) so the eval tables aren't
+    buried in hundreds of log lines across the ~210 conversations."""
+    from loguru import logger
+
+    logger.remove()
+    logger.add(sys.stderr, level="WARNING")
+
+
 def _avg(xs: List[float]) -> float:
     return sum(xs) / len(xs) if xs else 0.0
 
@@ -309,17 +318,14 @@ async def run_detection_eval(model: str, api_key: str) -> Matrix:
 
 
 async def run_latency_sweep(model: str, api_key: str) -> None:
-    """Phase 2: average per-turn latency at each tool-active-turn limit."""
-    n_turns = sum(len(t) for t in LATENCY_SCENARIOS)
-    print(
-        f"\n[2] Latency sweep — {len(LATENCY_SCENARIOS)} human conversations, "
-        f"{n_turns} turns each limit, model={model}\n"
-    )
-    print(f"  {'active_turns':<13} {'avg ms/turn':>12} {'tool-present':>14} {'tool-absent':>13}")
-    print("  " + "-" * 54)
+    """Phase 2: average per-turn latency at each tool-active-turn limit.
 
+    All conversations run first; the table is printed as one contiguous block at
+    the end (so it isn't scattered across per-turn output).
+    """
     present_pool: List[float] = []
     absent_pool: List[float] = []
+    rows: List[tuple[str, float, List[float], List[float]]] = []
     for limit in TURN_LIMITS:
         per_turn: List[tuple[int, float]] = []
         for turns in LATENCY_SCENARIOS:
@@ -330,10 +336,19 @@ async def run_latency_sweep(model: str, api_key: str) -> None:
         present_pool += present
         absent_pool += absent
         all_ms = [ms for _, ms in per_turn]
-        label = "None" if limit is None else str(limit)
+        rows.append(("None" if limit is None else str(limit), _avg(all_ms), present, absent))
+
+    turns_each = len(LATENCY_SCENARIOS[0]) if LATENCY_SCENARIOS else 0
+    print(
+        f"\n[2] Latency sweep — {len(LATENCY_SCENARIOS)} human conversations × {turns_each} turns, "
+        f"model={model}"
+    )
+    print(f"  {'active_turns':<13} {'avg ms/turn':>12} {'tool-present':>14} {'tool-absent':>13}")
+    print("  " + "-" * 54)
+    for label, avg_all, present, absent in rows:
         present_str = f"{_avg(present):.0f}ms" if present else "—"
         absent_str = f"{_avg(absent):.0f}ms" if absent else "—"
-        print(f"  {label:<13} {_avg(all_ms):>10.0f}ms {present_str:>14} {absent_str:>13}")
+        print(f"  {label:<13} {avg_all:>10.0f}ms {present_str:>14} {absent_str:>13}")
 
     dp, da = _avg(present_pool), _avg(absent_pool)
     print(
@@ -343,6 +358,7 @@ async def run_latency_sweep(model: str, api_key: str) -> None:
 
 
 async def _run_all() -> int:
+    _quiet_logs()
     api_key = _resolve_api_key(MODEL)
     if not api_key:
         print(f"No API key for model {MODEL!r}. Set ANTHROPIC_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY.")
@@ -367,6 +383,7 @@ def test_voicemail_tool_confusion_matrix():
     """Pytest entry: detection only. Skips without an API key; asserts zero false positives."""
     import pytest
 
+    _quiet_logs()
     api_key = _resolve_api_key(MODEL)
     if not api_key:
         pytest.skip(f"no API key for live voicemail eval (model={MODEL})")
