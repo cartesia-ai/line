@@ -32,11 +32,13 @@ from line.llm_agent.tools.system import (
     mcp_tool,
     send_dtmf,
     transfer_call,
+    voicemail,
     web_search,
 )
 
 # Function tool definitions and types
 from line.llm_agent.tools.utils import (
+    ClassTool,
     FunctionTool,
     HandoffToolFn,
     LoopbackToolFn,
@@ -67,6 +69,7 @@ __all__ = [
     "end_call",
     "send_dtmf",
     "transfer_call",
+    "voicemail",
     "web_search",
     "agent_as_handoff",
     "mcp_tool",
@@ -79,6 +82,7 @@ __all__ = [
     "HandoffToolFn",
     # Tool definitions
     "FunctionTool",
+    "ClassTool",
     "ParameterInfo",
     "ToolType",
 ]

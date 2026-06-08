@@ -52,8 +52,9 @@ from line.llm_agent.provider import (
     _get_model_config,
     parse_model_id,
 )
-from line.llm_agent.tools.system import EndCallTool, TransferCallTool, WebSearchTool
+from line.llm_agent.tools.system import WebSearchTool
 from line.llm_agent.tools.utils import (
+    ClassTool,
     FunctionTool,
     ToolEnv,
     ToolType,
@@ -68,7 +69,7 @@ _OUTPUT_EVENT_TYPES: Tuple[type, ...] = get_args(OutputEvent)
 
 # Type alias for tools that can be passed to LlmAgent.
 # Plain callables are automatically wrapped via the @tool decorator.
-ToolSpec = Union[FunctionTool, WebSearchTool, EndCallTool, TransferCallTool, Callable]
+ToolSpec = Union[FunctionTool, WebSearchTool, ClassTool, Callable]
 
 
 class LlmAgent:
@@ -90,6 +91,13 @@ class LlmAgent:
         max_tool_iterations: int = 10,
         backend: Optional[str] = None,
     ):
+        """
+        A tool may opt into turn-limited availability via its ``active_turns``
+        (e.g. ``voicemail(active_turns=2)``): the agent drops it from its options
+        after that many user turns, so the LM can no longer call it once the
+        conversation is "deemed started". The built-in ``voicemail`` tool defaults
+        to ``active_turns=2``; pass ``None`` to keep a tool for the whole call.
+        """
         if not api_key:
             raise ValueError("Missing API key in LLmAgent initialization")
 
@@ -116,13 +124,21 @@ class LlmAgent:
         self._tools: List[ToolSpec] = list(tools or [])
         effective_tools, web_search_options = _normalize_tools(self._tools, model_id=model_id)
 
+        # The provider is intentionally NOT seeded with the agent's tools: the
+        # agent passes the fully-resolved tool list to every chat()/warmup(), so a
+        # stored copy would be redundant — and would re-merge tools the agent has
+        # dropped for the turn (e.g. a windowed-out voicemail tool).
         self._llm = LlmProvider(
             model=str(model_id),
             api_key=api_key,
             config=effective_config,
-            tools=self._tools,
+            tools=[],
             backend=backend,
         )
+
+        # Counts user-driven response turns so tools with a finite `active_turns`
+        # can be dropped once the conversation is "deemed started".
+        self._user_turns_seen = 0
 
         self._introduction_sent = False
         self.history = History()
@@ -144,9 +160,12 @@ class LlmAgent:
         return self._background_event_queue
 
     def set_tools(self, tools: List[ToolSpec]) -> None:
-        """Replace the agent's tools with a new list."""
+        """Replace the agent's tools with a new list.
+
+        Only updates the agent's own list; the resolved tools are passed to the
+        provider per call, so there's no provider-side copy to keep in sync.
+        """
         self._tools = tools
-        self._llm._set_tools(tools)
 
     def set_config(self, config: LlmConfig) -> None:
         """Replace the agent's config."""
@@ -224,6 +243,10 @@ class LlmAgent:
 
         # Handle CallStarted
         if isinstance(event, CallStarted):
+            # Reset per-call turn state so tool-removal windows (active_turns) start
+            # fresh — a reused LlmAgent instance otherwise carries the count over and
+            # would drop windowed tools on the next call's opening turn.
+            self._user_turns_seen = 0
             warmup_task = asyncio.create_task(
                 self._llm.warmup(config=effective_config, tools=effective_tools)
             )
@@ -246,6 +269,14 @@ class LlmAgent:
             await self.cleanup()
             yield LogMetric(name="agent_turn_ms", value=(time.perf_counter() - turn_start_time) * 1000)
             return
+
+        # A non-handoff, non-lifecycle event drives an agent response turn. Count
+        # it, then drop any tool whose `active_turns` window has closed so the LM
+        # can no longer call it once the conversation is "deemed started". This is
+        # the single source of truth — the provider isn't seeded with tools, so the
+        # filtered list here is exactly what's sent (no per-turn mutation needed).
+        self._user_turns_seen += 1
+        effective_tools = [t for t in _merge_tools(self._tools, tools) if not self._tool_window_closed(t)]
 
         async for output in self._generate_response(
             env, event, effective_tools, effective_config, context=context, history=history
@@ -689,6 +720,16 @@ class LlmAgent:
         await self._get_background_event_queue().wait()
         await self._llm.aclose()
 
+    def _tool_window_closed(self, tool: Any) -> bool:
+        """Whether *tool*'s ``active_turns`` window has elapsed.
+
+        A tool (e.g. ``voicemail(active_turns=2)``) is dropped once more user turns
+        have been seen than its ``active_turns``. Tools without an ``active_turns``
+        (plain FunctionTools, callables, or ``active_turns=None``) are never dropped.
+        """
+        active_turns = getattr(tool, "active_turns", None)
+        return active_turns is not None and self._user_turns_seen > active_turns
+
     # ------------------------------------------------------------------
     # Validation helpers
     # ------------------------------------------------------------------
@@ -712,13 +753,11 @@ class LlmAgent:
             if not isinstance(tools, list):
                 raise TypeError(f"tools must be a list, got {type(tools).__name__}")
             for i, tool in enumerate(tools):
-                if not (
-                    isinstance(tool, (FunctionTool, WebSearchTool, EndCallTool, TransferCallTool))
-                    or callable(tool)
-                ):
+                if not (isinstance(tool, (FunctionTool, WebSearchTool, ClassTool)) or callable(tool)):
                     raise TypeError(
-                        f"tools[{i}] must be a FunctionTool, WebSearchTool, EndCallTool, "
-                        f"TransferCallTool, or callable, got {type(tool).__name__}"
+                        f"tools[{i}] must be a FunctionTool, WebSearchTool, a built-in ClassTool "
+                        f"(end_call/transfer_call/voicemail/knowledge_base), or callable, "
+                        f"got {type(tool).__name__}"
                     )
 
     @staticmethod

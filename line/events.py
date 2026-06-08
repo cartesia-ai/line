@@ -42,8 +42,15 @@ class AgentToolReturned(BaseModel):
     responding_to: Optional[str] = None
 
 
+# Supported end_reason values in the Cartesia API. "agent_ended" is the default
+# normal hangup (from end_call); "voicemail_detected" is set by the voicemail tool.
+# The reason field below stays a plain str so an unexpected value never raises.
+EndCallReason = Literal["agent_ended", "voicemail_detected"]
+
+
 class AgentEndCall(BaseModel):
     type: Literal["end_call"] = "end_call"
+    reason: str = "agent_ended"
     responding_to: Optional[str] = None
     interruptible: bool = True
 

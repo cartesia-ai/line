@@ -20,6 +20,7 @@ from line.llm_agent.tools.system import (
     knowledge_base,
     send_dtmf,
     transfer_call,
+    voicemail,
     web_search,
 )
 
@@ -47,6 +48,7 @@ __all__ = [
     "end_call",
     "send_dtmf",
     "transfer_call",
+    "voicemail",
     "agent_as_handoff",
     "knowledge_base",
     # Utility types
