@@ -38,6 +38,7 @@ from line.llm_agent.tools.system import (
 
 # Function tool definitions and types
 from line.llm_agent.tools.utils import (
+    ClassTool,
     FunctionTool,
     HandoffToolFn,
     LoopbackToolFn,
@@ -81,6 +82,7 @@ __all__ = [
     "HandoffToolFn",
     # Tool definitions
     "FunctionTool",
+    "ClassTool",
     "ParameterInfo",
     "ToolType",
 ]

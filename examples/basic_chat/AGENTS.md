@@ -159,7 +159,7 @@ agent = LlmAgent(
 | `end_call` | passthrough | End call gracefully (`end_reason="agent_ended"`) |
 | `send_dtmf` | passthrough | Send DTMF tone (0-9, *, #) |
 | `transfer_call` | passthrough | Transfer to E.164 number |
-| `voicemail` | passthrough | End on a voicemail greeting: optional message, then hang up with `end_reason="voicemail_detected"`. Auto-removed after `voicemail_tool_active_turns` (default 2). |
+| `voicemail` | passthrough | End on a voicemail greeting: optional message, then hang up with `end_reason="voicemail_detected"`. Auto-removed after its `active_turns` (default 2). |
 | `web_search` | WebSearchTool | Real-time search (native or DuckDuckGo fallback) |
 | `agent_as_handoff` | helper | Create handoff tool from an Agent (pass to tools list) |
 

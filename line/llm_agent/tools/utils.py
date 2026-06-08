@@ -47,6 +47,7 @@ from typing import (
     get_args,
     get_origin,
     get_type_hints,
+    runtime_checkable,
 )
 
 from line.agent import TurnEnv
@@ -55,13 +56,7 @@ from line.knowledge_base import KnowledgeBase
 
 if TYPE_CHECKING:
     from line.llm_agent.provider import ParsedModelId
-    from line.llm_agent.tools.system import (
-        EndCallTool,
-        KnowledgeBaseTool,
-        TransferCallTool,
-        VoicemailTool,
-        WebSearchTool,
-    )
+    from line.llm_agent.tools.system import WebSearchTool
 
 # -------------------------
 # Tool Type Enum
@@ -151,16 +146,34 @@ class FunctionTool:
     is_background: bool = False
 
 
+@runtime_checkable
+class ClassTool(Protocol):
+    """Shared interface for the built-in class-based tools (``end_call``,
+    ``transfer_call``, ``voicemail``, ``knowledge_base``).
+
+    Each is configured by calling it (e.g. ``voicemail(message=…)``), resolves to a
+    :class:`FunctionTool` via :meth:`as_function_tool`, and may opt into
+    turn-limited availability via ``active_turns`` — the number of user turns the
+    tool stays in the agent's options before it is dropped (``None`` = whole call).
+    A runtime-checkable Protocol (composition over inheritance), so ``isinstance``
+    recognizes any tool exposing this shape.
+    """
+
+    active_turns: Optional[int]
+
+    @property
+    def name(self) -> str: ...
+
+    def as_function_tool(self) -> "FunctionTool": ...
+
+
 # Type alias for tools that can be passed to LlmAgent/LlmProvider.
 # Plain callables are automatically wrapped as loopback tools.
-# Uses string literal because WebSearchTool/EndCallTool are TYPE_CHECKING-only imports.
+# WebSearchTool stays separate — it maps to native web-search options, not a FunctionTool.
 ToolSpec = Union[
     FunctionTool,
     "WebSearchTool",
-    "EndCallTool",
-    "TransferCallTool",
-    "KnowledgeBaseTool",
-    "VoicemailTool",
+    ClassTool,
     Callable,
 ]
 
@@ -352,13 +365,7 @@ def _normalize_tools(
         FunctionTool in the first list.
     """
     from line.llm_agent.tools.decorators import loopback_tool
-    from line.llm_agent.tools.system import (
-        EndCallTool,
-        KnowledgeBaseTool,
-        TransferCallTool,
-        VoicemailTool,
-        WebSearchTool,
-    )
+    from line.llm_agent.tools.system import WebSearchTool
 
     function_tools: List[FunctionTool] = []
     web_search_tool: Optional[Any] = None
@@ -366,17 +373,18 @@ def _normalize_tools(
     for tool in tool_specs:
         if isinstance(tool, FunctionTool):
             function_tools.append(tool)
-        elif isinstance(tool, (EndCallTool, TransferCallTool, KnowledgeBaseTool, VoicemailTool)):
-            function_tools.append(tool.as_function_tool())
         elif isinstance(tool, WebSearchTool):
             web_search_tool = tool
+        elif isinstance(tool, ClassTool):
+            # Built-in class tools (end_call, transfer_call, voicemail, knowledge_base).
+            # Checked before `callable` since they are callable (configurable via __call__).
+            function_tools.append(tool.as_function_tool())
         elif callable(tool):
             function_tools.append(loopback_tool(tool))
         else:
             raise TypeError(
                 f"Unsupported tool type: {type(tool).__name__}. "
-                f"Expected FunctionTool, EndCallTool, TransferCallTool, "
-                f"KnowledgeBaseTool, WebSearchTool, or callable."
+                f"Expected FunctionTool, WebSearchTool, a built-in ClassTool, or callable."
             )
 
     web_search_options: Optional[Dict[str, Any]] = None
@@ -437,6 +445,7 @@ __all__ = [
     "PassthroughToolFn",
     "HandoffToolFn",
     "FunctionTool",
+    "ClassTool",
     "ParameterInfo",
     # constructor
     "construct_function_tool",

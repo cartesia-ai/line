@@ -8,7 +8,7 @@ Two phases (both make real LLM calls):
    up on a real person → zero false positives).
 
 2. **Latency sweep** — runs longer human conversations at several
-   ``voicemail_tool_active_turns`` limits (1, 2, 5, None) and reports the average
+   ``voicemail(active_turns=…)`` limits (1, 2, 5, None) and reports the average
    per-turn latency for each, to show how keeping the tool available on more
    turns adds per-turn overhead (an extra tool sits in the LLM's schema on every
    turn the tool is still present).
@@ -254,9 +254,9 @@ async def _run_conversation(
     agent = LlmAgent(
         model=model,
         api_key=api_key,
-        tools=[voicemail(message=VOICEMAIL_MESSAGE), end_call],
+        # active_turns lives on the tool now.
+        tools=[voicemail(message=VOICEMAIL_MESSAGE, active_turns=active_turns), end_call],
         config=LlmConfig(system_prompt=SYSTEM_PROMPT, introduction=""),
-        voicemail_tool_active_turns=active_turns,
     )
     env = TurnEnv(agent_env=AgentEnv())
     history: list = []
@@ -286,7 +286,7 @@ async def _run_conversation(
 async def run_detection_eval(model: str, api_key: str) -> Matrix:
     """Phase 1: confusion matrix over the labeled detection scenarios (limit=1)."""
     m = Matrix()
-    print(f"\n[1] Detection — model={model}, {len(SCENARIOS)} scenarios (voicemail_tool_active_turns=1)\n")
+    print(f"\n[1] Detection — model={model}, {len(SCENARIOS)} scenarios (voicemail active_turns=1)\n")
     print(f"{'truth':<10} {'predicted':<10} category")
     print("-" * 44)
     for s in SCENARIOS:

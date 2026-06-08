@@ -34,6 +34,11 @@ DtmfButton = Literal["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "*", "#"]
 # Logger for system tools
 logger = logging.getLogger(__name__)
 
+# Sentinel for chainable ``__call__`` configs: distinguishes "argument omitted
+# (inherit the current value)" from "explicitly passed None". Needed for
+# ``active_turns``, where ``None`` is a real value meaning "never auto-remove".
+_INHERIT: Any = object()
+
 
 @dataclass
 class UpdateCallConfig:
@@ -204,9 +209,13 @@ is possible."""
         self,
         description: Optional[str] = None,
         interruptible: bool = True,
+        active_turns: Optional[int] = None,
     ):
         self.description = description if description else self.DEFAULT_DESCRIPTION
         self.interruptible = interruptible
+        # How many user turns this tool stays available before LlmAgent drops it.
+        # None (default) = available for the whole call.
+        self.active_turns = active_turns
         self._function_tool = self._create_function_tool()
 
     @property
@@ -239,6 +248,7 @@ is possible."""
         self,
         description: Optional[str] = None,
         interruptible: Optional[bool] = None,
+        active_turns: Any = _INHERIT,
     ) -> "EndCallTool":
         """Create a configured EndCallTool instance.
 
@@ -249,12 +259,15 @@ is possible."""
             description: Description that replaces the default. Use this to customize
                 when the LLM should end the call.
             interruptible: Whether the end_call tool is interruptible.
+            active_turns: User turns the tool stays available before the agent drops it
+                (``None`` = whole call). Omit to inherit the current value.
         Returns:
             A new EndCallTool instance with the specified configuration.
         """
         return EndCallTool(
             description=description if description is not None else self.description,
             interruptible=interruptible if interruptible is not None else self.interruptible,
+            active_turns=self.active_turns if active_turns is _INHERIT else active_turns,
         )
 
 
@@ -304,6 +317,7 @@ class TransferCallTool:
         target_phone_number: Optional[str] = None,
         message: Optional[str] = None,
         interruptible: bool = True,
+        active_turns: Optional[int] = None,
     ):
         # When pinned, validate/normalize once at construction so a bad config
         # fails fast rather than at call time.
@@ -312,6 +326,8 @@ class TransferCallTool:
         )
         self.message = message
         self.interruptible = interruptible
+        # User turns this tool stays available before LlmAgent drops it (None = whole call).
+        self.active_turns = active_turns
         self._function_tool = self._create_function_tool()
 
     @property
@@ -410,6 +426,7 @@ class TransferCallTool:
         target_phone_number: Optional[str] = None,
         message: Optional[str] = None,
         interruptible: Optional[bool] = None,
+        active_turns: Any = _INHERIT,
     ) -> "TransferCallTool":
         """Create a configured TransferCallTool instance.
 
@@ -423,6 +440,8 @@ class TransferCallTool:
                 the number is hidden from the LLM and validated at construction.
             message: Optional message spoken before transfer.
             interruptible: Whether the transfer_call tool is interruptible.
+            active_turns: User turns the tool stays available before the agent drops it
+                (``None`` = whole call). Omit to inherit the current value.
         """
         return TransferCallTool(
             target_phone_number=(
@@ -430,6 +449,7 @@ class TransferCallTool:
             ),
             message=message if message is not None else self.message,
             interruptible=interruptible if interruptible is not None else self.interruptible,
+            active_turns=self.active_turns if active_turns is _INHERIT else active_turns,
         )
 
 
@@ -473,12 +493,17 @@ first; this tool ends the call."""
         message: Optional[str] = None,
         interruptible: bool = False,
         description: Optional[str] = None,
+        active_turns: Optional[int] = 2,
     ):
         # interruptible defaults to False: on a voicemail there's no human to interrupt
         # and we want the message left in full.
         self.message = message
         self.interruptible = interruptible
         self.description = description if description else self.DEFAULT_DESCRIPTION
+        # Voicemail is only worth checking at the start of a call, so the agent drops
+        # this tool after `active_turns` user turns (default 2, covering a greeting that
+        # arrives over a couple of turns). None keeps it for the whole call.
+        self.active_turns = active_turns
         self._function_tool = self._create_function_tool()
 
     @property
@@ -511,6 +536,7 @@ first; this tool ends the call."""
         message: Optional[str] = None,
         interruptible: bool = False,
         description: Optional[str] = None,
+        active_turns: Any = _INHERIT,
     ) -> "VoicemailTool":
         """Create a configured VoicemailTool instance.
 
@@ -518,8 +544,15 @@ first; this tool ends the call."""
             message: Optional message spoken (uninterruptible by default) before the call ends.
             interruptible: Whether the message/end are interruptible.
             description: Override the default LLM-facing description (when to invoke).
+            active_turns: User turns the tool stays available before the agent drops it
+                (default 2; ``None`` = whole call). Omit to inherit the current value.
         """
-        return VoicemailTool(message=message, interruptible=interruptible, description=description)
+        return VoicemailTool(
+            message=message,
+            interruptible=interruptible,
+            description=description,
+            active_turns=self.active_turns if active_turns is _INHERIT else active_turns,
+        )
 
 
 # Default instance - can be used directly or called to configure
@@ -758,12 +791,15 @@ class KnowledgeBaseTool:
         description: Optional[str] = None,
         timeout_s: Optional[float] = None,
         is_background: bool = False,
+        active_turns: Optional[int] = None,
     ):
         self._filters = filters
         self._top_k = top_k
         self._description = description if description else self.DEFAULT_DESCRIPTION
         self._timeout_s = timeout_s
         self._is_background = is_background
+        # User turns this tool stays available before LlmAgent drops it (None = whole call).
+        self.active_turns = active_turns
         _warn_if_long_timeout(timeout_s, source="KnowledgeBaseTool")
         self._function_tool = self._create_function_tool()
 
@@ -815,6 +851,7 @@ class KnowledgeBaseTool:
         description: Optional[str] = None,
         timeout_s: Optional[float] = None,
         is_background: Optional[bool] = None,
+        active_turns: Any = _INHERIT,
     ) -> "KnowledgeBaseTool":
         return KnowledgeBaseTool(
             filters=filters if filters is not None else self._filters,
@@ -822,6 +859,7 @@ class KnowledgeBaseTool:
             description=description if description is not None else self._description,
             timeout_s=timeout_s if timeout_s is not None else self._timeout_s,
             is_background=is_background if is_background is not None else self._is_background,
+            active_turns=self.active_turns if active_turns is _INHERIT else active_turns,
         )
 
 

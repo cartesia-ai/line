@@ -52,8 +52,9 @@ from line.llm_agent.provider import (
     _get_model_config,
     parse_model_id,
 )
-from line.llm_agent.tools.system import EndCallTool, TransferCallTool, VoicemailTool, WebSearchTool
+from line.llm_agent.tools.system import WebSearchTool
 from line.llm_agent.tools.utils import (
+    ClassTool,
     FunctionTool,
     ToolEnv,
     ToolType,
@@ -68,14 +69,7 @@ _OUTPUT_EVENT_TYPES: Tuple[type, ...] = get_args(OutputEvent)
 
 # Type alias for tools that can be passed to LlmAgent.
 # Plain callables are automatically wrapped via the @tool decorator.
-ToolSpec = Union[FunctionTool, WebSearchTool, EndCallTool, TransferCallTool, VoicemailTool, Callable]
-
-
-def _is_voicemail_tool(tool: Any) -> bool:
-    """Return True if *tool* is the built-in voicemail tool (instance or FunctionTool)."""
-    if isinstance(tool, VoicemailTool):
-        return True
-    return getattr(tool, "name", None) == "voicemail"
+ToolSpec = Union[FunctionTool, WebSearchTool, ClassTool, Callable]
 
 
 class LlmAgent:
@@ -96,18 +90,13 @@ class LlmAgent:
         config: Optional[LlmConfig] = None,
         max_tool_iterations: int = 10,
         backend: Optional[str] = None,
-        voicemail_tool_active_turns: Optional[int] = 2,
     ):
         """
-        Args:
-            voicemail_tool_active_turns: How many completed user turns the built-in
-                ``voicemail`` tool stays available before the agent drops it from its
-                options. Voicemail is only worth detecting at the start of a call, so
-                once the conversation is "deemed started" the tool is removed and the
-                LM can no longer hang up mid-conversation. Defaults to ``2`` — enough to
-                cover a greeting that arrives over a couple of turns (e.g. when VAD splits
-                it) while still retiring the tool early. ``None`` keeps it for the whole
-                call. No-op when no voicemail tool is in ``tools``.
+        A tool may opt into turn-limited availability via its ``active_turns``
+        (e.g. ``voicemail(active_turns=2)``): the agent drops it from its options
+        after that many user turns, so the LM can no longer call it once the
+        conversation is "deemed started". The built-in ``voicemail`` tool defaults
+        to ``active_turns=2``; pass ``None`` to keep a tool for the whole call.
         """
         if not api_key:
             raise ValueError("Missing API key in LLmAgent initialization")
@@ -143,9 +132,8 @@ class LlmAgent:
             backend=backend,
         )
 
-        # Drop the built-in voicemail tool once the conversation is "deemed
-        # started" (after `voicemail_tool_active_turns` completed turns).
-        self._voicemail_tool_active_turns = voicemail_tool_active_turns
+        # Counts user-driven response turns so tools with a finite `active_turns`
+        # can be dropped once the conversation is "deemed started".
         self._user_turns_seen = 0
 
         self._introduction_sent = False
@@ -272,18 +260,14 @@ class LlmAgent:
             return
 
         # A non-handoff, non-lifecycle event drives an agent response turn. Count
-        # it and, once the conversation is "deemed started", strip the voicemail
-        # tool from this turn's tools so the LM can't hang up mid-conversation.
+        # it, then drop any tool whose `active_turns` window has closed so the LM
+        # can no longer call it once the conversation is "deemed started".
         self._user_turns_seen += 1
+        self._strip_windowed_tools()
         effective_tools = _merge_tools(self._tools, tools)
-        if self._voicemail_window_closed():
-            # Remove it from the provider's stored defaults (so it isn't merged
-            # back in) AND from this turn's effective set (so a per-call `tools`
-            # override can't reintroduce it). Re-checked every turn, so there is no
-            # sticky flag that could wrongly block a later re-added tool.
-            if any(_is_voicemail_tool(t) for t in self._tools):
-                self.set_tools([t for t in self._tools if not _is_voicemail_tool(t)])
-            effective_tools = [t for t in effective_tools if not _is_voicemail_tool(t)]
+        # Also strip from this turn's effective set so a per-call `tools` override
+        # can't reintroduce a windowed tool. Re-checked every turn (no sticky flag).
+        effective_tools = [t for t in effective_tools if not self._tool_window_closed(t)]
 
         async for output in self._generate_response(
             env, event, effective_tools, effective_config, context=context, history=history
@@ -727,19 +711,26 @@ class LlmAgent:
         await self._get_background_event_queue().wait()
         await self._llm.aclose()
 
-    def _voicemail_window_closed(self) -> bool:
-        """Whether the voicemail tool should no longer be available.
+    def _tool_window_closed(self, tool: Any) -> bool:
+        """Whether *tool*'s ``active_turns`` window has elapsed.
 
-        True once more than ``voicemail_tool_active_turns`` user turns have been
-        seen. The voicemail tool is only useful at the start of a call (the
-        greeting); after that the conversation is "deemed started" and we strip
-        the tool so the main LM can't hang up mid-conversation. Always ``False``
-        when removal is disabled (``None``).
+        A tool (e.g. ``voicemail(active_turns=2)``) is dropped once more user turns
+        have been seen than its ``active_turns``. Tools without an ``active_turns``
+        (plain FunctionTools, callables, or ``active_turns=None``) are never dropped.
         """
-        return (
-            self._voicemail_tool_active_turns is not None
-            and self._user_turns_seen > self._voicemail_tool_active_turns
-        )
+        active_turns = getattr(tool, "active_turns", None)
+        return active_turns is not None and self._user_turns_seen > active_turns
+
+    def _strip_windowed_tools(self) -> None:
+        """Permanently drop any tool whose ``active_turns`` window has closed.
+
+        Updates ``self._tools`` (and the provider's stored defaults via
+        ``set_tools``) so a windowed tool isn't merged back in. Re-checked every
+        turn; removal is monotonic since the turn count only grows.
+        """
+        remaining = [t for t in self._tools if not self._tool_window_closed(t)]
+        if len(remaining) != len(self._tools):
+            self.set_tools(remaining)
 
     # ------------------------------------------------------------------
     # Validation helpers
@@ -765,14 +756,12 @@ class LlmAgent:
                 raise TypeError(f"tools must be a list, got {type(tools).__name__}")
             for i, tool in enumerate(tools):
                 if not (
-                    isinstance(
-                        tool, (FunctionTool, WebSearchTool, EndCallTool, TransferCallTool, VoicemailTool)
-                    )
-                    or callable(tool)
+                    isinstance(tool, (FunctionTool, WebSearchTool, ClassTool)) or callable(tool)
                 ):
                     raise TypeError(
-                        f"tools[{i}] must be a FunctionTool, WebSearchTool, EndCallTool, "
-                        f"TransferCallTool, VoicemailTool, or callable, got {type(tool).__name__}"
+                        f"tools[{i}] must be a FunctionTool, WebSearchTool, a built-in ClassTool "
+                        f"(end_call/transfer_call/voicemail/knowledge_base), or callable, "
+                        f"got {type(tool).__name__}"
                     )
 
     @staticmethod

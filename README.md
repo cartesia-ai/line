@@ -172,23 +172,26 @@ voicemail(description="…")                 # override the LLM-facing "when to 
 
 **Automatic removal once the conversation starts.** Voicemail is only worth
 checking at the very start of a call, so the agent **drops the `voicemail` tool
-after `voicemail_tool_active_turns` user turns** (default `2`) — once the
-conversation is "deemed started" the LLM can no longer trigger a voicemail
-hangup mid-call. The default of `2` covers a greeting that arrives over a couple
-of turns (e.g. split by VAD); set it higher for heavily fragmented greetings, or
-`None` to keep the tool for the whole call:
+after its `active_turns`** (default `2`) — once the conversation is "deemed
+started" the LLM can no longer trigger a voicemail hangup mid-call. The default
+of `2` covers a greeting that arrives over a couple of turns (e.g. split by VAD);
+set it higher for heavily fragmented greetings, or `None` to keep the tool for
+the whole call:
 
 ```python
 agent = LlmAgent(
     model="anthropic/claude-haiku-4-5-20251001",
     api_key=os.getenv("ANTHROPIC_API_KEY"),
-    tools=[voicemail(message="Hi, please call us back."), end_call],
+    # active_turns lives on the tool. Default is 2; None keeps it for the whole call.
+    tools=[voicemail(message="Hi, please call us back.", active_turns=2), end_call],
     config=LlmConfig(system_prompt=SYSTEM_PROMPT, introduction=""),
-    voicemail_tool_active_turns=2,  # default; None keeps the tool for the whole call
 )
 ```
 
-The removal is a no-op for agents that don't include the `voicemail` tool.
+`active_turns` is a general feature of the built-in class tools (`end_call`,
+`transfer_call`, `voicemail`, `knowledge_base`): any of them can be set to drop
+after N user turns. It defaults to `None` (kept for the whole call) for every
+tool except `voicemail`, which defaults to `2`.
 
 ### HTTP Tools — Connect to HTTP APIs Without Code
 
