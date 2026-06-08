@@ -21,10 +21,13 @@ Environment:
 """
 
 import asyncio
+from contextlib import suppress
 from dataclasses import dataclass, field
 import os
 import sys
 from typing import List, Literal, Optional
+
+import litellm
 
 from line.agent import AgentEnv, TurnEnv
 from line.events import AgentEndCall, AgentSendText, AgentTextSent, UserTextSent, UserTurnEnded
@@ -222,12 +225,23 @@ async def run_eval(model: str, api_key: str) -> Matrix:
     return m
 
 
+async def _eval_then_cleanup(model: str, api_key: str) -> Matrix:
+    """Run the eval and close litellm's cached async HTTP clients before the
+    event loop tears down — otherwise their SSL transports raise
+    "Event loop is closed" after the run finishes."""
+    try:
+        return await run_eval(model, api_key)
+    finally:
+        with suppress(Exception):
+            await litellm.close_litellm_async_clients()
+
+
 async def _main_async() -> int:
     api_key = _resolve_api_key(MODEL)
     if not api_key:
         print(f"No API key for model {MODEL!r}. Set ANTHROPIC_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY.")
         return 2
-    m = await run_eval(MODEL, api_key)
+    m = await _eval_then_cleanup(MODEL, api_key)
     # Hard guarantee: never hang up on a human.
     if m.fp:
         print(f"\nFAIL: {m.fp} false positive(s) — the agent hung up on a real person.")
@@ -243,7 +257,7 @@ def test_voicemail_tool_confusion_matrix():
     api_key = _resolve_api_key(MODEL)
     if not api_key:
         pytest.skip(f"no API key for live voicemail eval (model={MODEL})")
-    matrix = asyncio.run(run_eval(MODEL, api_key))
+    matrix = asyncio.run(_eval_then_cleanup(MODEL, api_key))
     # The non-negotiable: never hang up on a human.
     assert matrix.fp == 0, f"hung up on {matrix.fp} human(s): {matrix.fp_examples}"
     # Sanity floor: unambiguous classic greetings should be caught.
