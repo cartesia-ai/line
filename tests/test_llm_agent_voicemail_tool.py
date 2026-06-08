@@ -138,6 +138,12 @@ def test_voicemail_chaining_preserves_prior_config():
     assert rechained.active_turns == 1
 
 
+def test_as_function_tool_carries_active_turns():
+    """active_turns travels onto the resolved FunctionTool so removal still applies."""
+    assert voicemail(active_turns=3).as_function_tool().active_turns == 3
+    assert end_call.as_function_tool().active_turns is None
+
+
 def test_normalize_tools_resolves_voicemail():
     """VoicemailTool must resolve to a FunctionTool named 'voicemail' (not a loopback callable)."""
     fts, _ = _normalize_tools([voicemail(message="hi"), end_call], parse_model_id("gpt-4o"))
@@ -223,6 +229,19 @@ async def test_per_call_tools_override_cannot_reintroduce_windowed_tool():
     agent, mock = _agent([[StreamChunk(text="a", is_final=True)]] * 2, tools=[end_call])
     await _collect(agent, _turn("hi"), tools=[voicemail(active_turns=1)])  # turn 1: within window
     await _collect(agent, _turn("hi"), tools=[voicemail(active_turns=1)])  # turn 2: window closed
+
+    assert "voicemail" in _names(mock.recorded_tools[0])
+    assert "voicemail" not in _names(mock.recorded_tools[1])
+
+
+async def test_prereresolved_function_tool_is_still_windowed():
+    """A pre-resolved FunctionTool (voicemail(...).as_function_tool()) is still dropped."""
+    agent, mock = _agent(
+        [[StreamChunk(text="a", is_final=True)]] * 2,
+        tools=[voicemail(active_turns=1).as_function_tool(), end_call],
+    )
+    await _collect(agent, _turn("hi"))
+    await _collect(agent, _turn("hi"))
 
     assert "voicemail" in _names(mock.recorded_tools[0])
     assert "voicemail" not in _names(mock.recorded_tools[1])

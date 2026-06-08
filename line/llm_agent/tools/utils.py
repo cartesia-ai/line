@@ -144,6 +144,10 @@ class FunctionTool:
     parameters: Dict[str, "ParameterInfo"]
     tool_type: ToolType = ToolType.GENERAL
     is_background: bool = False
+    # User turns the tool stays available before LlmAgent drops it (None = whole
+    # call). Carried over from a ClassTool's `active_turns` by `as_function_tool()`
+    # so turn-limited removal still applies when a resolved FunctionTool is passed.
+    active_turns: Optional[int] = None
 
 
 @runtime_checkable

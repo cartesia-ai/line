@@ -233,12 +233,14 @@ is possible."""
             # end_call always reports a normal agent hangup reason.
             yield AgentEndCall(reason="agent_ended", interruptible=self.interruptible)
 
-        return construct_function_tool(
+        ft = construct_function_tool(
             _end_call_impl,
             name="end_call",
             description=self.description,
             tool_type=ToolType.GENERAL,
         )
+        ft.active_turns = self.active_turns
+        return ft
 
     def as_function_tool(self) -> FunctionTool:
         """Return the underlying FunctionTool for use in tool resolution."""
@@ -352,9 +354,13 @@ class TransferCallTool:
 
     def _create_function_tool(self) -> FunctionTool:
         """Create the underlying FunctionTool for the configured mode."""
-        if self.target_phone_number is not None:
-            return self._create_fixed_number_tool()
-        return self._create_dynamic_number_tool()
+        ft = (
+            self._create_fixed_number_tool()
+            if self.target_phone_number is not None
+            else self._create_dynamic_number_tool()
+        )
+        ft.active_turns = self.active_turns
+        return ft
 
     def _create_fixed_number_tool(self) -> FunctionTool:
         """Pinned destination: no LLM-facing parameter; transfer to the preset number."""
@@ -520,12 +526,14 @@ first; this tool ends the call."""
                 yield AgentSendText(text=self.message, interruptible=self.interruptible)
             yield AgentEndCall(reason="voicemail_detected", interruptible=self.interruptible)
 
-        return construct_function_tool(
+        ft = construct_function_tool(
             _voicemail_impl,
             name="voicemail",
             description=self.description,
             tool_type=ToolType.GENERAL,
         )
+        ft.active_turns = self.active_turns
+        return ft
 
     def as_function_tool(self) -> FunctionTool:
         """Return the underlying FunctionTool for use in tool resolution."""
@@ -837,13 +845,15 @@ class KnowledgeBaseTool:
                 return "No relevant information found in the knowledge base."
             return separator.join(chunks)
 
-        return construct_function_tool(
+        ft = construct_function_tool(
             _knowledge_base_impl,
             name="knowledge_base",
             description=self._description,
             tool_type=ToolType.GENERAL,
             is_background=self._is_background,
         )
+        ft.active_turns = self.active_turns
+        return ft
 
     def as_function_tool(self) -> FunctionTool:
         return self._function_tool
