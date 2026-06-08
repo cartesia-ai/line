@@ -1,5 +1,7 @@
 # Cartesia Line SDK
 
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/cartesia-ai/line)
+
 Build intelligent, low-latency voice agents with Line.
 
 Line brings voice to your text agents with Cartesia's state-of-the-art speech models. We handle audio orchestration, deployment, and observability so you can focus on your agent's reasoning.
@@ -134,7 +136,7 @@ agent = LlmAgent(
 |------|--------------|
 | `end_call` | Ends the call |
 | `send_dtmf` | Presses phone buttons (0-9, *, #) |
-| `transfer_call` | Transfers to a phone number (E.164 format) |
+| `transfer_call` | Transfers to a phone number (E.164). LLM-supplied by default, or pin a fixed destination with `transfer_call(target_phone_number="+1...")` |
 | `web_search` | Searches the web (native LLM search or DuckDuckGo fallback) |
 | `knowledge_base` | Looks up information from the agent's knowledge base via natural-language query. Call `knowledge_base(filters={...}, top_k=10)` to pre-filter retrievals or override `top_k` |
 | `http_server_tool` | Creates an HTTP tool from JSON schemas (see below) |

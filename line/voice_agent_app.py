@@ -194,13 +194,18 @@ class VoiceAgentApp:
                 metadata.update(result.metadata)
                 config = result.config
 
-            except HTTPException:
+            except HTTPException as e:
+                # Attach a X-Cartesia-Error-Source header to explicit HTTP errors
+                # from customer code.
+                if e.headers is None:
+                    e.headers = {}
+                e.headers["X-Cartesia-Error-Source"] = "agent-code"
                 raise
             except Exception as e:
                 logger.error(f"Error in pre_call_handler: {str(e)}")
                 # Mark this as customer-code-originated so downstream services
-                # (e.g. Inferno) can attribute the failure correctly rather than
-                # treating it as a Cartesia/SDK error.
+                # can attribute the failure correctly rather than treating it
+                # as a Cartesia/SDK error.
                 raise HTTPException(
                     status_code=500,
                     detail="Server error in call processing",
