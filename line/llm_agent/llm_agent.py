@@ -124,11 +124,15 @@ class LlmAgent:
         self._tools: List[ToolSpec] = list(tools or [])
         effective_tools, web_search_options = _normalize_tools(self._tools, model_id=model_id)
 
+        # The provider is intentionally NOT seeded with the agent's tools: the
+        # agent passes the fully-resolved tool list to every chat()/warmup(), so a
+        # stored copy would be redundant — and would re-merge tools the agent has
+        # dropped for the turn (e.g. a windowed-out voicemail tool).
         self._llm = LlmProvider(
             model=str(model_id),
             api_key=api_key,
             config=effective_config,
-            tools=self._tools,
+            tools=[],
             backend=backend,
         )
 
@@ -156,9 +160,12 @@ class LlmAgent:
         return self._background_event_queue
 
     def set_tools(self, tools: List[ToolSpec]) -> None:
-        """Replace the agent's tools with a new list."""
+        """Replace the agent's tools with a new list.
+
+        Only updates the agent's own list; the resolved tools are passed to the
+        provider per call, so there's no provider-side copy to keep in sync.
+        """
         self._tools = tools
-        self._llm._set_tools(tools)
 
     def set_config(self, config: LlmConfig) -> None:
         """Replace the agent's config."""
@@ -261,13 +268,11 @@ class LlmAgent:
 
         # A non-handoff, non-lifecycle event drives an agent response turn. Count
         # it, then drop any tool whose `active_turns` window has closed so the LM
-        # can no longer call it once the conversation is "deemed started".
+        # can no longer call it once the conversation is "deemed started". This is
+        # the single source of truth — the provider isn't seeded with tools, so the
+        # filtered list here is exactly what's sent (no per-turn mutation needed).
         self._user_turns_seen += 1
-        self._strip_windowed_tools()
-        effective_tools = _merge_tools(self._tools, tools)
-        # Also strip from this turn's effective set so a per-call `tools` override
-        # can't reintroduce a windowed tool. Re-checked every turn (no sticky flag).
-        effective_tools = [t for t in effective_tools if not self._tool_window_closed(t)]
+        effective_tools = [t for t in _merge_tools(self._tools, tools) if not self._tool_window_closed(t)]
 
         async for output in self._generate_response(
             env, event, effective_tools, effective_config, context=context, history=history
@@ -720,17 +725,6 @@ class LlmAgent:
         """
         active_turns = getattr(tool, "active_turns", None)
         return active_turns is not None and self._user_turns_seen > active_turns
-
-    def _strip_windowed_tools(self) -> None:
-        """Permanently drop any tool whose ``active_turns`` window has closed.
-
-        Updates ``self._tools`` (and the provider's stored defaults via
-        ``set_tools``) so a windowed tool isn't merged back in. Re-checked every
-        turn; removal is monotonic since the turn count only grows.
-        """
-        remaining = [t for t in self._tools if not self._tool_window_closed(t)]
-        if len(remaining) != len(self._tools):
-            self.set_tools(remaining)
 
     # ------------------------------------------------------------------
     # Validation helpers
