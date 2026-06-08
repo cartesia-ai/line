@@ -378,10 +378,6 @@ class LlmAgent:
                     continue
 
                 tool_args = json.loads(tc.arguments) if tc.arguments else {}
-                # Filter to the tool's declared parameters so a stray/hallucinated
-                # key from the model can't break the `func(ctx, **tool_args)` splat
-                # below. This is why tool handlers don't need to defend with **kwargs.
-                tool_args = _select_declared_args(tool, tool_args)
 
                 normalized_func = _normalize_to_async_gen(tool.func)
 
@@ -776,19 +772,6 @@ async def _normalize_result(
             yield item
     else:
         yield result  # type: ignore[misc]
-
-
-def _select_declared_args(tool: FunctionTool, raw: Dict[str, Any]) -> Dict[str, Any]:
-    """Keep only the args a tool actually declares in its schema.
-
-    Tool handlers are invoked by splatting the model's raw JSON args
-    (`func(ctx, **tool_args)`). The model can emit keys that aren't in the tool's
-    schema — hallucinated, or left over from a prior turn — and for a tool whose
-    handler takes no such parameter that splat would raise `TypeError` and the
-    call would fail. The declared `parameters` are the source of truth for what
-    the handler accepts, so drop anything else here, once, before dispatch.
-    """
-    return {k: v for k, v in raw.items() if k in tool.parameters}
 
 
 def _normalize_to_async_gen(

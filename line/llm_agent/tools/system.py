@@ -335,9 +335,9 @@ class TransferCallTool:
         async def _transfer_call_fixed_impl(ctx: ToolEnv):
             """Transfer the call to the preconfigured destination number.
 
-            Exposes no LLM-facing parameter; the dispatcher filters the model's
-            args to the declared schema, so a stray ``target_phone_number`` the
-            model might invent never reaches this handler.
+            Exposes no LLM-facing parameter: the destination is pinned at
+            construction and hidden from the model, so the schema carries no
+            ``target_phone_number`` for it to supply.
             """
             if self.message:
                 yield AgentSendText(text=self.message, interruptible=self.interruptible)
