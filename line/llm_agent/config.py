@@ -49,6 +49,15 @@ class LlmConfig:
     # Tool schema settings
     strict_tool_schemas: bool = _UNSET
 
+    # Zero Data Retention mode. Default False — the SDK sends ``store: true``
+    # to OpenAI's Responses API and chains turns via ``previous_response_id``
+    # for efficient continuation. Set True for OpenAI organizations with ZDR
+    # enabled (server-side conversation storage rejected by the API) — the
+    # SDK then sends ``store: false`` and the full conversation as ``input``
+    # on every turn. Only used by the WebSocket and ``http_responses``
+    # backends; the ``http`` backend ignores it.
+    zdr_enabled: bool = _UNSET
+
     @classmethod
     def from_call_request(
         cls,
@@ -135,6 +144,7 @@ _FIELD_DEFAULTS: Dict[str, Any] = {
     "timeout": None,
     "extra": dict,  # callable → invoked each time
     "strict_tool_schemas": True,
+    "zdr_enabled": False,
 }
 
 

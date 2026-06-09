@@ -152,7 +152,7 @@ def _build_responses_body(
     """
     body: Dict[str, Any] = {
         "model": model_id.model,
-        "store": True,
+        "store": not cfg.zdr_enabled,
     }
     if input is not None:
         body["input"] = input
@@ -201,13 +201,33 @@ def _plan_responses_chat(
         responses_api=True,
     )
 
+    desired_pairs = _expand_messages(non_system, assistant_text_type="output_text")
+
+    if config.zdr_enabled:
+        # ZDR mode: every turn sends the full conversation as ``input`` (no
+        # ``previous_response_id`` chaining). Server keeps no state, so
+        # history-based divergence/continuation logic is skipped and the
+        # per-turn history update is a no-op.
+        body = _build_responses_body(
+            model_id=model_id,
+            instructions=instructions,
+            tool_defs=tool_defs,
+            cfg=config,
+            input=[item for item, _ in desired_pairs],
+            previous_response_id=None,
+        )
+
+        def update(old_history: List[ConversationEntry], response: Dict[str, Any]) -> List[ConversationEntry]:
+            return []
+
+        return body, update
+
     context_id = _context_identity(
         instructions,
         tool_defs,
         temperature=config.temperature,
         max_tokens=config.max_tokens,
     )
-    desired_pairs = _expand_messages(non_system, assistant_text_type="output_text")
     desired_ids = [context_id] + [identity for _, identity in desired_pairs]
 
     if history and history[0][0] == context_id:

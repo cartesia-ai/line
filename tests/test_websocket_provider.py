@@ -165,6 +165,56 @@ def test_build_request_uses_bare_model_name():
     assert request["model"] == "gpt-5.2"
 
 
+def test_build_request_defaults_store_to_true():
+    request = _build_request(
+        model_id=parse_model_id("openai/gpt-5.2"),
+        instructions=None,
+        tool_defs=None,
+        cfg=_normalize_config(LlmConfig()),
+    )
+    assert request["store"] is True
+
+
+def test_build_request_honors_zdr_enabled_true():
+    request = _build_request(
+        model_id=parse_model_id("openai/gpt-5.2"),
+        instructions=None,
+        tool_defs=None,
+        cfg=_normalize_config(LlmConfig(zdr_enabled=True)),
+    )
+    assert request["store"] is False
+
+
+def test_plan_chat_zdr_mode_sends_full_input_without_previous_response_id():
+    """When zdr_enabled=True, ignore history and send the full conversation."""
+    config = _normalize_config(LlmConfig(zdr_enabled=True))
+    context_id = _context_identity(None, None, temperature=config.temperature, max_tokens=config.max_tokens)
+    history = [
+        (context_id, "warmup"),
+        (("user", "hello", "", ""), None),
+        (("assistant", "hi", "", ""), "resp_1"),
+    ]
+
+    request, update = _plan_chat(
+        history=history,
+        model_id=parse_model_id("openai/gpt-5.2"),
+        messages=[
+            Message(role="user", content="hello"),
+            Message(role="assistant", content="hi"),
+            Message(role="user", content="what's up?"),
+        ],
+        tools=None,
+        config=config,
+    )
+
+    assert request["store"] is False
+    assert "previous_response_id" not in request
+    # All three turns should be in input, not just the diverged tail
+    assert len(request["input"]) == 3
+    # Update should produce an empty history (server has no state to track)
+    assert update(history, {"status": "completed", "id": "resp_2", "output": []}) == []
+
+
 # ---------------------------------------------------------------------------
 # _extract_model_output_identities
 # ---------------------------------------------------------------------------
