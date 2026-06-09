@@ -170,20 +170,20 @@ voicemail(interruptible=True)              # allow the message/hangup to be inte
 voicemail(description="…")                 # override the LLM-facing "when to call this" text
 ```
 
-**Automatic removal once the conversation starts.** Voicemail is only worth
-checking at the very start of a call, so the agent **drops the `voicemail` tool
-after its `active_turns`** (default `2`) — once the conversation is "deemed
-started" the LLM can no longer trigger a voicemail hangup mid-call. The default
-of `2` covers a greeting that arrives over a couple of turns (e.g. split by VAD);
-set it higher for heavily fragmented greetings, or `None` to keep the tool for
-the whole call:
+**Optionally remove the tool once the conversation starts.** Set `active_turns`
+to drop the `voicemail` tool after that many user turns. It defaults to `None`
+(available the whole call): a voicemail greeting often transcribes into several
+short turns that arrive before the agent first responds, so a small window is
+exhausted before the LLM can act. The tool's description keeps the model off it
+once a real person is talking, so keeping it available is safe.
 
 ```python
 agent = LlmAgent(
     model="anthropic/claude-haiku-4-5-20251001",
     api_key=os.getenv("ANTHROPIC_API_KEY"),
-    # active_turns lives on the tool. Default is 2; None keeps it for the whole call.
-    tools=[voicemail(message="Hi, please call us back.", active_turns=2), end_call],
+    # active_turns lives on the tool. Default None keeps it for the whole call;
+    # set a finite value to drop it after that many user turns.
+    tools=[voicemail(message="Hi, please call us back."), end_call],
     config=LlmConfig(system_prompt=SYSTEM_PROMPT, introduction=""),
 )
 ```
@@ -191,7 +191,7 @@ agent = LlmAgent(
 `active_turns` is a general feature of the built-in class tools (`end_call`,
 `transfer_call`, `voicemail`, `knowledge_base`): any of them can be set to drop
 after N user turns. It defaults to `None` (kept for the whole call) for every
-tool except `voicemail`, which defaults to `2`.
+tool.
 
 ### HTTP Tools — Connect to HTTP APIs Without Code
 

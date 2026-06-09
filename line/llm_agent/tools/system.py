@@ -491,26 +491,41 @@ Use when the greeting is a machine, e.g.:
 - "please leave a message", "at the tone", "you've reached the voicemail of…"
 - a beep, or a one-sided recorded greeting with no back-and-forth
 
-Do NOT use this if a real person is talking with you. You may leave a brief message
-first; this tool ends the call."""
+Do NOT use this if a real person is talking with you."""
+
+    # Appended to DEFAULT_DESCRIPTION. With a fixed message the tool speaks it, so
+    # the model must not add its own preamble; without one, it may speak first.
+    _FIXED_MESSAGE_GUIDANCE = (
+        "This tool speaks a fixed message and ends the call. Do not say anything "
+        "yourself — no preamble, acknowledgement, or narration; just call this tool."
+    )
+    _DYNAMIC_MESSAGE_GUIDANCE = "You may leave a brief message first; this tool ends the call."
 
     def __init__(
         self,
         message: Optional[str] = None,
         interruptible: bool = False,
         description: Optional[str] = None,
-        active_turns: Optional[int] = 2,
+        active_turns: Optional[int] = None,
     ):
         # interruptible defaults to False: on a voicemail there's no human to interrupt
         # and we want the message left in full.
         self.message = message
         self.interruptible = interruptible
-        self.description = description if description else self.DEFAULT_DESCRIPTION
-        # Voicemail is only worth checking at the start of a call, so the agent drops
-        # this tool after `active_turns` user turns (default 2, covering a greeting that
-        # arrives over a couple of turns). None keeps it for the whole call.
+        # Track an explicit description override so chaining (__call__) carries only
+        # that forward; otherwise the default is recomputed for the new message.
+        self._custom_description = description
+        self.description = description if description else self._build_default_description()
+        # User turns the tool stays available before the agent drops it. Default
+        # None (whole call): a voicemail greeting fragments into many short turns
+        # that can exhaust a small window before the agent first responds.
         self.active_turns = active_turns
         self._function_tool = self._create_function_tool()
+
+    def _build_default_description(self) -> str:
+        """Default LLM-facing description, tailored to whether a fixed message is set."""
+        tail = self._FIXED_MESSAGE_GUIDANCE if self.message else self._DYNAMIC_MESSAGE_GUIDANCE
+        return f"{self.DEFAULT_DESCRIPTION}\n\n{tail}"
 
     @property
     def name(self) -> str:
@@ -543,7 +558,7 @@ first; this tool ends the call."""
         self,
         message: Optional[str] = None,
         interruptible: Optional[bool] = None,
-        description: Optional[str] = None,
+        description: Any = _INHERIT,
         active_turns: Any = _INHERIT,
     ) -> "VoicemailTool":
         """Create a configured VoicemailTool instance.
@@ -555,14 +570,17 @@ first; this tool ends the call."""
         Args:
             message: Optional message spoken (uninterruptible by default) before the call ends.
             interruptible: Whether the message/end are interruptible.
-            description: Override the default LLM-facing description (when to invoke).
+            description: Override the default LLM-facing description (when to invoke). Omit
+                to inherit any prior override; the built-in default is otherwise recomputed
+                for the resulting message (the fixed-message default tells the model not to
+                narrate, the no-message default lets it speak first).
             active_turns: User turns the tool stays available before the agent drops it
-                (default 2; ``None`` = whole call). Omit to inherit the current value.
+                (``None`` = whole call, the default). Omit to inherit the current value.
         """
         return VoicemailTool(
             message=message if message is not None else self.message,
             interruptible=interruptible if interruptible is not None else self.interruptible,
-            description=description if description is not None else self.description,
+            description=self._custom_description if description is _INHERIT else description,
             active_turns=self.active_turns if active_turns is _INHERIT else active_turns,
         )
 
