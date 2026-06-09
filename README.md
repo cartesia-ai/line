@@ -170,17 +170,12 @@ voicemail(interruptible=True)              # allow the message/hangup to be inte
 voicemail(description="…")                 # override the LLM-facing "when to call this" text
 ```
 
-**Optionally remove the tool once the conversation starts.** Voicemail is only
-worth checking at the very start of a call, so you can have the agent **drop the
-`voicemail` tool after its `active_turns`** — once the conversation is "deemed
-started" the LLM can no longer trigger a voicemail hangup mid-call. This defaults
-to `None` (the tool stays available for the whole call), because a real voicemail
-greeting transcribes into a variable, often large number of short turns (split by
-VAD, e.g. "…forwarded to voicemail.", "…not available.", "At the tone…") that can
-all arrive before the agent first responds — a small window like `2` is exhausted
-and the tool is gone by the time the LLM acts. Keeping it available is safe (the
-tool's description tells the model not to use it once a real person is talking);
-set a finite value if you want it forced off after N turns:
+**Optionally remove the tool once the conversation starts.** Set `active_turns`
+to drop the `voicemail` tool after that many user turns. It defaults to `None`
+(available the whole call): a voicemail greeting often transcribes into several
+short turns that arrive before the agent first responds, so a small window is
+exhausted before the LLM can act. The tool's description keeps the model off it
+once a real person is talking, so keeping it available is safe.
 
 ```python
 agent = LlmAgent(

@@ -493,11 +493,8 @@ Use when the greeting is a machine, e.g.:
 
 Do NOT use this if a real person is talking with you."""
 
-    # Appended to DEFAULT_DESCRIPTION depending on whether a fixed message is set.
-    # With a fixed message the tool speaks it for you, so the model must NOT add its
-    # own words (otherwise it narrates a preamble like "I've reached a voicemail, so
-    # I'll end the call now." before the configured message). Without one, the model
-    # may speak its own brief message in its turn before calling the tool.
+    # Appended to DEFAULT_DESCRIPTION. With a fixed message the tool speaks it, so
+    # the model must not add its own preamble; without one, it may speak first.
     _FIXED_MESSAGE_GUIDANCE = (
         "This tool speaks a fixed message and ends the call. Do not say anything "
         "yourself — no preamble, acknowledgement, or narration; just call this tool."
@@ -515,20 +512,13 @@ Do NOT use this if a real person is talking with you."""
         # and we want the message left in full.
         self.message = message
         self.interruptible = interruptible
-        # Remember whether the description was explicitly overridden, so chaining
-        # (__call__) only carries forward a *custom* description — otherwise the
-        # default is recomputed for the (possibly new) message.
+        # Track an explicit description override so chaining (__call__) carries only
+        # that forward; otherwise the default is recomputed for the new message.
         self._custom_description = description
         self.description = description if description else self._build_default_description()
-        # active_turns bounds how long the tool stays available (the agent drops it
-        # after that many user turns). Default None = available for the whole call.
-        # A finite window is unreliable for voicemail because greetings transcribe
-        # into a variable, often large number of short turns ("…forwarded to
-        # voicemail.", "…not available.", "At the tone…", "…you may hang up.") that
-        # can all arrive before the agent first responds — exhausting a small window
-        # so the tool is gone by the time the LLM acts. The tool's description still
-        # tells the model not to use it once a real person is talking, so keeping it
-        # available is safe; set a finite value to force removal after N turns.
+        # User turns the tool stays available before the agent drops it. Default
+        # None (whole call): a voicemail greeting fragments into many short turns
+        # that can exhaust a small window before the agent first responds.
         self.active_turns = active_turns
         self._function_tool = self._create_function_tool()
 
