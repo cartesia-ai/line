@@ -152,7 +152,7 @@ def _build_responses_body(
     """
     body: Dict[str, Any] = {
         "model": model_id.model,
-        "store": cfg.responses_store,
+        "store": not cfg.zdr_enabled,
     }
     if input is not None:
         body["input"] = input
@@ -203,11 +203,11 @@ def _plan_responses_chat(
 
     desired_pairs = _expand_messages(non_system, assistant_text_type="output_text")
 
-    if not config.responses_store:
-        # ZDR-friendly stateless mode: every turn sends the full conversation
-        # as ``input`` (no ``previous_response_id`` chaining). Server keeps no
-        # state, so history-based divergence/continuation logic is skipped and
-        # the per-turn history update is a no-op.
+    if config.zdr_enabled:
+        # ZDR mode: every turn sends the full conversation as ``input`` (no
+        # ``previous_response_id`` chaining). Server keeps no state, so
+        # history-based divergence/continuation logic is skipped and the
+        # per-turn history update is a no-op.
         body = _build_responses_body(
             model_id=model_id,
             instructions=instructions,

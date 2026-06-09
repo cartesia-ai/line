@@ -249,22 +249,22 @@ def test_user_defaults_with_extra_kwargs():
     assert config.max_tokens == 500
 
 
-def test_responses_store_defaults_to_true():
-    """The Responses-API ``store`` opt-out defaults to True (stateful)."""
+def test_zdr_enabled_defaults_to_false():
+    """ZDR mode defaults to False — stateful Responses API behavior preserved."""
     from line.llm_agent.config import _normalize_config
 
     config = _normalize_config(LlmConfig())
-    assert config.responses_store is True
+    assert config.zdr_enabled is False
 
 
-def test_responses_store_explicit_false_propagates_through_merge():
-    """Explicitly disabling server state survives normalization and merge."""
+def test_zdr_enabled_explicit_true_propagates_through_merge():
+    """Explicitly enabling ZDR survives normalization and merge."""
     from line.llm_agent.config import _merge_configs, _normalize_config
 
-    base = LlmConfig(responses_store=False)
+    base = LlmConfig(zdr_enabled=True)
     override = LlmConfig()
     merged = _merge_configs(base, override)
-    assert merged.responses_store is False
+    assert merged.zdr_enabled is True
 
     normalized = _normalize_config(base)
-    assert normalized.responses_store is False
+    assert normalized.zdr_enabled is True

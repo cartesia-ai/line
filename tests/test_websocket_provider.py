@@ -175,19 +175,19 @@ def test_build_request_defaults_store_to_true():
     assert request["store"] is True
 
 
-def test_build_request_honors_responses_store_false():
+def test_build_request_honors_zdr_enabled_true():
     request = _build_request(
         model_id=parse_model_id("openai/gpt-5.2"),
         instructions=None,
         tool_defs=None,
-        cfg=_normalize_config(LlmConfig(responses_store=False)),
+        cfg=_normalize_config(LlmConfig(zdr_enabled=True)),
     )
     assert request["store"] is False
 
 
-def test_plan_chat_stateless_mode_sends_full_input_without_previous_response_id():
-    """When responses_store=False, ignore history and send the full conversation."""
-    config = _normalize_config(LlmConfig(responses_store=False))
+def test_plan_chat_zdr_mode_sends_full_input_without_previous_response_id():
+    """When zdr_enabled=True, ignore history and send the full conversation."""
+    config = _normalize_config(LlmConfig(zdr_enabled=True))
     context_id = _context_identity(None, None, temperature=config.temperature, max_tokens=config.max_tokens)
     history = [
         (context_id, "warmup"),
