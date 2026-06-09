@@ -491,8 +491,18 @@ Use when the greeting is a machine, e.g.:
 - "please leave a message", "at the tone", "you've reached the voicemail of…"
 - a beep, or a one-sided recorded greeting with no back-and-forth
 
-Do NOT use this if a real person is talking with you. You may leave a brief message
-first; this tool ends the call."""
+Do NOT use this if a real person is talking with you."""
+
+    # Appended to DEFAULT_DESCRIPTION depending on whether a fixed message is set.
+    # With a fixed message the tool speaks it for you, so the model must NOT add its
+    # own words (otherwise it narrates a preamble like "I've reached a voicemail, so
+    # I'll end the call now." before the configured message). Without one, the model
+    # may speak its own brief message in its turn before calling the tool.
+    _FIXED_MESSAGE_GUIDANCE = (
+        "This tool speaks a fixed message and ends the call. Do not say anything "
+        "yourself — no preamble, acknowledgement, or narration; just call this tool."
+    )
+    _DYNAMIC_MESSAGE_GUIDANCE = "You may leave a brief message first; this tool ends the call."
 
     def __init__(
         self,
@@ -505,7 +515,11 @@ first; this tool ends the call."""
         # and we want the message left in full.
         self.message = message
         self.interruptible = interruptible
-        self.description = description if description else self.DEFAULT_DESCRIPTION
+        # Remember whether the description was explicitly overridden, so chaining
+        # (__call__) only carries forward a *custom* description — otherwise the
+        # default is recomputed for the (possibly new) message.
+        self._custom_description = description
+        self.description = description if description else self._build_default_description()
         # active_turns bounds how long the tool stays available (the agent drops it
         # after that many user turns). Default None = available for the whole call.
         # A finite window is unreliable for voicemail because greetings transcribe
@@ -517,6 +531,11 @@ first; this tool ends the call."""
         # available is safe; set a finite value to force removal after N turns.
         self.active_turns = active_turns
         self._function_tool = self._create_function_tool()
+
+    def _build_default_description(self) -> str:
+        """Default LLM-facing description, tailored to whether a fixed message is set."""
+        tail = self._FIXED_MESSAGE_GUIDANCE if self.message else self._DYNAMIC_MESSAGE_GUIDANCE
+        return f"{self.DEFAULT_DESCRIPTION}\n\n{tail}"
 
     @property
     def name(self) -> str:
@@ -549,7 +568,7 @@ first; this tool ends the call."""
         self,
         message: Optional[str] = None,
         interruptible: Optional[bool] = None,
-        description: Optional[str] = None,
+        description: Any = _INHERIT,
         active_turns: Any = _INHERIT,
     ) -> "VoicemailTool":
         """Create a configured VoicemailTool instance.
@@ -561,14 +580,17 @@ first; this tool ends the call."""
         Args:
             message: Optional message spoken (uninterruptible by default) before the call ends.
             interruptible: Whether the message/end are interruptible.
-            description: Override the default LLM-facing description (when to invoke).
+            description: Override the default LLM-facing description (when to invoke). Omit
+                to inherit any prior override; the built-in default is otherwise recomputed
+                for the resulting message (the fixed-message default tells the model not to
+                narrate, the no-message default lets it speak first).
             active_turns: User turns the tool stays available before the agent drops it
                 (``None`` = whole call, the default). Omit to inherit the current value.
         """
         return VoicemailTool(
             message=message if message is not None else self.message,
             interruptible=interruptible if interruptible is not None else self.interruptible,
-            description=description if description is not None else self.description,
+            description=self._custom_description if description is _INHERIT else description,
             active_turns=self.active_turns if active_turns is _INHERIT else active_turns,
         )
 

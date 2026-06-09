@@ -136,6 +136,19 @@ def test_active_turns_defaults_and_chaining():
     assert end_call(active_turns=3).active_turns == 3
 
 
+def test_default_description_is_message_aware():
+    """A fixed-message voicemail tells the model not to narrate; dynamic mode lets it speak."""
+    with_msg = voicemail(message="Call us back.").description
+    assert "Do not say anything yourself" in with_msg
+    assert "leave a brief message" not in with_msg
+    # No fixed message -> the model may speak its own message before ending.
+    assert "leave a brief message" in voicemail.description
+    # An explicit description override wins and is preserved through chaining.
+    custom = voicemail(message="x", description="CUSTOM")
+    assert custom.description == "CUSTOM"
+    assert custom(active_turns=3).description == "CUSTOM"
+
+
 def test_voicemail_chaining_preserves_prior_config():
     """Re-configuring voicemail inherits omitted fields (chain-safe)."""
     configured = voicemail(message="Call us back.", interruptible=True, active_turns=5)
