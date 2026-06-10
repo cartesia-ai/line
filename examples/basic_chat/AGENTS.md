@@ -156,10 +156,10 @@ agent = LlmAgent(
 
 | Tool | Type | Purpose |
 |------|------|---------|
-| `end_call` | passthrough | End call gracefully (`end_reason="agent_ended"`) |
+| `end_call` | passthrough | End call gracefully |
 | `send_dtmf` | passthrough | Send DTMF tone (0-9, *, #) |
 | `transfer_call` | passthrough | Transfer to E.164 number |
-| `voicemail` | passthrough | End on a voicemail greeting: optional message, then hang up with `end_reason="voicemail_detected"`. Stays available the whole call by default (`active_turns=None`); set a finite `active_turns` to drop it after N user turns. |
+| `voicemail` | passthrough | End the call on a voicemail greeting, optionally leaving a message first (`voicemail(message="…")`) |
 | `web_search` | WebSearchTool | Real-time search (native or DuckDuckGo fallback) |
 | `agent_as_handoff` | helper | Create handoff tool from an Agent (pass to tools list) |
 

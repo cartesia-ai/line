@@ -475,9 +475,7 @@ class VoicemailTool:
 
     The detection cues live in the tool's description (below), so the agent's system
     prompt doesn't need to carry voicemail-handling instructions. When invoked the tool
-    speaks the configured message (if any) and then ends the call with
-    ``reason="voicemail_detected"``, which the Cartesia API records as the call's
-    ``end_reason``.
+    speaks the configured message (if any) and then ends the call.
 
     Behavior modes (all from this one tool):
       - voicemail(message="...")  -> speak the message (uninterruptible), then end.

@@ -91,14 +91,6 @@ class LlmAgent:
         max_tool_iterations: int = 10,
         backend: Optional[str] = None,
     ):
-        """
-        A tool may opt into turn-limited availability via its ``active_turns``
-        (e.g. ``voicemail(active_turns=2)``): the agent drops it from its options
-        after that many user turns, so the LM can no longer call it once the
-        conversation is "deemed started". ``active_turns`` defaults to ``None`` for
-        every built-in tool (kept for the whole call); set a finite value to drop a
-        tool after N user turns.
-        """
         if not api_key:
             raise ValueError("Missing API key in LLmAgent initialization")
 
