@@ -137,18 +137,17 @@ agent = LlmAgent(
 | `end_call` | Ends the call |
 | `send_dtmf` | Presses phone buttons (0-9, *, #) |
 | `transfer_call` | Transfers to a phone number (E.164). LLM-supplied by default, or pin a fixed destination with `transfer_call(target_phone_number="+1...")` |
-| `voicemail` | Ends the call when you reach a voicemail: optionally leaves a message first, then hangs up with `end_reason="voicemail_detected"`. Configure with `voicemail(message="…")`. See [Voicemail detection](#voicemail-detection-outbound-calls). |
+| `voicemail` | Ends the call when you reach a voicemail, optionally leaving a message first. Configure with `voicemail(message="…")`. See [Voicemail detection](#voicemail-detection-outbound-calls). |
 | `web_search` | Searches the web (native LLM search or DuckDuckGo fallback) |
 | `knowledge_base` | Looks up information from the agent's knowledge base via natural-language query. Call `knowledge_base(filters={...}, top_k=10)` to pre-filter retrievals or override `top_k` |
 | `http_server_tool` | Creates an HTTP tool from JSON schemas (see below) |
 
 ### Voicemail Detection (outbound calls)
 
-On an outbound call you usually want the agent to hear the callee's opening line
-before speaking, so set `introduction=""` — the agent stays silent on
-`CallStarted` and only responds after the first `UserTurnEnded`. Give it the
-`voicemail` tool and it will hang up (after an optional message) when the LLM
-recognizes a machine greeting, recording `end_reason="voicemail_detected"`:
+Add the `voicemail` tool and the agent hangs up — after an optional message —
+when it recognizes a voicemail or answering-machine greeting. On outbound calls,
+set `introduction=""` so the agent stays silent until it hears the callee's
+opening line:
 
 ```python
 from line.llm_agent import LlmAgent, LlmConfig, end_call, voicemail
@@ -161,7 +160,7 @@ agent = LlmAgent(
 )
 ```
 
-Behavior modes (all from the one tool):
+Configuration options:
 
 ```python
 voicemail                                  # silently end the call on a voicemail
@@ -169,29 +168,6 @@ voicemail(message="Sorry we missed you.")  # speak the message (uninterruptible)
 voicemail(interruptible=True)              # allow the message/hangup to be interrupted
 voicemail(description="…")                 # override the LLM-facing "when to call this" text
 ```
-
-**Optionally remove the tool once the conversation starts.** Set `active_turns`
-to drop the `voicemail` tool after that many user turns. It defaults to `None`
-(available the whole call): a voicemail greeting often transcribes into several
-short turns that arrive before the agent first responds, so a small window is
-exhausted before the LLM can act. The tool's description keeps the model off it
-once a real person is talking, so keeping it available is safe.
-
-```python
-agent = LlmAgent(
-    model="anthropic/claude-haiku-4-5-20251001",
-    api_key=os.getenv("ANTHROPIC_API_KEY"),
-    # active_turns lives on the tool. Default None keeps it for the whole call;
-    # set a finite value to drop it after that many user turns.
-    tools=[voicemail(message="Hi, please call us back."), end_call],
-    config=LlmConfig(system_prompt=SYSTEM_PROMPT, introduction=""),
-)
-```
-
-`active_turns` is a general feature of the built-in class tools (`end_call`,
-`transfer_call`, `voicemail`, `knowledge_base`): any of them can be set to drop
-after N user turns. It defaults to `None` (kept for the whole call) for every
-tool.
 
 ### HTTP Tools — Connect to HTTP APIs Without Code
 

@@ -209,9 +209,10 @@ agent = LlmAgent(
 
 | Tool | Type | Purpose |
 |------|------|---------|
-| `end_call` | passthrough | End call gracefully |
+| `end_call` | passthrough | End call gracefully if the conversation has wrapped up. Customize when it's invoked with `end_call(description="…")` |
 | `send_dtmf` | passthrough | Send DTMF tone (0-9, *, #) |
 | `transfer_call` | passthrough | Transfer to E.164 number |
+| `voicemail` | passthrough | Detect a voicemail greeting and end the call, optionally leaving a message first (`voicemail(message="…")`) |
 | `web_search` | WebSearchTool | Real-time search (native or DuckDuckGo fallback) |
 | `agent_as_handoff` | helper | Create handoff tool from an Agent (pass to tools list) |
 
