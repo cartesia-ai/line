@@ -16,7 +16,13 @@ from unittest.mock import AsyncMock, MagicMock
 from fastapi import WebSocket, WebSocketDisconnect
 import pytest
 
-from line._harness_types import EndCallOutput, MessageOutput, TransferOutput
+from line._harness_types import (
+    EndCallOutput,
+    MessageOutput,
+    RollbackTurnInput,
+    SpeculativeTurnInput,
+    TransferOutput,
+)
 from line.agent import TurnEnv
 from line.events import (
     AgentEndCall,
@@ -1441,3 +1447,88 @@ class TestCreateChatSessionErrorAttribution:
         # carries the agent-code attribution.
         assert response.status_code == 403
         assert response.headers.get("X-Cartesia-Error-Source") == "agent-code"
+
+
+# ============================================================
+# Speculative turns (eager endpointing)
+# ============================================================
+
+
+async def reply_agent(env: TurnEnv, event: InputEvent) -> AsyncIterator[OutputEvent]:
+    """Agent that replies once to a user turn end."""
+    if isinstance(event, UserTurnEnded):
+        yield AgentSendText(text="reply")
+
+
+class TestSpeculativeTurns:
+    @pytest.mark.asyncio
+    async def test_speculative_turn_runs_agent_and_stamps_id(self):
+        """A speculative_turn runs the agent early; outputs carry the speculation_id."""
+        ws = create_mock_websocket()
+        runner = ConversationRunner(ws, reply_agent, env)
+
+        await runner._handle_speculative_turn(SpeculativeTurnInput(content="hello", speculation_id=1))
+        if runner.agent_task:
+            await runner.agent_task
+
+        sent = [c.args[0] for c in ws.send_json.call_args_list]
+        messages = [m for m in sent if m.get("type") == "message"]
+        assert len(messages) == 1
+        assert messages[0]["content"] == "reply"
+        assert messages[0]["speculation_id"] == 1
+        assert runner._active_speculation_id == 1
+
+    @pytest.mark.asyncio
+    async def test_rollback_cancels_and_rewinds_history(self):
+        ws = create_mock_websocket()
+        runner = ConversationRunner(ws, reply_agent, env)
+        history_before = len(runner.history)
+
+        await runner._handle_speculative_turn(SpeculativeTurnInput(content="hello", speculation_id=1))
+        if runner.agent_task:
+            await runner.agent_task
+        # The speculative run appended events + emitted text.
+        assert len(runner.history) > history_before
+        assert len(runner.emitted_agent_text) == 1
+
+        await runner._handle_rollback_turn(RollbackTurnInput(speculation_id=1))
+
+        assert runner._active_speculation_id is None
+        assert len(runner.history) == history_before  # rewound
+        assert runner.emitted_agent_text == []  # rewound
+
+    @pytest.mark.asyncio
+    async def test_commit_does_not_regenerate(self):
+        """A real UserTurnEnded while a speculation is open commits without re-running."""
+        ws = create_mock_websocket()
+        runner = ConversationRunner(ws, reply_agent, env)
+
+        await runner._handle_speculative_turn(SpeculativeTurnInput(content="hello", speculation_id=1))
+        if runner.agent_task:
+            await runner.agent_task
+        ws.send_json.reset_mock()
+
+        await runner._handle_event(TurnEnv(agent_env=env), UserTurnEnded(content=[]))
+        if runner.agent_task:
+            await runner.agent_task
+
+        sent = [c.args[0] for c in ws.send_json.call_args_list]
+        messages = [m for m in sent if m.get("type") == "message"]
+        assert messages == []  # no second reply
+        assert runner._active_speculation_id is None
+
+    @pytest.mark.asyncio
+    async def test_newer_speculation_supersedes_older(self):
+        ws = create_mock_websocket()
+        runner = ConversationRunner(ws, reply_agent, env)
+
+        await runner._handle_speculative_turn(SpeculativeTurnInput(content="hello", speculation_id=1))
+        if runner.agent_task:
+            await runner.agent_task
+        await runner._handle_speculative_turn(SpeculativeTurnInput(content="hello there", speculation_id=2))
+        if runner.agent_task:
+            await runner.agent_task
+
+        # Only the latest speculation stays open; the old checkpoint was dropped.
+        assert runner._active_speculation_id == 2
+        assert 1 not in runner._speculation_checkpoints

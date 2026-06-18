@@ -219,6 +219,26 @@ class History:
     # Private API (called by LlmAgent)
     # ------------------------------------------------------------------
 
+    def mark(self) -> tuple[int, int]:
+        """Snapshot local history + mutations so a speculative turn can be undone.
+
+        Returns an opaque marker for :meth:`restore`. Only the agent-owned state
+        (``_local_history`` and ``_mutations``) is captured; ``_input_history`` is
+        replaced wholesale on every :meth:`_set_input`, so it needs no snapshot.
+        """
+        return (len(self._local_history), len(self._mutations))
+
+    def restore(self, marker: tuple[int, int]) -> None:
+        """Truncate local history + mutations back to a :meth:`mark`.
+
+        Drops everything the agent appended since the mark — i.e. the
+        generated-but-rolled-back speculative turn.
+        """
+        local_len, mutations_len = marker
+        del self._local_history[local_len:]
+        del self._mutations[mutations_len:]
+        self._cache = None  # invalidate cache
+
     def _set_input(self, input_history: List[InputEvent], current_event_id: str) -> None:
         """Update merge sources from a new process() call."""
         self._input_history = input_history

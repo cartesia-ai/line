@@ -40,6 +40,8 @@ from line._harness_types import (
     LogMetricOutput,
     MessageOutput,
     OutputMessage,
+    RollbackTurnInput,
+    SpeculativeTurnInput,
     StartInput,
     STTConfig,
     ToolCallOutput,
@@ -328,6 +330,13 @@ class ConversationRunner:
         self.agent_callable, self.run_filter, self.cancel_filter = self._prepare_agent(agent_spec)
         self.agent_task: Optional[asyncio.Task] = None
 
+        # Speculative turns (eager endpointing). When a speculation is open, the
+        # agent task runs early and its outputs are stamped with this id; on
+        # rollback we cancel + rewind to the matching checkpoint.
+        self._active_speculation_id: Optional[int] = None
+        # speculation_id -> (history_len, emitted_len, agent_history_mark)
+        self._speculation_checkpoints: Dict[int, Tuple[int, int, Optional[object]]] = {}
+
     @property
     def shutdown_event(self) -> asyncio.Event:
         return self._shutdown_event
@@ -359,6 +368,10 @@ class ConversationRunner:
             agent_obj = agent_spec
             run_spec = default_run
             cancel_spec = default_cancel
+
+        # Kept so speculation rollback can rewind the agent's own history
+        # (LlmAgent exposes history.mark()/restore(); other agents are skipped).
+        self._agent_obj = agent_obj
 
         run_filter = self._normalize_filter(run_spec)
         cancel_filter = self._normalize_filter(cancel_spec)
@@ -402,6 +415,15 @@ class ConversationRunner:
                     logger.warning(f"Dropping unparseable websocket message: {message}")
                     continue
 
+                # Speculative turns are handled out-of-band: they drive an early
+                # agent run / rollback rather than mapping to a single InputEvent.
+                if isinstance(input_msg, SpeculativeTurnInput):
+                    await self._handle_speculative_turn(input_msg)
+                    continue
+                if isinstance(input_msg, RollbackTurnInput):
+                    await self._handle_rollback_turn(input_msg)
+                    continue
+
                 # Convert and process the input message
                 event = self._convert_input_message(input_msg)
                 if event is None:
@@ -443,6 +465,15 @@ class ConversationRunner:
 
     async def _handle_event(self, turn_env: TurnEnv, event: InputEvent) -> None:
         """Apply run/cancel filters for a single event."""
+        # Commit: a finalized user turn while a speculation is open just confirms
+        # the eager prediction. The reply was already generated speculatively, so
+        # drop the checkpoint and do NOT regenerate.
+        if self._active_speculation_id is not None and isinstance(event, UserTurnEnded):
+            logger.info(f"-> ✅ Commit speculation {self._active_speculation_id}")
+            self._speculation_checkpoints.pop(self._active_speculation_id, None)
+            self._active_speculation_id = None
+            return
+
         if self.run_filter(event):
             await self._start_agent_task(turn_env, event)
         elif self.cancel_filter(event):
@@ -454,6 +485,9 @@ class ConversationRunner:
 
         # Use the triggering event's event_id for setting responding_to
         responding_to_id = event.event_id
+        # Stamp this task's outputs with the open speculation (if any) so the
+        # harness can hold them until the turn commits or drop them on rollback.
+        speculation_id = self._active_speculation_id
 
         async def runner():
             try:
@@ -469,6 +503,8 @@ class ConversationRunner:
                         break
                     if mapped is None:
                         continue
+                    if speculation_id is not None and hasattr(mapped, "speculation_id"):
+                        mapped.speculation_id = speculation_id
                     await self.websocket.send_json(mapped.model_dump())
             except asyncio.CancelledError:
                 pass
@@ -490,6 +526,72 @@ class ConversationRunner:
             except asyncio.CancelledError:
                 pass
         self.agent_task = None
+
+    ######### Speculative Turn Methods #########
+
+    async def _handle_speculative_turn(self, message: SpeculativeTurnInput) -> None:
+        """Run the agent early on an eagerly-predicted (not-yet-final) user turn.
+
+        Checkpoints history, injects the predicted user text, then drives a
+        synthetic UserTurnEnded so the agent generates now. Outputs from this run
+        carry the speculation_id (see _start_agent_task) so the harness holds them.
+        """
+        spec_id = message.speculation_id
+        logger.info(f'-> 🔮 Speculative turn {spec_id}: "{message.content}"')
+
+        # Latest-wins: a newer eager-end supersedes the prior open speculation.
+        if self._active_speculation_id is not None and self._active_speculation_id != spec_id:
+            await self._rollback_speculation(self._active_speculation_id)
+
+        # Checkpoint everything a rollback must undo.
+        self._speculation_checkpoints[spec_id] = (
+            len(self.history),
+            len(self.emitted_agent_text),
+            self._agent_history_mark(),
+        )
+        self._active_speculation_id = spec_id
+
+        # Inject the predicted transcript, then synthesize the turn end that runs
+        # the agent. We start the task directly rather than via _handle_event so
+        # this synthetic UserTurnEnded isn't swallowed by the commit guard (which
+        # exists for the *real* turn end that follows).
+        _, self.history = self._process_input_event(self.history, UserTextSent(content=message.content))
+        content = self._turn_content(self.history, UserTurnStarted, (UserTextSent, UserDtmfSent))
+        ev, self.history = self._process_input_event(self.history, UserTurnEnded(content=content))
+        if ev is not None:
+            await self._start_agent_task(TurnEnv(agent_env=self.env), ev)
+
+    async def _handle_rollback_turn(self, message: RollbackTurnInput) -> None:
+        """User resumed: scrap the speculation (cancel generation + rewind history)."""
+        logger.info(f"-> ↩️ Rollback speculation {message.speculation_id}")
+        await self._rollback_speculation(message.speculation_id)
+
+    async def _rollback_speculation(self, spec_id: int) -> None:
+        """Cancel the in-flight speculative run and rewind to its checkpoint."""
+        await self._cancel_agent_task()
+        checkpoint = self._speculation_checkpoints.pop(spec_id, None)
+        if checkpoint is not None:
+            history_len, emitted_len, agent_mark = checkpoint
+            del self.history[history_len:]
+            del self.emitted_agent_text[emitted_len:]
+            self._agent_history_restore(agent_mark)
+        if self._active_speculation_id == spec_id:
+            self._active_speculation_id = None
+
+    def _agent_history_mark(self) -> Optional[object]:
+        """Snapshot the agent's own history, if it supports it (LlmAgent does)."""
+        agent_history = getattr(self._agent_obj, "history", None)
+        if agent_history is not None and hasattr(agent_history, "mark"):
+            return agent_history.mark()
+        return None
+
+    def _agent_history_restore(self, marker: Optional[object]) -> None:
+        """Rewind the agent's own history to a prior mark."""
+        if marker is None:
+            return
+        agent_history = getattr(self._agent_obj, "history", None)
+        if agent_history is not None and hasattr(agent_history, "restore"):
+            agent_history.restore(marker)
 
     async def send_error(self, error: str):
         """Send an error message via WebSocket."""
