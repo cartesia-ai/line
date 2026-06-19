@@ -61,13 +61,12 @@ class CustomInput(BaseModel):
 class SpeculativeTurnInput(BaseModel):
     """Eager (predicted-final) user turn from STT turn.eager_end.
 
-    Run the turn early; every output it produces is stamped with this
-    speculation_id so the harness can hold the reply until the turn commits
+    Run the turn early; every output it produces is stamped with responding_to ==
+    this turn's event_id, so the harness can hold the reply until the turn commits
     (turn.end) or drops it on rollback (turn.resume).
     """
 
     content: str
-    speculation_id: int
     language: Optional[str] = None
     type: Literal["speculative_turn"] = "speculative_turn"
     event_id: Optional[str] = None
@@ -76,10 +75,11 @@ class SpeculativeTurnInput(BaseModel):
 class RollbackTurnInput(BaseModel):
     """User resumed after an eager-end: scrap this speculation.
 
-    Cancel the in-flight generation and rewind any conversation history it wrote.
+    Cancel the in-flight generation and rewind any conversation history it wrote
+    for the turn whose event_id is ``responding_to``.
     """
 
-    speculation_id: int
+    responding_to: str
     type: Literal["rollback_turn"] = "rollback_turn"
     event_id: Optional[str] = None
 
@@ -109,8 +109,6 @@ class DTMFOutput(BaseModel):
     type: Literal["dtmf"] = "dtmf"
     button: str
     responding_to: Optional[str] = None
-    # Set when this output answers a speculative turn; None for normal turns.
-    speculation_id: Optional[int] = None
 
 
 class MessageOutput(BaseModel):
@@ -118,7 +116,6 @@ class MessageOutput(BaseModel):
     content: str
     interruptible: bool = True
     responding_to: Optional[str] = None
-    speculation_id: Optional[int] = None
 
 
 class ToolCallOutput(BaseModel):
@@ -128,7 +125,6 @@ class ToolCallOutput(BaseModel):
     result: Optional[str] = None
     id: Optional[str] = None
     responding_to: Optional[str] = None
-    speculation_id: Optional[int] = None
 
 
 class TransferOutput(BaseModel):
@@ -136,7 +132,6 @@ class TransferOutput(BaseModel):
     target_phone_number: str
     responding_to: Optional[str] = None
     interruptible: bool = True
-    speculation_id: Optional[int] = None
 
 
 class EndCallOutput(BaseModel):
@@ -146,7 +141,6 @@ class EndCallOutput(BaseModel):
     reason: Optional[str] = None
     responding_to: Optional[str] = None
     interruptible: bool = True
-    speculation_id: Optional[int] = None
 
 
 class LogEventOutput(BaseModel):

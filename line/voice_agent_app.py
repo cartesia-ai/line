@@ -333,9 +333,9 @@ class ConversationRunner:
         # Speculative turns (eager endpointing). When a speculation is open, the
         # agent task runs early and its outputs are stamped with this id; on
         # rollback we cancel + rewind to the matching checkpoint.
-        self._active_speculation_id: Optional[int] = None
-        # speculation_id -> (history_len, emitted_len, agent_history_mark)
-        self._speculation_checkpoints: Dict[int, Tuple[int, int, Optional[object]]] = {}
+        self._pending_responding_to: Optional[str] = None
+        # responding_to (the eager turn's event_id) -> (history_len, emitted_len, agent_history_mark)
+        self._speculation_checkpoints: Dict[str, Tuple[int, int, Optional[object]]] = {}
 
     @property
     def shutdown_event(self) -> asyncio.Event:
@@ -468,10 +468,10 @@ class ConversationRunner:
         # Commit: a finalized user turn while a speculation is open just confirms
         # the eager prediction. The reply was already generated speculatively, so
         # drop the checkpoint and do NOT regenerate.
-        if self._active_speculation_id is not None and isinstance(event, UserTurnEnded):
-            logger.info(f"-> ✅ Commit speculation {self._active_speculation_id}")
-            self._speculation_checkpoints.pop(self._active_speculation_id, None)
-            self._active_speculation_id = None
+        if self._pending_responding_to is not None and isinstance(event, UserTurnEnded):
+            logger.info(f"-> ✅ Commit speculation {self._pending_responding_to}")
+            self._speculation_checkpoints.pop(self._pending_responding_to, None)
+            self._pending_responding_to = None
             return
 
         if self.run_filter(event):
@@ -483,11 +483,9 @@ class ConversationRunner:
         """Start the agent async iterable for the given event."""
         await self._cancel_agent_task()
 
-        # Use the triggering event's event_id for setting responding_to
+        # Stamp outputs with the triggering event's event_id. On a speculative turn the synthetic
+        # UserTurnEnded carries the eager turn's event_id, which is what the harness holds the reply by.
         responding_to_id = event.event_id
-        # Stamp this task's outputs with the open speculation (if any) so the
-        # harness can hold them until the turn commits or drop them on rollback.
-        speculation_id = self._active_speculation_id
 
         async def runner():
             try:
@@ -503,8 +501,6 @@ class ConversationRunner:
                         break
                     if mapped is None:
                         continue
-                    if speculation_id is not None and hasattr(mapped, "speculation_id"):
-                        mapped.speculation_id = speculation_id
                     await self.websocket.send_json(mapped.model_dump())
             except asyncio.CancelledError:
                 pass
@@ -534,49 +530,53 @@ class ConversationRunner:
 
         Checkpoints history, injects the predicted user text, then drives a
         synthetic UserTurnEnded so the agent generates now. Outputs from this run
-        carry the speculation_id (see _start_agent_task) so the harness holds them.
+        are stamped with responding_to == the eager turn's event_id (see
+        _start_agent_task) so the harness holds them.
         """
-        spec_id = message.speculation_id
-        logger.info(f'-> 🔮 Speculative turn {spec_id}: "{message.content}"')
+        turn_id = message.event_id
+        logger.info(f'-> 🔮 Speculative turn {turn_id}: "{message.content}"')
 
         # Latest-wins: a newer eager-end supersedes the prior open speculation.
-        if self._active_speculation_id is not None and self._active_speculation_id != spec_id:
-            await self._rollback_speculation(self._active_speculation_id)
+        if self._pending_responding_to is not None and self._pending_responding_to != turn_id:
+            await self._rollback_speculation(self._pending_responding_to)
 
         # Checkpoint everything a rollback must undo.
-        self._speculation_checkpoints[spec_id] = (
+        self._speculation_checkpoints[turn_id] = (
             len(self.history),
             len(self.emitted_agent_text),
             self._agent_history_mark(),
         )
-        self._active_speculation_id = spec_id
+        self._pending_responding_to = turn_id
 
-        # Inject the predicted transcript, then synthesize the turn end that runs
-        # the agent. We start the task directly rather than via _handle_event so
-        # this synthetic UserTurnEnded isn't swallowed by the commit guard (which
-        # exists for the *real* turn end that follows).
-        _, self.history = self._process_input_event(self.history, UserTextSent(content=message.content))
+        # Inject the predicted transcript, then synthesize the turn end that runs the agent. Start the
+        # task directly (not via _handle_event) so this synthetic UserTurnEnded isn't swallowed by the
+        # commit guard; the synthetic events carry the eager event_id so outputs inherit responding_to.
+        _, self.history = self._process_input_event(
+            self.history, UserTextSent(content=message.content, event_id=turn_id)
+        )
         content = self._turn_content(self.history, UserTurnStarted, (UserTextSent, UserDtmfSent))
-        ev, self.history = self._process_input_event(self.history, UserTurnEnded(content=content))
+        ev, self.history = self._process_input_event(
+            self.history, UserTurnEnded(content=content, event_id=turn_id)
+        )
         if ev is not None:
             await self._start_agent_task(TurnEnv(agent_env=self.env), ev)
 
     async def _handle_rollback_turn(self, message: RollbackTurnInput) -> None:
         """User resumed: scrap the speculation (cancel generation + rewind history)."""
-        logger.info(f"-> ↩️ Rollback speculation {message.speculation_id}")
-        await self._rollback_speculation(message.speculation_id)
+        logger.info(f"-> ↩️ Rollback speculation {message.responding_to}")
+        await self._rollback_speculation(message.responding_to)
 
-    async def _rollback_speculation(self, spec_id: int) -> None:
+    async def _rollback_speculation(self, responding_to: str) -> None:
         """Cancel the in-flight speculative run and rewind to its checkpoint."""
         await self._cancel_agent_task()
-        checkpoint = self._speculation_checkpoints.pop(spec_id, None)
+        checkpoint = self._speculation_checkpoints.pop(responding_to, None)
         if checkpoint is not None:
             history_len, emitted_len, agent_mark = checkpoint
             del self.history[history_len:]
             del self.emitted_agent_text[emitted_len:]
             self._agent_history_restore(agent_mark)
-        if self._active_speculation_id == spec_id:
-            self._active_speculation_id = None
+        if self._pending_responding_to == responding_to:
+            self._pending_responding_to = None
 
     def _agent_history_mark(self) -> Optional[object]:
         """Snapshot the agent's own history, if it supports it (LlmAgent does)."""
