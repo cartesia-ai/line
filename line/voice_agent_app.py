@@ -663,10 +663,13 @@ class ConversationRunner:
         Returns None for the event when an AgentTextSent ack-back is consumed by
         deduplication (already pre-committed as uninterruptible text).
         """
-        # Collapse to the max version per event_id: successive eager
-        # estimates of one user turn share an event_id; the latest estimate wins.
-        # No-op when no versioned events are present.
-        raw_history = _collapse_versions(history + [raw_event])
+        raw_history = history + [raw_event]
+        # Collapse to the max version per event_id: successive eager estimates of one
+        # user turn share an event_id; the latest wins. Only an eager (version > 0)
+        # arrival can supersede a prior estimate, so skip the scan otherwise — keeps the
+        # non-speculative hot path free of an O(history) pass per event.
+        if (getattr(raw_event, "version", 0) or 0) > 0:
+            raw_history = _collapse_versions(raw_history)
         # Process history to restore whitespace before passing to agent
         processed_history = _get_processed_history(self.emitted_agent_text, raw_history)
         processed_event = processed_history[-1]
