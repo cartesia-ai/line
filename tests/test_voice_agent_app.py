@@ -1458,34 +1458,34 @@ async def reply_agent(env: TurnEnv, event: InputEvent) -> AsyncIterator[OutputEv
 
 
 class TestCollapseVersions:
-    def test_keeps_max_version_per_event_id(self):
+    def test_keeps_max_version_per_base_event_id(self):
         history = [
-            UserTextSent(content="hel", event_id="e1", version=1),
-            UserTextSent(content="hello", event_id="e1", version=2),
-            UserTurnEnded(content=[], event_id="e1", version=2),
+            UserTextSent(content="hel", event_id="e1:1"),
+            UserTextSent(content="hello", event_id="e1:2"),
+            UserTurnEnded(content=[], event_id="e1:2"),
         ]
         out = _collapse_versions(history)
-        # v1 dropped; only the v2 estimate survives.
+        # e1:1 dropped; only the e1:2 estimate survives.
         texts = [e for e in out if isinstance(e, UserTextSent)]
         assert len(texts) == 1
-        assert texts[0].content == "hello" and texts[0].version == 2
+        assert texts[0].content == "hello" and texts[0].event_id == "e1:2"
 
-    def test_noop_without_versions(self):
+    def test_noop_without_version_suffix(self):
         history = [
             UserTextSent(content="a", event_id="e1"),
             UserTextSent(content="b", event_id="e2"),
         ]
-        assert _collapse_versions(history) == history  # unchanged (all version 0)
+        assert _collapse_versions(history) == history  # unchanged (plain event_ids)
 
 
-class TestSpeculativeTurns:
+class TestEagerTurns:
     @pytest.mark.asyncio
-    async def test_speculative_turn_runs_agent_and_stamps_composite_id(self):
-        """An eager turn runs the agent early; outputs carry responding_to == event_id:version."""
+    async def test_eager_turn_runs_agent_and_stamps_composite_id(self):
+        """An eager transcript runs as a normal turn; outputs carry responding_to == event_id:version."""
         ws = create_mock_websocket()
         runner = ConversationRunner(ws, reply_agent, env)
 
-        await runner._handle_speculative_turn(TranscriptionInput(content="hello", event_id="e1", version=1))
+        await runner._run_eager_turn(TranscriptionInput(content="hello", event_id="e1", version=1))
         if runner.agent_task:
             await runner.agent_task
 
@@ -1501,18 +1501,16 @@ class TestSpeculativeTurns:
         ws = create_mock_websocket()
         runner = ConversationRunner(ws, reply_agent, env)
 
-        await runner._handle_speculative_turn(TranscriptionInput(content="hi", event_id="e1", version=1))
+        await runner._run_eager_turn(TranscriptionInput(content="hi", event_id="e1", version=1))
         if runner.agent_task:
             await runner.agent_task
-        await runner._handle_speculative_turn(
-            TranscriptionInput(content="hi there", event_id="e1", version=2)
-        )
+        await runner._run_eager_turn(TranscriptionInput(content="hi there", event_id="e1", version=2))
         if runner.agent_task:
             await runner.agent_task
 
-        # Only the latest (v2) user text for e1 survives the collapse.
-        texts = [e for e in runner.history if isinstance(e, UserTextSent) and e.event_id == "e1"]
-        assert texts and all(e.version == 2 for e in texts)
+        # Only the latest estimate (base e1, version 2) survives the collapse.
+        texts = [e for e in runner.history if isinstance(e, UserTextSent) and e.event_id.startswith("e1")]
+        assert texts and all(e.event_id == "e1:2" for e in texts)
         assert any(e.content == "hi there" for e in texts)
 
     def test_eager_generation_gated_to_llm_agent(self):

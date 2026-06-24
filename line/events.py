@@ -174,10 +174,6 @@ class UserTextSent(BaseModel):
     content: str
     event_id: str = Field(default_factory=_generate_event_id)
     history: Optional[List["InputEvent"]] = None
-    # Eager-endpointing version. Successive eager estimates of one user
-    # turn share an event_id with an increasing version; history collapses to the
-    # max version per event_id. 0 = non-speculative.
-    version: int = 0
 
 
 class UserTurnEnded(BaseModel):
@@ -185,7 +181,6 @@ class UserTurnEnded(BaseModel):
     content: List[Union[UserDtmfSent, UserTextSent]] = Field(default_factory=list)
     event_id: str = Field(default_factory=_generate_event_id)
     history: Optional[List["InputEvent"]] = None
-    version: int = 0
 
 
 class AgentTurnStarted(BaseModel):

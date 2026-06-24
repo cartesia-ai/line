@@ -433,15 +433,15 @@ class ConversationRunner:
                     logger.warning(f"Dropping unparseable websocket message: {message}")
                     continue
 
-                # Speculative turn: an eager (version > 0) transcript runs the
-                # turn early. Handled out-of-band — it drives an early agent run rather
-                # than mapping to a single appended event.
+                # An eager (version > 0) transcript is a predicted-final turn: run it
+                # through the normal turn flow (see _run_eager_turn). The version is
+                # folded into the event_id; nothing else is special-cased.
                 if (
                     self._eager_generation
                     and isinstance(input_msg, TranscriptionInput)
                     and (input_msg.version or 0) > 0
                 ):
-                    await self._handle_speculative_turn(input_msg)
+                    await self._run_eager_turn(input_msg)
                     continue
 
                 # Convert and process the input message
@@ -490,29 +490,20 @@ class ConversationRunner:
         elif self.cancel_filter(event):
             await self._cancel_agent_task()
 
-    async def _start_agent_task(
-        self, turn_env: TurnEnv, event: InputEvent, responding_to: Optional[str] = None
-    ) -> None:
-        """Start the agent async iterable for the given event.
-
-        For a speculative turn, ``responding_to`` is the composite "event_id:version"
-        id; it is forced onto every output (overriding the agent's own bare event_id
-        stamp) so the harness can hold the reply until the matching turn commits.
-        """
+    async def _start_agent_task(self, turn_env: TurnEnv, event: InputEvent) -> None:
+        """Start the agent async iterable for the given event."""
         await self._cancel_agent_task()
 
-        # Use the triggering event's event_id for setting responding_to
-        responding_to_id = responding_to if responding_to is not None else event.event_id
+        # Use the triggering event's event_id for setting responding_to. For an eager
+        # turn this id is the composite "<event_id>:<version>", so the reply is naturally
+        # stamped with it — no special handling here.
+        responding_to_id = event.event_id
 
         async def runner():
             try:
                 async for output in self.agent_callable(turn_env, event):
-                    # Set responding_to at the harness boundary (outermost layer). A
-                    # speculative override is forced even when already set, so the
-                    # composite "event_id:version" wins over the agent's bare event_id.
-                    if responding_to is not None:
-                        output.responding_to = responding_to_id
-                    elif output.responding_to is None:
+                    # Set responding_to at the harness boundary (outermost layer)
+                    if output.responding_to is None:
                         output.responding_to = responding_to_id
                     if isinstance(output, AgentSendText):
                         self.emitted_agent_text.append((output.text, output.interruptible))
@@ -544,41 +535,32 @@ class ConversationRunner:
                 pass
         self.agent_task = None
 
-    async def _handle_speculative_turn(self, message: TranscriptionInput) -> None:
-        """Run the agent early on an eagerly-predicted (not-yet-final) user turn.
+    async def _run_eager_turn(self, message: TranscriptionInput) -> None:
+        """Run an eager (predicted-final) transcript as an ordinary user turn.
 
-        Appends the predicted transcript, then drives a synthetic UserTurnEnded so the
-        agent generates now. Every output is stamped responding_to == "event_id:version"
-        so the harness holds the reply until this turn commits (turn.end) or supersedes
-        it (a higher version). Stateless: no checkpoint, no rollback — history collapses
-        to the max version per event_id, so the latest estimate wins. A newer eager
-        cancels the in-flight run via _start_agent_task's _cancel_agent_task().
-
-        Known v1 limitation (accepted, no rollback): a superseded version's
-        own local output keyed by the shared event_id is not pruned, so if a cancelled
-        eager emitted a tool call / partial text before cancellation it can linger in the
-        agent's local history. With cumulative-transcript STT (Ink-2) the eager window is
-        shorter than LLM TTFB, so a superseded run is cancelled before emitting anything
-        in practice; pruning superseded local output is deferred to a later version.
+        The only thing the version buys us is identity: it is folded into a composite
+        event_id "<event_id>:<version>" so (a) the reply's responding_to distinguishes
+        this estimate from later ones — the harness holds/supersedes by it — and (b)
+        history collapses to the max version per base event_id. Beyond that there is no
+        speculative special-casing: we append the text and end the turn through the same
+        _handle_event path a normal turn uses, so run/cancel filters apply as usual and a
+        newer eager cancels the in-flight run via _start_agent_task's _cancel_agent_task().
         """
-        event_id = message.event_id
-        version = message.version or 0
-        responding_to = f"{event_id}:{version}"
-        logger.info(f'-> 🔮 Speculative turn {responding_to}: "{message.content}"')
+        event_id = f"{message.event_id}:{message.version}"
+        logger.info(f'-> 🔮 Eager turn {event_id}: "{message.content}"')
 
-        # Append the predicted transcript, then synthesize the turn end that runs the
-        # agent. Start the task directly (not via _handle_event) so the synthetic
-        # UserTurnEnded is not also matched by the normal run filter; both synthetic
-        # events carry the eager event_id + version so the collapse picks the latest.
-        text_event = UserTextSent(content=message.content, event_id=event_id, version=version)
-        _, self.history = self._process_input_event(self.history, text_event)
-        content = self._turn_content(self.history, UserTurnStarted, (UserTextSent, UserDtmfSent))
-        turn_event, self.history = self._process_input_event(
-            self.history,
-            UserTurnEnded(content=content, event_id=event_id, version=version),
+        env = TurnEnv(agent_env=self.env)
+        text, self.history = self._process_input_event(
+            self.history, UserTextSent(content=message.content, event_id=event_id)
         )
-        if turn_event is not None:
-            await self._start_agent_task(TurnEnv(agent_env=self.env), turn_event, responding_to=responding_to)
+        if text is not None:
+            await self._handle_event(env, text)
+        content = self._turn_content(self.history, UserTurnStarted, (UserTextSent, UserDtmfSent))
+        end, self.history = self._process_input_event(
+            self.history, UserTurnEnded(content=content, event_id=event_id)
+        )
+        if end is not None:
+            await self._handle_event(env, end)
 
     async def send_error(self, error: str):
         """Send an error message via WebSocket."""
@@ -608,7 +590,7 @@ class ConversationRunner:
                 return UserTurnEnded(content=content, **event_id_kwargs)
 
         elif isinstance(message, TranscriptionInput):
-            return UserTextSent(content=message.content, version=message.version or 0, **event_id_kwargs)
+            return UserTextSent(content=message.content, **event_id_kwargs)
 
         elif isinstance(message, AgentStateInput):
             if message.value == UserState.SPEAKING:
@@ -664,11 +646,11 @@ class ConversationRunner:
         deduplication (already pre-committed as uninterruptible text).
         """
         raw_history = history + [raw_event]
-        # Collapse to the max version per event_id: successive eager estimates of one
-        # user turn share an event_id; the latest wins. Only an eager (version > 0)
-        # arrival can supersede a prior estimate, so skip the scan otherwise — keeps the
+        # Collapse eager estimates of one turn to the latest: they share a base event_id
+        # and differ only by a ":<version>" suffix. Only a versioned (eager) arrival can
+        # supersede a prior estimate, so skip the scan otherwise — keeps the
         # non-speculative hot path free of an O(history) pass per event.
-        if (getattr(raw_event, "version", 0) or 0) > 0:
+        if ":" in (getattr(raw_event, "event_id", None) or ""):
             raw_history = _collapse_versions(raw_history)
         # Process history to restore whitespace before passing to agent
         processed_history = _get_processed_history(self.emitted_agent_text, raw_history)
@@ -837,28 +819,38 @@ class ConversationRunner:
         return ErrorOutput(content=f"Unhandled output event type: {type(event).__name__}")
 
 
-def _collapse_versions(history: List[InputEvent]) -> List[InputEvent]:
-    """Keep only the max-version events per event_id (eager endpointing).
+def _split_event_id(event_id: Optional[str]) -> Tuple[Optional[str], int]:
+    """Split a (possibly composite) event_id into (base, version).
 
-    Successive eager (predicted-final) estimates of one user turn share an event_id
-    and carry an increasing ``version``; the latest estimate wins, so lower-version
-    events for that event_id are dropped. Events without a version (0) or with a
-    unique event_id are unaffected — this is a no-op for non-speculative history.
+    Eager estimates of one turn share a base id and differ by a ":<version>" suffix
+    (e.g. "<uuid>:1", "<uuid>:2"). A plain id has version 0. UUIDs contain no ":".
+    """
+    if event_id and ":" in event_id:
+        base, _, ver = event_id.rpartition(":")
+        if ver.isdigit():
+            return base, int(ver)
+    return event_id, 0
+
+
+def _collapse_versions(history: List[InputEvent]) -> List[InputEvent]:
+    """Keep only the max-version events per base event_id (eager endpointing).
+
+    Successive eager (predicted-final) estimates of one user turn share a base
+    event_id and carry an increasing version suffix; the latest estimate wins, so
+    lower-version events for that base are dropped. Events with a plain (suffix-less)
+    event_id are unaffected — this is a no-op for non-speculative history.
     """
     max_version: Dict[str, int] = {}
     for ev in history:
-        version = getattr(ev, "version", 0) or 0
-        if version:
-            eid = getattr(ev, "event_id", None)
-            if eid is not None and version > max_version.get(eid, 0):
-                max_version[eid] = version
-    if not max_version:
+        base, version = _split_event_id(getattr(ev, "event_id", None))
+        if base is not None and version > max_version.get(base, 0):
+            max_version[base] = version
+    if not any(v > 0 for v in max_version.values()):
         return history
     collapsed: List[InputEvent] = []
     for ev in history:
-        eid = getattr(ev, "event_id", None)
-        version = getattr(ev, "version", 0) or 0
-        if eid in max_version and version < max_version[eid]:
+        base, version = _split_event_id(getattr(ev, "event_id", None))
+        if base is not None and version < max_version.get(base, 0):
             continue  # superseded eager estimate
         collapsed.append(ev)
     return collapsed
