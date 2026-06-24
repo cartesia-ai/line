@@ -434,14 +434,14 @@ class ConversationRunner:
                     continue
 
                 # An eager (version > 0) transcript is a predicted-final turn: run it
-                # through the normal turn flow (see _run_eager_turn). The version is
+                # through the normal turn flow (see _run_versioned_turn). The version is
                 # folded into the event_id; nothing else is special-cased.
                 if (
                     self._eager_generation
                     and isinstance(input_msg, TranscriptionInput)
                     and (input_msg.version or 0) > 0
                 ):
-                    await self._run_eager_turn(input_msg)
+                    await self._run_versioned_turn(input_msg)
                     continue
 
                 # Convert and process the input message
@@ -535,7 +535,7 @@ class ConversationRunner:
                 pass
         self.agent_task = None
 
-    async def _run_eager_turn(self, message: TranscriptionInput) -> None:
+    async def _run_versioned_turn(self, message: TranscriptionInput) -> None:
         """Run an eager (predicted-final) transcript as an ordinary user turn.
 
         The only thing the version buys us is identity: it is folded into a composite
@@ -547,7 +547,7 @@ class ConversationRunner:
         newer eager cancels the in-flight run via _start_agent_task's _cancel_agent_task().
         """
         event_id = f"{message.event_id}:{message.version}"
-        logger.info(f'-> 🔮 Eager turn {event_id}: "{message.content}"')
+        logger.info(f'-> 🔮 Versioned turn {event_id}: "{message.content}"')
 
         env = TurnEnv(agent_env=self.env)
         text, self.history = self._process_input_event(

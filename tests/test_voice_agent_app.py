@@ -1485,7 +1485,7 @@ class TestEagerTurns:
         ws = create_mock_websocket()
         runner = ConversationRunner(ws, reply_agent, env)
 
-        await runner._run_eager_turn(TranscriptionInput(content="hello", event_id="e1", version=1))
+        await runner._run_versioned_turn(TranscriptionInput(content="hello", event_id="e1", version=1))
         if runner.agent_task:
             await runner.agent_task
 
@@ -1501,10 +1501,10 @@ class TestEagerTurns:
         ws = create_mock_websocket()
         runner = ConversationRunner(ws, reply_agent, env)
 
-        await runner._run_eager_turn(TranscriptionInput(content="hi", event_id="e1", version=1))
+        await runner._run_versioned_turn(TranscriptionInput(content="hi", event_id="e1", version=1))
         if runner.agent_task:
             await runner.agent_task
-        await runner._run_eager_turn(TranscriptionInput(content="hi there", event_id="e1", version=2))
+        await runner._run_versioned_turn(TranscriptionInput(content="hi there", event_id="e1", version=2))
         if runner.agent_task:
             await runner.agent_task
 
