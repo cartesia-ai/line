@@ -23,6 +23,9 @@ class TranscriptionInput(BaseModel):
     # (predicted-final) estimate of the same user turn, sharing one event_id; the
     # SDK runs the turn early and collapses to the max version per event_id.
     version: Optional[int] = None
+    # The redundant final turn-end of a turn an eager already committed. The SDK
+    # ignores any speculative message (not appended to history, not run).
+    speculative: bool = False
 
 
 class DTMFInput(BaseModel):
@@ -35,6 +38,8 @@ class UserStateInput(BaseModel):
     value: str
     type: Literal["user_state"] = "user_state"
     event_id: Optional[str] = None
+    version: Optional[int] = None
+    speculative: bool = False
 
 
 class AgentStateInput(BaseModel):
@@ -85,6 +90,7 @@ class DTMFOutput(BaseModel):
     type: Literal["dtmf"] = "dtmf"
     button: str
     responding_to: Optional[str] = None
+    version: Optional[int] = None
 
 
 class MessageOutput(BaseModel):
@@ -92,6 +98,7 @@ class MessageOutput(BaseModel):
     content: str
     interruptible: bool = True
     responding_to: Optional[str] = None
+    version: Optional[int] = None
 
 
 class ToolCallOutput(BaseModel):
@@ -101,12 +108,14 @@ class ToolCallOutput(BaseModel):
     result: Optional[str] = None
     id: Optional[str] = None
     responding_to: Optional[str] = None
+    version: Optional[int] = None
 
 
 class TransferOutput(BaseModel):
     type: Literal["transfer"] = "transfer"
     target_phone_number: str
     responding_to: Optional[str] = None
+    version: Optional[int] = None
     interruptible: bool = True
 
 
@@ -116,6 +125,7 @@ class EndCallOutput(BaseModel):
     # newer SDK; the canonical vocabulary is line.events.EndCallReason.
     reason: Optional[str] = None
     responding_to: Optional[str] = None
+    version: Optional[int] = None
     interruptible: bool = True
 
 
@@ -124,6 +134,7 @@ class LogEventOutput(BaseModel):
     event: str
     metadata: Optional[Dict[str, object]] = None
     responding_to: Optional[str] = None
+    version: Optional[int] = None
 
 
 class LogMetricOutput(BaseModel):
@@ -131,6 +142,7 @@ class LogMetricOutput(BaseModel):
     name: str
     value: object
     responding_to: Optional[str] = None
+    version: Optional[int] = None
 
 
 class TTSConfig(BaseModel):
@@ -149,12 +161,14 @@ class ConfigOutput(BaseModel):
     stt: Optional[STTConfig] = None
     language: Optional[str] = None
     responding_to: Optional[str] = None
+    version: Optional[int] = None
 
 
 class CustomOutput(BaseModel):
     type: Literal["custom"] = "custom"
     metadata: Dict[str, object]
     responding_to: Optional[str] = None
+    version: Optional[int] = None
 
 
 OutputMessage = Union[

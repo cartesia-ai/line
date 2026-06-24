@@ -1447,7 +1447,28 @@ class TestCreateChatSessionErrorAttribution:
 # Speculative turns / eager endpointing
 # ============================================================
 
-from line._harness_types import TranscriptionInput  # noqa: E402
+from line._harness_types import TranscriptionInput, UserStateInput  # noqa: E402
+
+
+async def _drive(runner: ConversationRunner, *messages) -> None:
+    """Feed wire messages through the runner the way run() does, awaiting each turn.
+
+    Mirrors the run-loop body (speculative drop -> convert -> process -> handle) and
+    awaits the spawned task after each message so a reply completes before the next
+    message could cancel it.
+    """
+    turn_env = TurnEnv(agent_env=env)
+    for msg in messages:
+        if getattr(msg, "speculative", False):
+            continue
+        event = runner._convert_input_message(msg)
+        if event is None:
+            continue
+        ev, runner.history = runner._process_input_event(runner.history, event)
+        if ev is not None:
+            await runner._handle_event(turn_env, ev)
+        if runner.agent_task:
+            await runner.agent_task
 
 
 async def reply_agent(env: TurnEnv, event: InputEvent) -> AsyncIterator[OutputEvent]:
@@ -1458,38 +1479,61 @@ async def reply_agent(env: TurnEnv, event: InputEvent) -> AsyncIterator[OutputEv
 
 class TestEagerTurns:
     @pytest.mark.asyncio
-    async def test_eager_turn_runs_agent_and_stamps_composite_id(self):
-        """An eager transcript runs as a normal turn; outputs carry responding_to == event_id:version."""
+    async def test_eager_turn_runs_agent_and_stamps_version(self):
+        """An eager (transcript + idle) runs through the normal turn path; the idle drives
+        generation and the reply carries responding_to == event_id (bare) + the version."""
         ws = create_mock_websocket()
         runner = ConversationRunner(ws, reply_agent, env)
 
-        await runner._run_versioned_turn(TranscriptionInput(content="hello", event_id="e1", version=1))
-        if runner.agent_task:
-            await runner.agent_task
+        await _drive(
+            runner,
+            TranscriptionInput(content="hello", event_id="e1", version=1),
+            UserStateInput(value="idle", event_id="e1", version=1),
+        )
 
-        sent = [c.args[0] for c in ws.send_json.call_args_list]
-        messages = [m for m in sent if m.get("type") == "message"]
+        messages = [c.args[0] for c in ws.send_json.call_args_list if c.args[0].get("type") == "message"]
         assert len(messages) == 1
         assert messages[0]["content"] == "reply"
-        assert messages[0]["responding_to"] == "e1:1"
+        assert messages[0]["responding_to"] == "e1"
+        assert messages[0]["version"] == 1
 
     @pytest.mark.asyncio
     async def test_newer_version_collapses_history(self):
         """A higher version of the same turn supersedes the older estimate in history."""
         ws = create_mock_websocket()
         runner = ConversationRunner(ws, reply_agent, env)
+        runner._eager_generation = True  # reply_agent isn't an LlmAgent; force-enable collapse
 
-        await runner._run_versioned_turn(TranscriptionInput(content="hi", event_id="e1", version=1))
-        if runner.agent_task:
-            await runner.agent_task
-        await runner._run_versioned_turn(TranscriptionInput(content="hi there", event_id="e1", version=2))
-        if runner.agent_task:
-            await runner.agent_task
+        await _drive(
+            runner,
+            TranscriptionInput(content="hi", event_id="e1", version=1),
+            UserStateInput(value="idle", event_id="e1", version=1),
+            TranscriptionInput(content="hi there", event_id="e1", version=2),
+            UserStateInput(value="idle", event_id="e1", version=2),
+        )
 
-        # Only the latest estimate (base e1, version 2) survives the collapse.
-        texts = [e for e in runner.history if isinstance(e, UserTextSent) and e.event_id.startswith("e1")]
-        assert texts and all(e.event_id == "e1:2" for e in texts)
+        # Only the latest estimate (event_id e1, version 2) survives the collapse.
+        texts = [e for e in runner.history if isinstance(e, UserTextSent) and e.event_id == "e1"]
+        assert texts and all(e.version == 2 for e in texts)
         assert any(e.content == "hi there" for e in texts)
+        assert not any(e.content == "hi" for e in texts)
+
+    @pytest.mark.asyncio
+    async def test_speculative_message_is_ignored(self):
+        """A speculative-flagged message (the redundant real turn-end an eager committed)
+        is dropped: not appended to history and not run."""
+        ws = create_mock_websocket()
+        ws.receive_json.side_effect = [
+            {"type": "message", "content": "final", "event_id": "e9", "speculative": True},
+            {"type": "user_state", "value": "idle", "event_id": "e9", "speculative": True},
+            WebSocketDisconnect(),
+        ]
+        runner = ConversationRunner(ws, reply_agent, env)
+        await runner.run()
+
+        assert not any(isinstance(e, (UserTextSent, UserTurnEnded)) for e in runner.history)
+        messages = [c.args[0] for c in ws.send_json.call_args_list if c.args[0].get("type") == "message"]
+        assert messages == []
 
     def test_eager_generation_gated_to_llm_agent(self):
         """A non-LlmAgent does not speculate even when eager_generation is requested."""

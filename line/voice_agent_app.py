@@ -352,9 +352,6 @@ class ConversationRunner:
                 "eager_generation requested but agent is not an LlmAgent; "
                 "speculative turns disabled for this call."
             )
-        # (base_event_id, composite_event_id) of the open turn's latest eager estimate,
-        # used to drop the prior estimate when a newer one arrives. None outside a turn.
-        self._open_eager: Optional[Tuple[str, str]] = None
 
     @property
     def shutdown_event(self) -> asyncio.Event:
@@ -436,15 +433,11 @@ class ConversationRunner:
                     logger.warning(f"Dropping unparseable websocket message: {message}")
                     continue
 
-                # An eager (version > 0) transcript is a predicted-final turn: run it
-                # through the normal turn flow (see _run_versioned_turn). The version is
-                # folded into the event_id; nothing else is special-cased.
-                if (
-                    self._eager_generation
-                    and isinstance(input_msg, TranscriptionInput)
-                    and (input_msg.version or 0) > 0
-                ):
-                    await self._run_versioned_turn(input_msg)
+                # Ignore any speculative-flagged message: it is the redundant final
+                # turn-end of a turn an eager already committed, so processing it would
+                # append a duplicate user turn or re-trigger generation. Eagers themselves
+                # are unflagged and run through the normal path below.
+                if getattr(input_msg, "speculative", False):
                     continue
 
                 # Convert and process the input message
@@ -497,10 +490,11 @@ class ConversationRunner:
         """Start the agent async iterable for the given event."""
         await self._cancel_agent_task()
 
-        # Use the triggering event's event_id for setting responding_to. For an eager
-        # turn this id is the composite "<event_id>:<version>", so the reply is naturally
-        # stamped with it — no special handling here.
+        # Stamp the reply with the triggering turn's (event_id, version) so the harness
+        # correlates the held reply on that pair. responding_to stays the bare event_id;
+        # version is 0 for a normal turn and N for the Nth eager estimate.
         responding_to_id = event.event_id
+        responding_version = getattr(event, "version", 0) or 0
 
         async def runner():
             try:
@@ -508,6 +502,7 @@ class ConversationRunner:
                     # Set responding_to at the harness boundary (outermost layer)
                     if output.responding_to is None:
                         output.responding_to = responding_to_id
+                    output.version = responding_version
                     if isinstance(output, AgentSendText):
                         self.emitted_agent_text.append((output.text, output.interruptible))
                     mapped = self._map_output_event(output)
@@ -538,42 +533,6 @@ class ConversationRunner:
                 pass
         self.agent_task = None
 
-    async def _run_versioned_turn(self, message: TranscriptionInput) -> None:
-        """Run an eager (predicted-final) transcript as an ordinary user turn.
-
-        The version only buys identity: it is folded into a composite event_id
-        "<event_id>:<version>" so the reply's responding_to distinguishes this estimate
-        from later ones (the harness holds/supersedes by it). Beyond that there is no
-        speculative special-casing — we append the text and end the turn through the same
-        _handle_event path a normal turn uses, so run/cancel filters apply as usual and a
-        newer eager cancels the in-flight run via _start_agent_task's _cancel_agent_task().
-
-        Supersession: a newer estimate of the same turn drops the prior estimate's events
-        so the agent only ever sees the latest. We constructed those ids, so we just
-        remember the prior composite and remove it — no parsing.
-        """
-        base = message.event_id
-        event_id = f"{base}:{message.version}"
-        logger.info(f'-> 🔮 Versioned turn {event_id}: "{message.content}"')
-
-        if self._open_eager is not None and self._open_eager[0] == base:
-            prior_id = self._open_eager[1]
-            self.history = [e for e in self.history if getattr(e, "event_id", None) != prior_id]
-        self._open_eager = (base, event_id)
-
-        env = TurnEnv(agent_env=self.env)
-        text, self.history = self._process_input_event(
-            self.history, UserTextSent(content=message.content, event_id=event_id)
-        )
-        if text is not None:
-            await self._handle_event(env, text)
-        content = self._turn_content(self.history, UserTurnStarted, (UserTextSent, UserDtmfSent))
-        end, self.history = self._process_input_event(
-            self.history, UserTurnEnded(content=content, event_id=event_id)
-        )
-        if end is not None:
-            await self._handle_event(env, end)
-
     async def send_error(self, error: str):
         """Send an error message via WebSocket."""
         try:
@@ -599,10 +558,10 @@ class ConversationRunner:
                     UserTurnStarted,
                     (UserTextSent, UserDtmfSent),
                 )
-                return UserTurnEnded(content=content, **event_id_kwargs)
+                return UserTurnEnded(content=content, version=message.version or 0, **event_id_kwargs)
 
         elif isinstance(message, TranscriptionInput):
-            return UserTextSent(content=message.content, **event_id_kwargs)
+            return UserTextSent(content=message.content, version=message.version or 0, **event_id_kwargs)
 
         elif isinstance(message, AgentStateInput):
             if message.value == UserState.SPEAKING:
@@ -646,6 +605,29 @@ class ConversationRunner:
                 return [ev for ev in history[idx + 1 :] if isinstance(ev, content_types)]
         return []
 
+    @staticmethod
+    def _collapse_versions(history: List[InputEvent]) -> List[InputEvent]:
+        """Keep only the max-version events per event_id.
+
+        Eager estimates of one turn share the turn's event_id at increasing versions; a
+        later estimate supersedes the earlier ones. Events without a version (normal turns,
+        agent events) default to version 0 and keep their own unique event_id, so they are
+        never dropped.
+        """
+        max_version: dict[str, int] = {}
+        for e in history:
+            eid = getattr(e, "event_id", None)
+            if eid is None:
+                continue
+            v = getattr(e, "version", 0) or 0
+            if v > max_version.get(eid, 0):
+                max_version[eid] = v
+        return [
+            e
+            for e in history
+            if (getattr(e, "version", 0) or 0) >= max_version.get(getattr(e, "event_id", None), 0)
+        ]
+
     def _process_input_event(
         self, history: List[InputEvent], raw_event: InputEvent
     ) -> tuple[Optional[InputEvent], List[InputEvent]]:
@@ -658,6 +640,11 @@ class ConversationRunner:
         deduplication (already pre-committed as uninterruptible text).
         """
         raw_history = history + [raw_event]
+        # Collapse eager re-estimates: a turn's later versions supersede earlier ones, so
+        # the agent only ever sees the latest estimate of each turn. Gated on eager
+        # generation; a no-op for normal (version 0) turns.
+        if self._eager_generation:
+            raw_history = self._collapse_versions(raw_history)
         # Process history to restore whitespace before passing to agent
         processed_history = _get_processed_history(self.emitted_agent_text, raw_history)
         processed_event = processed_history[-1]
@@ -754,16 +741,20 @@ class ConversationRunner:
             else:
                 logger.info(f'<- 🤖🔒 Agent said (uninterruptible): "{event.text}"')
             return MessageOutput(
-                content=event.text, interruptible=event.interruptible, responding_to=event.responding_to
+                content=event.text,
+                interruptible=event.interruptible,
+                responding_to=event.responding_to,
+                version=event.version,
             )
         if isinstance(event, AgentSendDtmf):
             logger.info(f"<- 🤖🔔 Agent DTMF sent: {event.button}")
-            return DTMFOutput(button=event.button, responding_to=event.responding_to)
+            return DTMFOutput(button=event.button, responding_to=event.responding_to, version=event.version)
         if isinstance(event, AgentEndCall):
             logger.info(f"<- 📞 End call (reason={event.reason}, interruptible={event.interruptible})")
             return EndCallOutput(
                 reason=event.reason,
                 responding_to=event.responding_to,
+                version=event.version,
                 interruptible=event.interruptible,
             )
         if isinstance(event, AgentTransferCall):
@@ -773,11 +764,17 @@ class ConversationRunner:
             return TransferOutput(
                 target_phone_number=event.target_phone_number,
                 responding_to=event.responding_to,
+                version=event.version,
                 interruptible=event.interruptible,
             )
         if isinstance(event, LogMetric):
             logger.debug(f"<- 📈 Log metric: {event.name}={event.value}")
-            return LogMetricOutput(name=event.name, value=event.value, responding_to=event.responding_to)
+            return LogMetricOutput(
+                name=event.name,
+                value=event.value,
+                responding_to=event.responding_to,
+                version=event.version,
+            )
         if isinstance(event, LogMessage):
             logger.debug(f"<- 🪵 Log message: {event.name} [{event.level}] {event.message}")
             metadata = {
@@ -785,13 +782,19 @@ class ConversationRunner:
                 "message": event.message,
                 "metadata": self._truncate_dict_for_ws(event.metadata),
             }
-            return LogEventOutput(event=event.name, metadata=metadata, responding_to=event.responding_to)
+            return LogEventOutput(
+                event=event.name,
+                metadata=metadata,
+                responding_to=event.responding_to,
+                version=event.version,
+            )
         if isinstance(event, AgentToolCalled):
             logger.info(f"<- 🔧 Tool called: {event.tool_name}({event.tool_args})")
             return ToolCallOutput(
                 name=event.tool_name,
                 arguments=self._truncate_dict_for_ws(event.tool_args),
                 responding_to=event.responding_to,
+                version=event.version,
             )
         if isinstance(event, AgentToolReturned):
             logger.info(f"<- 🔧 Tool returned: {event.tool_name}({event.tool_args}) -> {event.result}")
@@ -801,6 +804,7 @@ class ConversationRunner:
                 arguments=self._truncate_dict_for_ws(event.tool_args),
                 result=result_str,
                 responding_to=event.responding_to,
+                version=event.version,
             )
         if isinstance(event, AgentUpdateCall):
             logger.info(
@@ -817,10 +821,13 @@ class ConversationRunner:
                 stt=STTConfig(language=event.language) if event.language is not None else None,
                 language=event.language,
                 responding_to=event.responding_to,
+                version=event.version,
             )
         if isinstance(event, AgentSendCustom):
             logger.debug(f"<- 📦 Custom event with metadata: {event.metadata}")
-            return CustomOutput(metadata=event.metadata, responding_to=event.responding_to)
+            return CustomOutput(
+                metadata=event.metadata, responding_to=event.responding_to, version=event.version
+            )
 
         return ErrorOutput(content=f"Unhandled output event type: {type(event).__name__}")
 
