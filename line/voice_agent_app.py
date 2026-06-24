@@ -112,6 +112,10 @@ class CallRequest(BaseModel):
     # the start message. Threaded into AgentEnv so call-scoped clients
     # (e.g. KnowledgeBase) hit the same API that minted agent_token.
     api_base_url: Optional[str] = None
+    # Per-agent opt-in for speculative (eager-endpointing) generation.
+    # When enabled and the agent is an LlmAgent, eager (version > 0) transcripts
+    # run the turn early; the reply is held by the harness until the turn commits.
+    eager_generation: bool = False
 
     model_config = ConfigDict(
         # Allow both field name (from_) and alias (from) for input
@@ -265,7 +269,9 @@ class VoiceAgentApp:
         )
         try:
             agent_spec = await self.get_agent(env, call_request)
-            runner = ConversationRunner(websocket, agent_spec, env)
+            runner = ConversationRunner(
+                websocket, agent_spec, env, eager_generation=call_request.eager_generation
+            )
         except Exception:
             error_msg = traceback.format_exc()
             error_string = f"Error in get_agent for {call_request.call_id}: {error_msg}"
@@ -295,6 +301,7 @@ def _call_request_from_start_data(data: dict) -> CallRequest:
         metadata=start_msg.metadata or {},
         agent_token=start_msg.agent_token,
         api_base_url=start_msg.api_base_url,
+        eager_generation=bool(start_msg.eager_generation),
     )
 
 
@@ -309,7 +316,13 @@ class ConversationRunner:
     the websocket.
     """
 
-    def __init__(self, websocket: WebSocket, agent_spec: AgentSpec, env: AgentEnv):
+    def __init__(
+        self,
+        websocket: WebSocket,
+        agent_spec: AgentSpec,
+        env: AgentEnv,
+        eager_generation: bool = False,
+    ):
         """
         Initialize the ConversationRunner.
 
@@ -318,6 +331,9 @@ class ConversationRunner:
             agent_spec: Agent or (Agent, run_filter, cancel_filter).
             env: Per-call environment, passed through to TurnEnv so tools
                 can resolve call-scoped resources (e.g. knowledge base).
+            eager_generation: Per-agent opt-in for speculative (eager-endpointing)
+                generation. Only honored for LlmAgent (its history
+                supports the versioned collapse).
         """
         self.websocket = websocket
         self.env = env
@@ -327,6 +343,15 @@ class ConversationRunner:
 
         self.agent_callable, self.run_filter, self.cancel_filter = self._prepare_agent(agent_spec)
         self.agent_task: Optional[asyncio.Task] = None
+
+        # Speculative turns: only LlmAgent can speculate, since the
+        # versioned history collapse lives in its History.
+        self._eager_generation = eager_generation and self._agent_is_llm
+        if eager_generation and not self._agent_is_llm:
+            logger.warning(
+                "eager_generation requested but agent is not an LlmAgent; "
+                "speculative turns disabled for this call."
+            )
 
     @property
     def shutdown_event(self) -> asyncio.Event:
@@ -359,6 +384,12 @@ class ConversationRunner:
             agent_obj = agent_spec
             run_spec = default_run
             cancel_spec = default_cancel
+
+        # Lazy import (config.py imports CallRequest from this module, so a top-level
+        # import of LlmAgent would be circular). Used to gate speculative turns.
+        from line.llm_agent.llm_agent import LlmAgent
+
+        self._agent_is_llm = isinstance(agent_obj, LlmAgent)
 
         run_filter = self._normalize_filter(run_spec)
         cancel_filter = self._normalize_filter(cancel_spec)
@@ -400,6 +431,17 @@ class ConversationRunner:
                     input_msg = _input_message_adapter.validate_python(message)
                 except ValidationError:
                     logger.warning(f"Dropping unparseable websocket message: {message}")
+                    continue
+
+                # Speculative turn: an eager (version > 0) transcript runs the
+                # turn early. Handled out-of-band — it drives an early agent run rather
+                # than mapping to a single appended event.
+                if (
+                    self._eager_generation
+                    and isinstance(input_msg, TranscriptionInput)
+                    and (input_msg.version or 0) > 0
+                ):
+                    await self._handle_speculative_turn(input_msg)
                     continue
 
                 # Convert and process the input message
@@ -448,18 +490,29 @@ class ConversationRunner:
         elif self.cancel_filter(event):
             await self._cancel_agent_task()
 
-    async def _start_agent_task(self, turn_env: TurnEnv, event: InputEvent) -> None:
-        """Start the agent async iterable for the given event."""
+    async def _start_agent_task(
+        self, turn_env: TurnEnv, event: InputEvent, responding_to: Optional[str] = None
+    ) -> None:
+        """Start the agent async iterable for the given event.
+
+        For a speculative turn, ``responding_to`` is the composite "event_id:version"
+        id; it is forced onto every output (overriding the agent's own bare event_id
+        stamp) so the harness can hold the reply until the matching turn commits.
+        """
         await self._cancel_agent_task()
 
         # Use the triggering event's event_id for setting responding_to
-        responding_to_id = event.event_id
+        responding_to_id = responding_to if responding_to is not None else event.event_id
 
         async def runner():
             try:
                 async for output in self.agent_callable(turn_env, event):
-                    # Set responding_to at the harness boundary (outermost layer)
-                    if output.responding_to is None:
+                    # Set responding_to at the harness boundary (outermost layer). A
+                    # speculative override is forced even when already set, so the
+                    # composite "event_id:version" wins over the agent's bare event_id.
+                    if responding_to is not None:
+                        output.responding_to = responding_to_id
+                    elif output.responding_to is None:
                         output.responding_to = responding_to_id
                     if isinstance(output, AgentSendText):
                         self.emitted_agent_text.append((output.text, output.interruptible))
@@ -491,6 +544,42 @@ class ConversationRunner:
                 pass
         self.agent_task = None
 
+    async def _handle_speculative_turn(self, message: TranscriptionInput) -> None:
+        """Run the agent early on an eagerly-predicted (not-yet-final) user turn.
+
+        Appends the predicted transcript, then drives a synthetic UserTurnEnded so the
+        agent generates now. Every output is stamped responding_to == "event_id:version"
+        so the harness holds the reply until this turn commits (turn.end) or supersedes
+        it (a higher version). Stateless: no checkpoint, no rollback — history collapses
+        to the max version per event_id, so the latest estimate wins. A newer eager
+        cancels the in-flight run via _start_agent_task's _cancel_agent_task().
+
+        Known v1 limitation (accepted, no rollback): a superseded version's
+        own local output keyed by the shared event_id is not pruned, so if a cancelled
+        eager emitted a tool call / partial text before cancellation it can linger in the
+        agent's local history. With cumulative-transcript STT (Ink-2) the eager window is
+        shorter than LLM TTFB, so a superseded run is cancelled before emitting anything
+        in practice; pruning superseded local output is deferred to a later version.
+        """
+        event_id = message.event_id
+        version = message.version or 0
+        responding_to = f"{event_id}:{version}"
+        logger.info(f'-> 🔮 Speculative turn {responding_to}: "{message.content}"')
+
+        # Append the predicted transcript, then synthesize the turn end that runs the
+        # agent. Start the task directly (not via _handle_event) so the synthetic
+        # UserTurnEnded is not also matched by the normal run filter; both synthetic
+        # events carry the eager event_id + version so the collapse picks the latest.
+        text_event = UserTextSent(content=message.content, event_id=event_id, version=version)
+        _, self.history = self._process_input_event(self.history, text_event)
+        content = self._turn_content(self.history, UserTurnStarted, (UserTextSent, UserDtmfSent))
+        turn_event, self.history = self._process_input_event(
+            self.history,
+            UserTurnEnded(content=content, event_id=event_id, version=version),
+        )
+        if turn_event is not None:
+            await self._start_agent_task(TurnEnv(agent_env=self.env), turn_event, responding_to=responding_to)
+
     async def send_error(self, error: str):
         """Send an error message via WebSocket."""
         try:
@@ -519,7 +608,7 @@ class ConversationRunner:
                 return UserTurnEnded(content=content, **event_id_kwargs)
 
         elif isinstance(message, TranscriptionInput):
-            return UserTextSent(content=message.content, **event_id_kwargs)
+            return UserTextSent(content=message.content, version=message.version or 0, **event_id_kwargs)
 
         elif isinstance(message, AgentStateInput):
             if message.value == UserState.SPEAKING:
@@ -574,7 +663,10 @@ class ConversationRunner:
         Returns None for the event when an AgentTextSent ack-back is consumed by
         deduplication (already pre-committed as uninterruptible text).
         """
-        raw_history = history + [raw_event]
+        # Collapse to the max version per event_id: successive eager
+        # estimates of one user turn share an event_id; the latest estimate wins.
+        # No-op when no versioned events are present.
+        raw_history = _collapse_versions(history + [raw_event])
         # Process history to restore whitespace before passing to agent
         processed_history = _get_processed_history(self.emitted_agent_text, raw_history)
         processed_event = processed_history[-1]
@@ -740,6 +832,33 @@ class ConversationRunner:
             return CustomOutput(metadata=event.metadata, responding_to=event.responding_to)
 
         return ErrorOutput(content=f"Unhandled output event type: {type(event).__name__}")
+
+
+def _collapse_versions(history: List[InputEvent]) -> List[InputEvent]:
+    """Keep only the max-version events per event_id (eager endpointing).
+
+    Successive eager (predicted-final) estimates of one user turn share an event_id
+    and carry an increasing ``version``; the latest estimate wins, so lower-version
+    events for that event_id are dropped. Events without a version (0) or with a
+    unique event_id are unaffected — this is a no-op for non-speculative history.
+    """
+    max_version: Dict[str, int] = {}
+    for ev in history:
+        version = getattr(ev, "version", 0) or 0
+        if version:
+            eid = getattr(ev, "event_id", None)
+            if eid is not None and version > max_version.get(eid, 0):
+                max_version[eid] = version
+    if not max_version:
+        return history
+    collapsed: List[InputEvent] = []
+    for ev in history:
+        eid = getattr(ev, "event_id", None)
+        version = getattr(ev, "version", 0) or 0
+        if eid in max_version and version < max_version[eid]:
+            continue  # superseded eager estimate
+        collapsed.append(ev)
+    return collapsed
 
 
 def _get_processed_history(

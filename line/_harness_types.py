@@ -19,6 +19,10 @@ class TranscriptionInput(BaseModel):
     content: str
     type: Literal["message"] = "message"
     event_id: Optional[str] = None
+    # Eager-endpointing version. A value > 0 marks the Nth eager
+    # (predicted-final) estimate of the same user turn, sharing one event_id; the
+    # SDK runs the turn early and collapses to the max version per event_id.
+    version: Optional[int] = None
 
 
 class DTMFInput(BaseModel):
@@ -197,5 +201,7 @@ class StartInput(BaseModel):
     # the agent uses the same API endpoint that minted its credentials,
     # rather than guessing via env var or a hardcoded prod default.
     api_base_url: Optional[str] = None
+    # Per-agent opt-in for speculative (eager-endpointing) generation.
+    eager_generation: Optional[bool] = None
 
     model_config = ConfigDict(populate_by_name=True)
