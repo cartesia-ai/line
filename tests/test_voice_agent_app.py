@@ -1448,34 +1448,12 @@ class TestCreateChatSessionErrorAttribution:
 # ============================================================
 
 from line._harness_types import TranscriptionInput  # noqa: E402
-from line.voice_agent_app import _collapse_versions  # noqa: E402
 
 
 async def reply_agent(env: TurnEnv, event: InputEvent) -> AsyncIterator[OutputEvent]:
     """Agent that replies once to a user turn end."""
     if isinstance(event, UserTurnEnded):
         yield AgentSendText(text="reply")
-
-
-class TestCollapseVersions:
-    def test_keeps_max_version_per_base_event_id(self):
-        history = [
-            UserTextSent(content="hel", event_id="e1:1"),
-            UserTextSent(content="hello", event_id="e1:2"),
-            UserTurnEnded(content=[], event_id="e1:2"),
-        ]
-        out = _collapse_versions(history)
-        # e1:1 dropped; only the e1:2 estimate survives.
-        texts = [e for e in out if isinstance(e, UserTextSent)]
-        assert len(texts) == 1
-        assert texts[0].content == "hello" and texts[0].event_id == "e1:2"
-
-    def test_noop_without_version_suffix(self):
-        history = [
-            UserTextSent(content="a", event_id="e1"),
-            UserTextSent(content="b", event_id="e2"),
-        ]
-        assert _collapse_versions(history) == history  # unchanged (plain event_ids)
 
 
 class TestEagerTurns:

@@ -344,14 +344,17 @@ class ConversationRunner:
         self.agent_callable, self.run_filter, self.cancel_filter = self._prepare_agent(agent_spec)
         self.agent_task: Optional[asyncio.Task] = None
 
-        # Speculative turns: only LlmAgent can speculate, since the
-        # versioned history collapse lives in its History.
+        # Speculative turns: only LlmAgent can speculate, since the versioned history
+        # supersession relies on its History merge.
         self._eager_generation = eager_generation and self._agent_is_llm
         if eager_generation and not self._agent_is_llm:
             logger.warning(
                 "eager_generation requested but agent is not an LlmAgent; "
                 "speculative turns disabled for this call."
             )
+        # (base_event_id, composite_event_id) of the open turn's latest eager estimate,
+        # used to drop the prior estimate when a newer one arrives. None outside a turn.
+        self._open_eager: Optional[Tuple[str, str]] = None
 
     @property
     def shutdown_event(self) -> asyncio.Event:
@@ -538,16 +541,25 @@ class ConversationRunner:
     async def _run_versioned_turn(self, message: TranscriptionInput) -> None:
         """Run an eager (predicted-final) transcript as an ordinary user turn.
 
-        The only thing the version buys us is identity: it is folded into a composite
-        event_id "<event_id>:<version>" so (a) the reply's responding_to distinguishes
-        this estimate from later ones — the harness holds/supersedes by it — and (b)
-        history collapses to the max version per base event_id. Beyond that there is no
-        speculative special-casing: we append the text and end the turn through the same
+        The version only buys identity: it is folded into a composite event_id
+        "<event_id>:<version>" so the reply's responding_to distinguishes this estimate
+        from later ones (the harness holds/supersedes by it). Beyond that there is no
+        speculative special-casing — we append the text and end the turn through the same
         _handle_event path a normal turn uses, so run/cancel filters apply as usual and a
         newer eager cancels the in-flight run via _start_agent_task's _cancel_agent_task().
+
+        Supersession: a newer estimate of the same turn drops the prior estimate's events
+        so the agent only ever sees the latest. We constructed those ids, so we just
+        remember the prior composite and remove it — no parsing.
         """
-        event_id = f"{message.event_id}:{message.version}"
+        base = message.event_id
+        event_id = f"{base}:{message.version}"
         logger.info(f'-> 🔮 Versioned turn {event_id}: "{message.content}"')
+
+        if self._open_eager is not None and self._open_eager[0] == base:
+            prior_id = self._open_eager[1]
+            self.history = [e for e in self.history if getattr(e, "event_id", None) != prior_id]
+        self._open_eager = (base, event_id)
 
         env = TurnEnv(agent_env=self.env)
         text, self.history = self._process_input_event(
@@ -646,12 +658,6 @@ class ConversationRunner:
         deduplication (already pre-committed as uninterruptible text).
         """
         raw_history = history + [raw_event]
-        # Collapse eager estimates of one turn to the latest: they share a base event_id
-        # and differ only by a ":<version>" suffix. Only a versioned (eager) arrival can
-        # supersede a prior estimate, so skip the scan otherwise — keeps the
-        # non-speculative hot path free of an O(history) pass per event.
-        if ":" in (getattr(raw_event, "event_id", None) or ""):
-            raw_history = _collapse_versions(raw_history)
         # Process history to restore whitespace before passing to agent
         processed_history = _get_processed_history(self.emitted_agent_text, raw_history)
         processed_event = processed_history[-1]
@@ -817,43 +823,6 @@ class ConversationRunner:
             return CustomOutput(metadata=event.metadata, responding_to=event.responding_to)
 
         return ErrorOutput(content=f"Unhandled output event type: {type(event).__name__}")
-
-
-def _split_event_id(event_id: Optional[str]) -> Tuple[Optional[str], int]:
-    """Split a (possibly composite) event_id into (base, version).
-
-    Eager estimates of one turn share a base id and differ by a ":<version>" suffix
-    (e.g. "<uuid>:1", "<uuid>:2"). A plain id has version 0. UUIDs contain no ":".
-    """
-    if event_id and ":" in event_id:
-        base, _, ver = event_id.rpartition(":")
-        if ver.isdigit():
-            return base, int(ver)
-    return event_id, 0
-
-
-def _collapse_versions(history: List[InputEvent]) -> List[InputEvent]:
-    """Keep only the max-version events per base event_id (eager endpointing).
-
-    Successive eager (predicted-final) estimates of one user turn share a base
-    event_id and carry an increasing version suffix; the latest estimate wins, so
-    lower-version events for that base are dropped. Events with a plain (suffix-less)
-    event_id are unaffected — this is a no-op for non-speculative history.
-    """
-    max_version: Dict[str, int] = {}
-    for ev in history:
-        base, version = _split_event_id(getattr(ev, "event_id", None))
-        if base is not None and version > max_version.get(base, 0):
-            max_version[base] = version
-    if not any(v > 0 for v in max_version.values()):
-        return history
-    collapsed: List[InputEvent] = []
-    for ev in history:
-        base, version = _split_event_id(getattr(ev, "event_id", None))
-        if base is not None and version < max_version.get(base, 0):
-            continue  # superseded eager estimate
-        collapsed.append(ev)
-    return collapsed
 
 
 def _get_processed_history(
