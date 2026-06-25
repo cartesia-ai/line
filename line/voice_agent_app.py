@@ -112,10 +112,6 @@ class CallRequest(BaseModel):
     # the start message. Threaded into AgentEnv so call-scoped clients
     # (e.g. KnowledgeBase) hit the same API that minted agent_token.
     api_base_url: Optional[str] = None
-    # Per-agent opt-in for speculative (eager-endpointing) generation.
-    # When enabled and the agent is an LlmAgent, eager (version > 0) transcripts
-    # run the turn early; the reply is held by the harness until the turn commits.
-    eager_generation: bool = False
 
     model_config = ConfigDict(
         # Allow both field name (from_) and alias (from) for input
@@ -269,9 +265,7 @@ class VoiceAgentApp:
         )
         try:
             agent_spec = await self.get_agent(env, call_request)
-            runner = ConversationRunner(
-                websocket, agent_spec, env, eager_generation=call_request.eager_generation
-            )
+            runner = ConversationRunner(websocket, agent_spec, env)
         except Exception:
             error_msg = traceback.format_exc()
             error_string = f"Error in get_agent for {call_request.call_id}: {error_msg}"
@@ -301,7 +295,6 @@ def _call_request_from_start_data(data: dict) -> CallRequest:
         metadata=start_msg.metadata or {},
         agent_token=start_msg.agent_token,
         api_base_url=start_msg.api_base_url,
-        eager_generation=bool(start_msg.eager_generation),
     )
 
 
@@ -321,7 +314,6 @@ class ConversationRunner:
         websocket: WebSocket,
         agent_spec: AgentSpec,
         env: AgentEnv,
-        eager_generation: bool = False,
     ):
         """
         Initialize the ConversationRunner.
@@ -331,9 +323,6 @@ class ConversationRunner:
             agent_spec: Agent or (Agent, run_filter, cancel_filter).
             env: Per-call environment, passed through to TurnEnv so tools
                 can resolve call-scoped resources (e.g. knowledge base).
-            eager_generation: Per-agent opt-in for speculative (eager-endpointing)
-                generation. Only honored for LlmAgent (its history
-                supports the versioned collapse).
         """
         self.websocket = websocket
         self.env = env
@@ -343,15 +332,6 @@ class ConversationRunner:
 
         self.agent_callable, self.run_filter, self.cancel_filter = self._prepare_agent(agent_spec)
         self.agent_task: Optional[asyncio.Task] = None
-
-        # Speculative turns: only LlmAgent can speculate, since the versioned history
-        # supersession relies on its History merge.
-        self._eager_generation = eager_generation and self._agent_is_llm
-        if eager_generation and not self._agent_is_llm:
-            logger.warning(
-                "eager_generation requested but agent is not an LlmAgent; "
-                "speculative turns disabled for this call."
-            )
 
     @property
     def shutdown_event(self) -> asyncio.Event:
@@ -384,12 +364,6 @@ class ConversationRunner:
             agent_obj = agent_spec
             run_spec = default_run
             cancel_spec = default_cancel
-
-        # Lazy import (config.py imports CallRequest from this module, so a top-level
-        # import of LlmAgent would be circular). Used to gate speculative turns.
-        from line.llm_agent.llm_agent import LlmAgent
-
-        self._agent_is_llm = isinstance(agent_obj, LlmAgent)
 
         run_filter = self._normalize_filter(run_spec)
         cancel_filter = self._normalize_filter(cancel_spec)
@@ -431,13 +405,6 @@ class ConversationRunner:
                     input_msg = _input_message_adapter.validate_python(message)
                 except ValidationError:
                     logger.warning(f"Dropping unparseable websocket message: {message}")
-                    continue
-
-                # Ignore any speculative-flagged message: it is the redundant final
-                # turn-end of a turn an eager already committed, so processing it would
-                # append a duplicate user turn or re-trigger generation. Eagers themselves
-                # are unflagged and run through the normal path below.
-                if getattr(input_msg, "speculative", False):
                     continue
 
                 # Convert and process the input message
@@ -488,6 +455,15 @@ class ConversationRunner:
 
     async def _start_agent_task(self, turn_env: TurnEnv, event: InputEvent) -> None:
         """Start the agent async iterable for the given event."""
+        # A still-running task here means the prior generation was never cancelled before
+        # this turn started. Under eager generation a resume should have already cancelled
+        # it (via user-speaking), so a live task signals the resume didn't land or was too
+        # slow. We still cancel it normally below; this is a loud signal, not a fatal abort.
+        if self.agent_task and not self.agent_task.done():
+            logger.error(
+                "Starting a new turn while the previous agent task is still running; "
+                "it should already have been cancelled (e.g. by a resume)."
+            )
         await self._cancel_agent_task()
 
         # Stamp the reply with the triggering turn's (event_id, version) so the harness
@@ -615,17 +591,17 @@ class ConversationRunner:
         never dropped.
         """
         max_version: dict[str, int] = {}
-        for e in history:
-            eid = getattr(e, "event_id", None)
-            if eid is None:
+        for event in history:
+            event_id = getattr(event, "event_id", None)
+            if event_id is None:
                 continue
-            v = getattr(e, "version", 0) or 0
-            if v > max_version.get(eid, 0):
-                max_version[eid] = v
+            version = getattr(event, "version", 0) or 0
+            max_version[event_id] = max(max_version.get(event_id, 0), version)
         return [
-            e
-            for e in history
-            if (getattr(e, "version", 0) or 0) >= max_version.get(getattr(e, "event_id", None), 0)
+            event
+            for event in history
+            if (getattr(event, "version", 0) or 0)
+            >= max_version.get(getattr(event, "event_id", None), 0)
         ]
 
     def _process_input_event(
@@ -641,10 +617,9 @@ class ConversationRunner:
         """
         raw_history = history + [raw_event]
         # Collapse eager re-estimates: a turn's later versions supersede earlier ones, so
-        # the agent only ever sees the latest estimate of each turn. Gated on eager
-        # generation; a no-op for normal (version 0) turns.
-        if self._eager_generation:
-            raw_history = self._collapse_versions(raw_history)
+        # the agent only ever sees the latest estimate of each turn. A no-op for normal
+        # (version 0) turns, so it runs unconditionally.
+        raw_history = self._collapse_versions(raw_history)
         # Process history to restore whitespace before passing to agent
         processed_history = _get_processed_history(self.emitted_agent_text, raw_history)
         processed_event = processed_history[-1]

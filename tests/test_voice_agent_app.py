@@ -11,7 +11,7 @@ Focuses on:
 import asyncio
 from datetime import datetime
 from typing import AsyncIterator, List
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from fastapi import WebSocket, WebSocketDisconnect
 import pytest
@@ -1453,14 +1453,11 @@ from line._harness_types import TranscriptionInput, UserStateInput  # noqa: E402
 async def _drive(runner: ConversationRunner, *messages) -> None:
     """Feed wire messages through the runner the way run() does, awaiting each turn.
 
-    Mirrors the run-loop body (speculative drop -> convert -> process -> handle) and
-    awaits the spawned task after each message so a reply completes before the next
-    message could cancel it.
+    Mirrors the run-loop body (convert -> process -> handle) and awaits the spawned task
+    after each message so a reply completes before the next message could cancel it.
     """
     turn_env = TurnEnv(agent_env=env)
     for msg in messages:
-        if getattr(msg, "speculative", False):
-            continue
         event = runner._convert_input_message(msg)
         if event is None:
             continue
@@ -1502,7 +1499,6 @@ class TestEagerTurns:
         """A higher version of the same turn supersedes the older estimate in history."""
         ws = create_mock_websocket()
         runner = ConversationRunner(ws, reply_agent, env)
-        runner._eager_generation = True  # reply_agent isn't an LlmAgent; force-enable collapse
 
         await _drive(
             runner,
@@ -1519,24 +1515,21 @@ class TestEagerTurns:
         assert not any(e.content == "hi" for e in texts)
 
     @pytest.mark.asyncio
-    async def test_speculative_message_is_ignored(self):
-        """A speculative-flagged message (the redundant real turn-end an eager committed)
-        is dropped: not appended to history and not run."""
+    async def test_starting_turn_with_live_task_logs_error(self):
+        """Starting a new turn while the previous agent task is still running is a loud
+        signal (a resume should already have cancelled it); the task is still cancelled."""
         ws = create_mock_websocket()
-        ws.receive_json.side_effect = [
-            {"type": "message", "content": "final", "event_id": "e9", "speculative": True},
-            {"type": "user_state", "value": "idle", "event_id": "e9", "speculative": True},
-            WebSocketDisconnect(),
-        ]
         runner = ConversationRunner(ws, reply_agent, env)
-        await runner.run()
 
-        assert not any(isinstance(e, (UserTextSent, UserTurnEnded)) for e in runner.history)
-        messages = [c.args[0] for c in ws.send_json.call_args_list if c.args[0].get("type") == "message"]
-        assert messages == []
+        async def never_ends():
+            await asyncio.Event().wait()
 
-    def test_eager_generation_gated_to_llm_agent(self):
-        """A non-LlmAgent does not speculate even when eager_generation is requested."""
-        ws = create_mock_websocket()
-        runner = ConversationRunner(ws, reply_agent, env, eager_generation=True)
-        assert runner._eager_generation is False  # reply_agent is a plain callable
+        runner.agent_task = asyncio.create_task(never_ends())
+        await asyncio.sleep(0)  # let the task start
+
+        with patch("line.voice_agent_app.logger.error") as mock_error:
+            await runner._start_agent_task(
+                TurnEnv(agent_env=env), UserTurnEnded(content=[], event_id="e1")
+            )
+
+        assert any("still running" in str(c.args[0]) for c in mock_error.call_args_list)

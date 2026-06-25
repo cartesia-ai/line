@@ -23,9 +23,6 @@ class TranscriptionInput(BaseModel):
     # (predicted-final) estimate of the same user turn, sharing one event_id; the
     # SDK runs the turn early and collapses to the max version per event_id.
     version: Optional[int] = None
-    # The redundant final turn-end of a turn an eager already committed. The SDK
-    # ignores any speculative message (not appended to history, not run).
-    speculative: bool = False
 
 
 class DTMFInput(BaseModel):
@@ -39,7 +36,6 @@ class UserStateInput(BaseModel):
     type: Literal["user_state"] = "user_state"
     event_id: Optional[str] = None
     version: Optional[int] = None
-    speculative: bool = False
 
 
 class AgentStateInput(BaseModel):
@@ -215,7 +211,10 @@ class StartInput(BaseModel):
     # the agent uses the same API endpoint that minted its credentials,
     # rather than guessing via env var or a hardcoded prod default.
     api_base_url: Optional[str] = None
-    # Per-agent opt-in for speculative (eager-endpointing) generation.
+    # Per-agent opt-in for speculative (eager-endpointing) generation, forwarded by the
+    # harness. Accepted for wire compatibility but not acted on here: all speculative
+    # gating lives in Bifrost, which simply doesn't send versioned messages when off. The
+    # SDK collapses versions uniformly regardless.
     eager_generation: Optional[bool] = None
 
     model_config = ConfigDict(populate_by_name=True)
