@@ -709,47 +709,38 @@ class ConversationRunner:
         return value
 
     def _map_output_event(self, event: OutputEvent) -> OutputMessage:
-        """Convert OutputEvent to websocket OutputMessage."""
+        """Convert OutputEvent to websocket OutputMessage, stamping the correlation
+        fields (responding_to, version) that every output type shares."""
+        message = self._build_output_message(event)
+        if not isinstance(message, ErrorOutput):
+            message.responding_to = event.responding_to
+            message.version = event.version
+        return message
+
+    def _build_output_message(self, event: OutputEvent) -> OutputMessage:
+        """Build the per-type websocket OutputMessage (correlation fields stamped by the caller)."""
         if isinstance(event, AgentSendText):
             if event.interruptible:
                 logger.info(f'<- 🤖🗣️ Agent said: "{event.text}"')
             else:
                 logger.info(f'<- 🤖🔒 Agent said (uninterruptible): "{event.text}"')
-            return MessageOutput(
-                content=event.text,
-                interruptible=event.interruptible,
-                responding_to=event.responding_to,
-                version=event.version,
-            )
+            return MessageOutput(content=event.text, interruptible=event.interruptible)
         if isinstance(event, AgentSendDtmf):
             logger.info(f"<- 🤖🔔 Agent DTMF sent: {event.button}")
-            return DTMFOutput(button=event.button, responding_to=event.responding_to, version=event.version)
+            return DTMFOutput(button=event.button)
         if isinstance(event, AgentEndCall):
             logger.info(f"<- 📞 End call (reason={event.reason}, interruptible={event.interruptible})")
-            return EndCallOutput(
-                reason=event.reason,
-                responding_to=event.responding_to,
-                version=event.version,
-                interruptible=event.interruptible,
-            )
+            return EndCallOutput(reason=event.reason, interruptible=event.interruptible)
         if isinstance(event, AgentTransferCall):
             logger.info(
                 f"<- 📱 Transfer to: {event.target_phone_number} (interruptible={event.interruptible})"
             )
             return TransferOutput(
-                target_phone_number=event.target_phone_number,
-                responding_to=event.responding_to,
-                version=event.version,
-                interruptible=event.interruptible,
+                target_phone_number=event.target_phone_number, interruptible=event.interruptible
             )
         if isinstance(event, LogMetric):
             logger.debug(f"<- 📈 Log metric: {event.name}={event.value}")
-            return LogMetricOutput(
-                name=event.name,
-                value=event.value,
-                responding_to=event.responding_to,
-                version=event.version,
-            )
+            return LogMetricOutput(name=event.name, value=event.value)
         if isinstance(event, LogMessage):
             logger.debug(f"<- 🪵 Log message: {event.name} [{event.level}] {event.message}")
             metadata = {
@@ -757,19 +748,12 @@ class ConversationRunner:
                 "message": event.message,
                 "metadata": self._truncate_dict_for_ws(event.metadata),
             }
-            return LogEventOutput(
-                event=event.name,
-                metadata=metadata,
-                responding_to=event.responding_to,
-                version=event.version,
-            )
+            return LogEventOutput(event=event.name, metadata=metadata)
         if isinstance(event, AgentToolCalled):
             logger.info(f"<- 🔧 Tool called: {event.tool_name}({event.tool_args})")
             return ToolCallOutput(
                 name=event.tool_name,
                 arguments=self._truncate_dict_for_ws(event.tool_args),
-                responding_to=event.responding_to,
-                version=event.version,
             )
         if isinstance(event, AgentToolReturned):
             logger.info(f"<- 🔧 Tool returned: {event.tool_name}({event.tool_args}) -> {event.result}")
@@ -778,8 +762,6 @@ class ConversationRunner:
                 name=event.tool_name,
                 arguments=self._truncate_dict_for_ws(event.tool_args),
                 result=result_str,
-                responding_to=event.responding_to,
-                version=event.version,
             )
         if isinstance(event, AgentUpdateCall):
             logger.info(
@@ -795,14 +777,10 @@ class ConversationRunner:
                 ),
                 stt=STTConfig(language=event.language) if event.language is not None else None,
                 language=event.language,
-                responding_to=event.responding_to,
-                version=event.version,
             )
         if isinstance(event, AgentSendCustom):
             logger.debug(f"<- 📦 Custom event with metadata: {event.metadata}")
-            return CustomOutput(
-                metadata=event.metadata, responding_to=event.responding_to, version=event.version
-            )
+            return CustomOutput(metadata=event.metadata)
 
         return ErrorOutput(content=f"Unhandled output event type: {type(event).__name__}")
 
