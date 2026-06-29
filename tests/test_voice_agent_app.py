@@ -1444,7 +1444,7 @@ class TestCreateChatSessionErrorAttribution:
 
 
 # ============================================================
-# Speculative turns / eager endpointing
+# Event versioning (drives speculative turns / eager endpointing)
 # ============================================================
 
 from line._harness_types import TranscriptionInput, UserStateInput  # noqa: E402

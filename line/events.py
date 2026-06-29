@@ -23,7 +23,7 @@ class AgentSendText(BaseModel):
     text: str
     interruptible: bool = True
     responding_to: Optional[str] = None
-    version: int = 0  # echoes the triggering turn's eager version (0 = normal turn)
+    version: int = 0
 
 
 class AgentToolCalled(BaseModel):
@@ -32,7 +32,7 @@ class AgentToolCalled(BaseModel):
     tool_name: str
     tool_args: Dict[str, Any] = Field(default_factory=dict)
     responding_to: Optional[str] = None
-    version: int = 0  # echoes the triggering turn's eager version (0 = normal turn)
+    version: int = 0
 
 
 class AgentToolReturned(BaseModel):
@@ -42,7 +42,7 @@ class AgentToolReturned(BaseModel):
     tool_args: Dict[str, Any] = Field(default_factory=dict)
     result: Any = None
     responding_to: Optional[str] = None
-    version: int = 0  # echoes the triggering turn's eager version (0 = normal turn)
+    version: int = 0
 
 
 # Supported end_reason values in the Cartesia API. "agent_ended" is the default
@@ -55,7 +55,7 @@ class AgentEndCall(BaseModel):
     type: Literal["end_call"] = "end_call"
     reason: str = "agent_ended"
     responding_to: Optional[str] = None
-    version: int = 0  # echoes the triggering turn's eager version (0 = normal turn)
+    version: int = 0
     interruptible: bool = True
 
 
@@ -63,7 +63,7 @@ class AgentTransferCall(BaseModel):
     type: Literal["agent_transfer_call"] = "agent_transfer_call"
     target_phone_number: str
     responding_to: Optional[str] = None
-    version: int = 0  # echoes the triggering turn's eager version (0 = normal turn)
+    version: int = 0
     interruptible: bool = True
 
 
@@ -71,7 +71,7 @@ class AgentSendDtmf(BaseModel):
     type: Literal["agent_send_dtmf"] = "agent_send_dtmf"
     button: str
     responding_to: Optional[str] = None
-    version: int = 0  # echoes the triggering turn's eager version (0 = normal turn)
+    version: int = 0
 
 
 class LogMetric(BaseModel):
@@ -79,7 +79,7 @@ class LogMetric(BaseModel):
     name: str
     value: Any
     responding_to: Optional[str] = None
-    version: int = 0  # echoes the triggering turn's eager version (0 = normal turn)
+    version: int = 0
 
 
 class LogMessage(BaseModel):
@@ -89,7 +89,7 @@ class LogMessage(BaseModel):
     message: str
     metadata: Optional[Dict[str, Any]] = None
     responding_to: Optional[str] = None
-    version: int = 0  # echoes the triggering turn's eager version (0 = normal turn)
+    version: int = 0
 
 
 class AgentUpdateCall(BaseModel):
@@ -98,14 +98,14 @@ class AgentUpdateCall(BaseModel):
     pronunciation_dict_id: Optional[str] = None
     language: Optional[str] = None
     responding_to: Optional[str] = None
-    version: int = 0  # echoes the triggering turn's eager version (0 = normal turn)
+    version: int = 0
 
 
 class AgentSendCustom(BaseModel):
     type: Literal["agent_send_custom"] = "agent_send_custom"
     metadata: Dict[str, Any]
     responding_to: Optional[str] = None
-    version: int = 0  # echoes the triggering turn's eager version (0 = normal turn)
+    version: int = 0
 
 
 OutputEvent = Union[
@@ -183,8 +183,8 @@ class UserTextSent(BaseModel):
     type: Literal["user_text_sent"] = "user_text_sent"
     content: str
     event_id: str = Field(default_factory=_generate_event_id)
-    # Eager-endpointing version: 0 for a normal turn; the Nth eager estimate of a
-    # turn shares the turn's event_id at version N. History keeps the max version.
+    # Version of this event: 0 by default; revisions of the same event share its
+    # event_id at increasing versions. History keeps only the max version per event_id.
     version: int = 0
     history: Optional[List["InputEvent"]] = None
 

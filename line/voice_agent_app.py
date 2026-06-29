@@ -455,20 +455,16 @@ class ConversationRunner:
 
     async def _start_agent_task(self, turn_env: TurnEnv, event: InputEvent) -> None:
         """Start the agent async iterable for the given event."""
-        # A still-running task here means the prior generation was never cancelled before
-        # this turn started. Under eager generation a resume should have already cancelled
-        # it (via user-speaking), so a live task signals the resume didn't land or was too
-        # slow. We still cancel it normally below; this is a loud signal, not a fatal abort.
         if self.agent_task and not self.agent_task.done():
             logger.error(
                 "Starting a new turn while the previous agent task is still running; "
-                "it should already have been cancelled (e.g. by a resume)."
+                "it should already have been cancelled."
             )
         await self._cancel_agent_task()
 
-        # Stamp the reply with the triggering turn's (event_id, version) so the harness
+        # Stamp the reply with the triggering event's (event_id, version) so the harness
         # correlates the held reply on that pair. responding_to stays the bare event_id;
-        # version is 0 for a normal turn and N for the Nth eager estimate.
+        # version echoes the triggering event's version (0 unless a newer version exists).
         responding_to_id = event.event_id
         responding_version = getattr(event, "version", 0) or 0
 
@@ -585,10 +581,9 @@ class ConversationRunner:
     def _collapse_versions(history: List[InputEvent]) -> List[InputEvent]:
         """Keep only the max-version events per event_id.
 
-        Eager estimates of one turn share the turn's event_id at increasing versions; a
-        later estimate supersedes the earlier ones. Events without a version (normal turns,
-        agent events) default to version 0 and keep their own unique event_id, so they are
-        never dropped.
+        Revisions of one event share its event_id at increasing versions; a later version
+        supersedes the earlier ones. Events without a version default to version 0 and keep
+        their own unique event_id, so they are never dropped.
         """
         max_version: dict[str, int] = {}
         for event in history:
@@ -615,9 +610,9 @@ class ConversationRunner:
         deduplication (already pre-committed as uninterruptible text).
         """
         raw_history = history + [raw_event]
-        # Collapse eager re-estimates: a turn's later versions supersede earlier ones, so
-        # the agent only ever sees the latest estimate of each turn. A no-op for normal
-        # (version 0) turns, so it runs unconditionally.
+        # Collapse versions: later versions of an event supersede earlier ones, so the
+        # agent only ever sees the latest version of each event. A no-op when every event
+        # is at version 0, so it runs unconditionally.
         raw_history = self._collapse_versions(raw_history)
         # Process history to restore whitespace before passing to agent
         processed_history = _get_processed_history(self.emitted_agent_text, raw_history)

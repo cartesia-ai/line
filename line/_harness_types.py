@@ -19,9 +19,9 @@ class TranscriptionInput(BaseModel):
     content: str
     type: Literal["message"] = "message"
     event_id: Optional[str] = None
-    # Eager-endpointing version. A value > 0 marks the Nth eager
-    # (predicted-final) estimate of the same user turn, sharing one event_id; the
-    # SDK runs the turn early and collapses to the max version per event_id.
+    # Version of this event. Events sharing an event_id are revisions of the same
+    # input; a higher version supersedes lower ones, and any new version
+    # regenerates the outcome (the SDK collapses to the max version per event_id).
     version: Optional[int] = None
 
 
@@ -211,10 +211,7 @@ class StartInput(BaseModel):
     # the agent uses the same API endpoint that minted its credentials,
     # rather than guessing via env var or a hardcoded prod default.
     api_base_url: Optional[str] = None
-    # Per-agent opt-in for speculative (eager-endpointing) generation, forwarded by the
-    # harness. Accepted for wire compatibility but not acted on here: all speculative
-    # gating lives in Bifrost, which simply doesn't send versioned messages when off. The
-    # SDK collapses versions uniformly regardless.
+    # Per-agent opt-in for speculative (eager-endpointing) generation, forwarded by the harness.
     eager_generation: Optional[bool] = None
 
     model_config = ConfigDict(populate_by_name=True)
