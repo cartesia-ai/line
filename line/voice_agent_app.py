@@ -600,8 +600,7 @@ class ConversationRunner:
         return [
             event
             for event in history
-            if (getattr(event, "version", 0) or 0)
-            >= max_version.get(getattr(event, "event_id", None), 0)
+            if (getattr(event, "version", 0) or 0) >= max_version.get(getattr(event, "event_id", None), 0)
         ]
 
     def _process_input_event(

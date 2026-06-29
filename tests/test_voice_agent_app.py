@@ -1528,8 +1528,6 @@ class TestEagerTurns:
         await asyncio.sleep(0)  # let the task start
 
         with patch("line.voice_agent_app.logger.error") as mock_error:
-            await runner._start_agent_task(
-                TurnEnv(agent_env=env), UserTurnEnded(content=[], event_id="e1")
-            )
+            await runner._start_agent_task(TurnEnv(agent_env=env), UserTurnEnded(content=[], event_id="e1"))
 
         assert any("still running" in str(c.args[0]) for c in mock_error.call_args_list)
