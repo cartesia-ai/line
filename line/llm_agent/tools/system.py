@@ -51,6 +51,9 @@ class UpdateCallConfig:
     voice_id: Optional[str] = None
     pronunciation_dict_id: Optional[str] = None
     language: Optional[str] = None
+    speed: Optional[float] = None
+    emotion: Optional[str] = None
+    volume: Optional[float] = None
 
 
 @dataclass
@@ -978,6 +981,9 @@ def agent_as_handoff(
                     voice_id=update_call.voice_id,
                     pronunciation_dict_id=update_call.pronunciation_dict_id,
                     language=update_call.language,
+                    speed=update_call.speed,
+                    emotion=update_call.emotion,
+                    volume=update_call.volume,
                 )
 
             # Trigger the agent's introduction via CallStarted

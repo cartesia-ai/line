@@ -1226,6 +1226,28 @@ class TestUpdateCallMapping:
         assert result.tts.language is None
         assert result.stt is None
 
+    def test_speed_emotion_volume_map_through(self):
+        """speed/emotion/volume flow from AgentUpdateCall onto ConfigOutput.tts."""
+        result = self._map(AgentUpdateCall(speed=1.2, emotion="cheerful", volume=0.8))
+        assert result.tts.speed == 1.2
+        assert result.tts.emotion == "cheerful"
+        assert result.tts.volume == 0.8
+
+    def test_speed_emotion_default_none(self):
+        """speed/emotion/volume are None when not provided."""
+        result = self._map(AgentUpdateCall(voice_id="abc"))
+        assert result.tts.speed is None
+        assert result.tts.emotion is None
+        assert result.tts.volume is None
+
+    def test_speed_emotion_coexist_with_voice_and_language(self):
+        """speed/emotion coexist with voice_id and language on the same update."""
+        result = self._map(AgentUpdateCall(voice_id="abc", language="fr", speed=0.9, emotion="sad"))
+        assert result.tts.voice_id == "abc"
+        assert result.tts.language == "fr"
+        assert result.tts.speed == 0.9
+        assert result.tts.emotion == "sad"
+
 
 # ============================================================
 # WebSocket output truncation tests
