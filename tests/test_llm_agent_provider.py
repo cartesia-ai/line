@@ -4,7 +4,13 @@ import asyncio
 from typing import Annotated, Any, List, Optional, get_type_hints
 
 from line.llm_agent.config import LlmConfig, _normalize_config
-from line.llm_agent.http_provider import _feed_tool_args, _HttpProvider
+from line.llm_agent.http_provider import (
+    _build_logged_completion_debug,
+    _build_logged_completion_output,
+    _feed_tool_args,
+    _HttpProvider,
+    _redact_llm_payload,
+)
 from line.llm_agent.provider import (
     ChatStream,
     LlmProvider,
@@ -572,6 +578,120 @@ def test_http_provider_sends_reasoning_effort_verbatim():
 
     stream = provider.chat([], config=_normalize_config(LlmConfig()))
     assert "reasoning_effort" not in stream._kwargs
+
+
+def test_http_provider_propagates_log_llm_calls_flag():
+    provider = _HttpProvider(model_id=parse_model_id("openai/gpt-4o"))
+
+    stream = provider.chat(
+        [Message(role="user", content="hi")],
+        config=_normalize_config(LlmConfig(log_llm_calls=True)),
+    )
+
+    assert stream._log_llm_calls is True
+
+
+def test_redact_llm_payload_removes_credentials():
+    payload = {
+        "api_key": "secret",
+        "headers": {
+            "Authorization": "Bearer secret",
+            "X-API-Key": "also-secret",
+        },
+        "messages": [{"role": "user", "content": "hello"}],
+    }
+
+    assert _redact_llm_payload(payload) == {
+        "api_key": "<redacted>",
+        "headers": {
+            "Authorization": "<redacted>",
+            "X-API-Key": "<redacted>",
+        },
+        "messages": [{"role": "user", "content": "hello"}],
+    }
+
+
+def test_build_logged_completion_output_is_chat_completion_shaped():
+    output = _build_logged_completion_output(
+        text="hello",
+        tool_calls=[
+            ToolCall(
+                id="call_1",
+                name="lookup",
+                arguments='{"q":"line"}',
+                is_complete=True,
+            )
+        ],
+        finish_reason="tool_calls",
+    )
+
+    assert output == {
+        "choices": [
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": "hello",
+                    "tool_calls": [
+                        {
+                            "id": "call_1",
+                            "type": "function",
+                            "function": {
+                                "name": "lookup",
+                                "arguments": '{"q":"line"}',
+                            },
+                            "is_complete": True,
+                        }
+                    ],
+                },
+                "finish_reason": "tool_calls",
+            }
+        ]
+    }
+
+
+def test_build_logged_completion_output_includes_empty_tool_calls():
+    output = _build_logged_completion_output(
+        text="hello",
+        tool_calls=[],
+        finish_reason="stop",
+    )
+
+    assert output["choices"][0]["message"]["tool_calls"] == []
+
+
+def test_build_logged_completion_output_includes_debug_fields():
+    debug = _build_logged_completion_debug(
+        started_at=1.0,
+        completed_at=1.5,
+        response_started_at=1.1,
+        first_chunk_at=1.2,
+        first_text_at=None,
+        first_tool_call_at=1.3,
+        chunk_count=3,
+        text_chunk_count=0,
+        tool_call_chunk_count=2,
+        tool_call_count=1,
+    )
+
+    output = _build_logged_completion_output(
+        text="",
+        tool_calls=[],
+        finish_reason="tool_calls",
+        debug=debug,
+    )
+
+    assert output["line_debug"] == {
+        "invoked_tool": True,
+        "tool_call_count": 1,
+        "chunk_count": 3,
+        "text_chunk_count": 0,
+        "tool_call_chunk_count": 2,
+        "duration_ms": 500.0,
+        "time_to_stream_start_ms": 100.0,
+        "time_to_first_chunk_ms": 200.0,
+        "time_to_first_text_ms": None,
+        "time_to_first_tool_call_ms": 300.0,
+    }
 
 
 def test_is_websocket_model_matches_gpt52_variants():

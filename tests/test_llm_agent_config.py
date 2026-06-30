@@ -93,6 +93,17 @@ def test_from_call_request_with_extra_kwargs():
     assert config.introduction == FALLBACK_INTRODUCTION
 
 
+def test_from_call_request_with_log_llm_calls():
+    """log_llm_calls is a normal LlmConfig kwarg accepted by from_call_request."""
+    call_request = make_call_request()
+
+    config = LlmConfig.from_call_request(call_request, log_llm_calls=True)
+
+    assert config.log_llm_calls is True
+    assert config.system_prompt == FALLBACK_SYSTEM_PROMPT
+    assert config.introduction == FALLBACK_INTRODUCTION
+
+
 def test_from_call_request_mixed_none_and_provided():
     """Test mixing None and provided values."""
     call_request = make_call_request(
@@ -255,6 +266,30 @@ def test_zdr_enabled_defaults_to_false():
 
     config = _normalize_config(LlmConfig())
     assert config.zdr_enabled is False
+
+
+def test_log_llm_calls_defaults_to_false():
+    """LLM call logging is opt-in so normal calls do not expose prompt data."""
+    from line.llm_agent.config import _normalize_config
+
+    config = _normalize_config(LlmConfig())
+    assert config.log_llm_calls is False
+
+
+def test_log_llm_calls_propagates_through_normalize_and_merge():
+    """Explicit log_llm_calls values survive normalization and merge layering."""
+    from line.llm_agent.config import _merge_configs, _normalize_config
+
+    base = LlmConfig(log_llm_calls=True)
+    override = LlmConfig()
+    merged = _merge_configs(base, override)
+    assert merged.log_llm_calls is True
+
+    normalized = _normalize_config(base)
+    assert normalized.log_llm_calls is True
+
+    disabled = _merge_configs(base, LlmConfig(log_llm_calls=False))
+    assert disabled.log_llm_calls is False
 
 
 def test_zdr_enabled_explicit_true_propagates_through_merge():

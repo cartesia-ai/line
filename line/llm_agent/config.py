@@ -46,6 +46,10 @@ class LlmConfig:
     # Provider-specific pass-through
     extra: Dict[str, Any] = _UNSET
 
+    # Debugging. When enabled, the LiteLLM HTTP backend logs the sanitized
+    # acompletion input kwargs and the assembled streamed completion output.
+    log_llm_calls: bool = _UNSET
+
     # Tool schema settings
     strict_tool_schemas: bool = _UNSET
 
@@ -143,6 +147,7 @@ _FIELD_DEFAULTS: Dict[str, Any] = {
     "fallbacks": None,
     "timeout": None,
     "extra": dict,  # callable → invoked each time
+    "log_llm_calls": False,
     "strict_tool_schemas": True,
     "zdr_enabled": False,
 }

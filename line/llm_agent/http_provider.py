@@ -11,9 +11,12 @@ Model naming:
 """
 
 import inspect
+import json
+import time
 from typing import Any, AsyncIterator, Dict, List, NamedTuple, Optional, Protocol, cast
 
 from litellm import acompletion
+from loguru import logger
 
 from line.llm_agent.config import LlmConfig
 from line.llm_agent.provider import Message, ParsedModelId, StreamChunk, ToolCall
@@ -106,7 +109,7 @@ class _HttpProvider:
 
         llm_kwargs.update(kwargs)
 
-        return _ChatStream(llm_kwargs)
+        return _ChatStream(llm_kwargs, log_llm_calls=config.log_llm_calls)
 
     def _build_messages(self, messages: List[Message], config: LlmConfig) -> List[Dict[str, Any]]:
         """Convert Message objects to LiteLLM format."""
@@ -182,8 +185,9 @@ class _ChatStream:
     the WebSocket backends.
     """
 
-    def __init__(self, llm_kwargs: Dict[str, Any]):
+    def __init__(self, llm_kwargs: Dict[str, Any], *, log_llm_calls: bool = False):
         self._kwargs = llm_kwargs
+        self._log_llm_calls = log_llm_calls
 
     async def __aenter__(self) -> "_ChatStream":
         return self
@@ -192,20 +196,49 @@ class _ChatStream:
         pass
 
     async def __aiter__(self) -> AsyncIterator[StreamChunk]:
-        response = cast(_ClosableAsyncIterable, await acompletion(**self._kwargs))
+        started_at = time.perf_counter()
+        response_started_at: Optional[float] = None
+        first_chunk_at: Optional[float] = None
+        first_text_at: Optional[float] = None
+        first_tool_call_at: Optional[float] = None
+        chunk_count = 0
+        text_chunk_count = 0
+        tool_call_chunk_count = 0
+
+        if self._log_llm_calls:
+            _log_llm_call("LiteLLM input call", self._kwargs)
+
+        response: Optional[_ClosableAsyncIterable] = None
+        output_text_parts: List[str] = []
+        finish_reason = None
+        output_error: Optional[BaseException] = None
+        tool_calls: Dict[int, ToolCall] = {}
         try:
-            tool_calls: Dict[int, ToolCall] = {}
+            response = cast(_ClosableAsyncIterable, await acompletion(**self._kwargs))
+            response_started_at = time.perf_counter()
             arg_states: Dict[int, _ArgState] = {}
 
             async for chunk in response:
+                chunk_count += 1
+                if first_chunk_at is None:
+                    first_chunk_at = time.perf_counter()
+
                 text = None
                 if chunk.choices and chunk.choices[0].delta:
                     delta = chunk.choices[0].delta
                     text = getattr(delta, "content", None)
+                    if text:
+                        text_chunk_count += 1
+                        if first_text_at is None:
+                            first_text_at = time.perf_counter()
+                        output_text_parts.append(text)
 
                     # Handle incremental tool calls
                     tc_delta = getattr(delta, "tool_calls", None)
                     if tc_delta:
+                        tool_call_chunk_count += 1
+                        if first_tool_call_at is None:
+                            first_tool_call_at = time.perf_counter()
                         for tc in tc_delta:
                             idx = tc.index
                             if idx not in tool_calls:
@@ -232,7 +265,6 @@ class _ChatStream:
                                     tool_calls[idx].thought_signature = thought_sig
 
                 # Check finish reason
-                finish_reason = None
                 if chunk.choices and chunk.choices[0].finish_reason:
                     finish_reason = chunk.choices[0].finish_reason
                     if finish_reason in ("tool_calls", "stop"):
@@ -244,12 +276,38 @@ class _ChatStream:
                     tool_calls=list(tool_calls.values()) if tool_calls else [],
                     is_final=finish_reason is not None,
                 )
+        except BaseException as exc:
+            output_error = exc
+            raise
         finally:
-            aclose = getattr(response, "aclose", None)
-            if callable(aclose):
-                result = aclose()
-                if inspect.isawaitable(result):
-                    await result
+            if self._log_llm_calls:
+                _log_llm_call(
+                    "LiteLLM output call",
+                    _build_logged_completion_output(
+                        text="".join(output_text_parts),
+                        tool_calls=list(tool_calls.values()),
+                        finish_reason=finish_reason,
+                        debug=_build_logged_completion_debug(
+                            started_at=started_at,
+                            completed_at=time.perf_counter(),
+                            response_started_at=response_started_at,
+                            first_chunk_at=first_chunk_at,
+                            first_text_at=first_text_at,
+                            first_tool_call_at=first_tool_call_at,
+                            chunk_count=chunk_count,
+                            text_chunk_count=text_chunk_count,
+                            tool_call_chunk_count=tool_call_chunk_count,
+                            tool_call_count=len(tool_calls),
+                        ),
+                        error=output_error,
+                    ),
+                )
+            if response is not None:
+                aclose = getattr(response, "aclose", None)
+                if callable(aclose):
+                    result = aclose()
+                    if inspect.isawaitable(result):
+                        await result
 
 
 class _ArgState(NamedTuple):
@@ -297,3 +355,124 @@ def _feed_tool_args(state: Optional[_ArgState], fragment: str) -> _ArgState:
                 depth -= 1
 
     return _ArgState(args, depth, in_str, esc)
+
+
+_REDACTED = "<redacted>"
+_SENSITIVE_KEYS = frozenset(
+    {
+        "api_key",
+        "authorization",
+        "proxy_authorization",
+        "x-api-key",
+        "openai-api-key",
+    }
+)
+
+
+def _redact_llm_payload(value: Any) -> Any:
+    """Return a JSON-friendly copy of a LiteLLM payload with credentials hidden."""
+    if isinstance(value, dict):
+        redacted: Dict[str, Any] = {}
+        for key, item in value.items():
+            key_str = str(key)
+            normalized = key_str.lower().replace("_", "-")
+            if key_str.lower().endswith("api_key") or normalized in _SENSITIVE_KEYS:
+                redacted[key] = _REDACTED
+            else:
+                redacted[key] = _redact_llm_payload(item)
+        return redacted
+    if isinstance(value, list):
+        return [_redact_llm_payload(item) for item in value]
+    if isinstance(value, tuple):
+        return [_redact_llm_payload(item) for item in value]
+    return value
+
+
+def _log_llm_call(label: str, payload: Any) -> None:
+    """Log a sanitized LLM payload as stable, readable JSON."""
+    logger.info(
+        "{}:\n{}",
+        label,
+        json.dumps(_redact_llm_payload(payload), indent=2, sort_keys=True, default=str),
+    )
+
+
+def _build_logged_completion_output(
+    *,
+    text: str,
+    tool_calls: List[ToolCall],
+    finish_reason: Optional[str],
+    debug: Optional[Dict[str, Any]] = None,
+    error: Optional[BaseException] = None,
+) -> Dict[str, Any]:
+    """Build a chat-completion-shaped summary from a streamed LiteLLM response."""
+    result: Dict[str, Any] = {
+        "choices": [
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": text or None,
+                    "tool_calls": [
+                        {
+                            "id": tc.id,
+                            "type": "function",
+                            "function": {
+                                "name": tc.name,
+                                "arguments": tc.arguments,
+                            },
+                            "is_complete": tc.is_complete,
+                            **(
+                                {"provider_specific_fields": {"thought_signature": tc.thought_signature}}
+                                if tc.thought_signature
+                                else {}
+                            ),
+                        }
+                        for tc in tool_calls
+                    ],
+                },
+                "finish_reason": finish_reason,
+            }
+        ]
+    }
+    if debug is not None:
+        result["line_debug"] = debug
+    if error is not None:
+        result["error"] = {
+            "type": type(error).__name__,
+            "message": str(error),
+        }
+    return result
+
+
+def _ms_since(start: float, end: Optional[float]) -> Optional[float]:
+    if end is None:
+        return None
+    return round((end - start) * 1000, 3)
+
+
+def _build_logged_completion_debug(
+    *,
+    started_at: float,
+    completed_at: float,
+    response_started_at: Optional[float],
+    first_chunk_at: Optional[float],
+    first_text_at: Optional[float],
+    first_tool_call_at: Optional[float],
+    chunk_count: int,
+    text_chunk_count: int,
+    tool_call_chunk_count: int,
+    tool_call_count: int,
+) -> Dict[str, Any]:
+    """Build SDK-specific timing fields for a streamed LiteLLM call."""
+    return {
+        "invoked_tool": tool_call_count > 0,
+        "tool_call_count": tool_call_count,
+        "chunk_count": chunk_count,
+        "text_chunk_count": text_chunk_count,
+        "tool_call_chunk_count": tool_call_chunk_count,
+        "duration_ms": _ms_since(started_at, completed_at),
+        "time_to_stream_start_ms": _ms_since(started_at, response_started_at),
+        "time_to_first_chunk_ms": _ms_since(started_at, first_chunk_at),
+        "time_to_first_text_ms": _ms_since(started_at, first_text_at),
+        "time_to_first_tool_call_ms": _ms_since(started_at, first_tool_call_at),
+    }

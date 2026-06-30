@@ -58,8 +58,17 @@ config = LlmConfig(
 
     # Provider-specific options
     extra={"logprobs": True},
+
+    # Debugging
+    log_llm_calls=True,  # Logs sanitized LiteLLM input and output payloads
 )
 ```
+
+`log_llm_calls=True` is intended for local debugging. It logs the sanitized
+`litellm.acompletion(...)` input kwargs before the call and the assembled
+streamed chat-completion output after the call. API keys and authorization
+headers are redacted, but prompts, messages, tool schemas, tool arguments, and
+model outputs may still contain sensitive data.
 
 ### Creating Config from CallRequest
 
