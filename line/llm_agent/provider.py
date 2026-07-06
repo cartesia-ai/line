@@ -267,8 +267,8 @@ class LlmProvider:
             ``"realtime"``, or ``"websocket"``).  When ``None`` (default),
             the backend is auto-detected from the model name (HTTP/LiteLLM
             for all non-realtime models).  Set ``backend="http_responses"``
-            for Responses-API-capable OpenAI models (e.g. ``gpt-5.2``,
-            ``gpt-5.4-mini``) to speak the Responses API natively over
+            for any non-realtime OpenAI model (e.g. ``gpt-4.1``, ``gpt-4o``,
+            ``gpt-5.2``, ``gpt-5.4-mini``) to speak the Responses API natively over
             HTTPS via ``litellm.aresponses``, bypassing LiteLLM's
             chat-completions → responses bridge — useful for avoiding
             duplicated TTS output on gpt-5.4+ where the bridge drops the
@@ -508,23 +508,28 @@ def _get_model_config(
         )
 
     elif backend == "websocket" and not _is_websocket_model(model_id):
+        # The WS Responses endpoint (``wss://api.openai.com/v1/responses``)
+        # only accepts a narrow set of gpt-5.x models.
         raise ValueError(
             f"Backend 'websocket' requires a websocket-compatible model (e.g. gpt-5.2), got {str(model_id)!r}"
         )
-    elif backend == "http_responses" and not _is_websocket_model(model_id):
+    elif backend == "http_responses" and not _supports_http_responses(model_id):
         raise ValueError(
-            f"Backend 'http_responses' requires a Responses-API-capable model "
-            f"(e.g. gpt-5.2, gpt-5.4-mini), got {str(model_id)!r}"
+            f"Backend 'http_responses' requires an OpenAI chat model that supports the Responses "
+            f"API (e.g. gpt-4.1, gpt-4o, gpt-3.5-turbo, gpt-5.2). Legacy completion models "
+            f"(davinci-002, babbage-002) and realtime models are not supported; got {str(model_id)!r}"
         )
-    elif _is_websocket_model(model_id) and backend in ("websocket", "http_responses"):
-        # Opt-in Responses-API-native paths.  WS speaks the Responses
-        # API over ``wss://api.openai.com/v1/responses``; http_responses
-        # speaks it over HTTPS via ``litellm.aresponses``.  Either
-        # avoids LiteLLM's chat-completions → responses bridge
-        # translator, which drops the ``phase`` field on ``message``
-        # output items and produces duplicated TTS output for gpt-5.4+.
-        responses_supported = get_supported_openai_params(model=litellm_model) or []
-        responses_supports_reasoning = "reasoning_effort" in responses_supported
+    elif backend in ("websocket", "http_responses"):
+        # Opt-in Responses-API-native paths.  WS speaks the Responses API
+        # over ``wss://api.openai.com/v1/responses`` (limited to a few
+        # gpt-5.x models); http_responses speaks it over HTTPS via
+        # ``litellm.aresponses`` (any OpenAI non-realtime model — the WS
+        # allowlist is a strict subset).  Either avoids LiteLLM's
+        # chat-completions → responses bridge translator, which drops the
+        # ``phase`` field on ``message`` output items and produces
+        # duplicated TTS output for gpt-5.4+.  The guards above have
+        # already rejected models incompatible with the chosen backend.
+        responses_supports_reasoning = "reasoning_effort" in (litellm_support or [])
         mcfg = _ModelConfig(
             backend=backend,
             supports_reasoning_effort=responses_supports_reasoning,
@@ -604,8 +609,56 @@ _WEBSOCKET_MODELS = frozenset(
 
 
 def _is_websocket_model(model_id: ParsedModelId) -> bool:
-    """Check if a model should use the WebSocket (Responses API) backend."""
+    """Check if a model is accepted by the WebSocket (Responses API) endpoint.
+
+    The ``wss://api.openai.com/v1/responses`` endpoint only accepts a narrow
+    set of gpt-5.x models; ``http_responses`` (HTTPS) is far less restrictive
+    — see :func:`_supports_http_responses`.
+    """
     return _is_openai_model(model_id) and model_id.model in _WEBSOCKET_MODELS
+
+
+def _supports_http_responses(model_id: ParsedModelId) -> bool:
+    """Check if a model can be driven via the HTTPS Responses API backend.
+
+    ``http_responses`` reaches the Responses API through
+    ``litellm.aresponses``, which OpenAI serves for every **chat** model —
+    gpt-4o, gpt-4.1, gpt-4-turbo, gpt-4, gpt-3.5-turbo, the o-series, and
+    gpt-5.x (verified against ``/v1/responses`` directly).  This is a strict
+    superset of the WebSocket-endpoint allowlist in
+    :func:`_is_websocket_model`.
+
+    Two classes of OpenAI models are excluded:
+
+    * **Realtime** models — they have their own transport and are rejected
+      earlier as incompatible with any non-realtime backend.
+    * **Legacy base/completion** models (``davinci-002``, ``babbage-002``) —
+      they speak only ``/v1/completions``, never ``/v1/responses``. litellm
+      tags them ``mode="completion"``; an unknown model is assumed
+      chat-capable so we never reject a valid model on a metadata gap.
+    """
+    if not _is_openai_model(model_id) or _is_realtime_model(model_id):
+        return False
+
+    from litellm import get_model_info
+
+    # Query the bare model name: litellm keys legacy completion models under
+    # the ``text-completion-openai`` namespace (e.g. "davinci-002"), so the
+    # ``openai/``-prefixed form raises "not mapped" and would slip through.
+    #
+    # Fail open on an unmapped model. get_model_info raises only when litellm
+    # has no record of the model at all — a chat model newer than litellm's
+    # model DB, or a fine-tuned id (``ft:gpt-4o:...``). Known completion
+    # models resolve successfully and are caught by the mode check above, so
+    # the sole effect of returning True here is to *not* reject a model we
+    # merely lack metadata for. The alternative (fail closed) would block
+    # valid, working models at construction the moment they outpace the DB;
+    # a genuinely-unsupported model instead surfaces OpenAI's own error at
+    # call time — the same behavior as before this gate existed.
+    try:
+        return get_model_info(model=model_id.model).get("mode") != "completion"
+    except Exception:
+        return True
 
 
 # Backward-compat alias — emits a deprecation warning on instantiation.

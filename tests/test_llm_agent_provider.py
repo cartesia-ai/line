@@ -407,11 +407,39 @@ class TestGetModelConfig:
         cfg = _get_model_config(parse_model_id("openai/gpt-5.2"), backend="http_responses")
         assert cfg.backend == "http_responses"
 
-    def test_http_responses_backend_with_non_responses_model_raises(self):
+    def test_http_responses_backend_accepts_non_websocket_openai_model(self):
+        # gpt-4.1 / gpt-4o / gpt-3.5-turbo support the Responses API over HTTPS
+        # (litellm.aresponses) even though they are not accepted by the WS Responses
+        # endpoint. They are non-reasoning models, so reasoning_effort stays unsupported.
+        for model in ("openai/gpt-4.1", "openai/gpt-4.1-mini", "openai/gpt-4o", "openai/gpt-3.5-turbo"):
+            cfg = _get_model_config(parse_model_id(model), backend="http_responses")
+            assert cfg.backend == "http_responses", model
+            assert cfg.supports_reasoning_effort is False, model
+            assert cfg.default_reasoning_effort is None, model
+
+    def test_http_responses_backend_rejects_legacy_completion_model(self):
+        # Base/completion models speak only /v1/completions, never /v1/responses.
+        for model in ("openai/davinci-002", "openai/babbage-002"):
+            try:
+                _get_model_config(parse_model_id(model), backend="http_responses")
+            except ValueError as exc:
+                assert "http_responses" in str(exc), model
+            else:
+                raise AssertionError(f"Expected ValueError for {model}")
+
+    def test_http_responses_backend_with_non_openai_model_raises(self):
         try:
-            _get_model_config(parse_model_id("openai/gpt-4o"), backend="http_responses")
+            _get_model_config(parse_model_id("anthropic/claude-sonnet-4-5"), backend="http_responses")
         except ValueError as exc:
             assert "http_responses" in str(exc)
+        else:
+            raise AssertionError("Expected ValueError")
+
+    def test_http_responses_backend_with_realtime_model_raises(self):
+        try:
+            _get_model_config(parse_model_id("openai/gpt-4o-realtime-preview"), backend="http_responses")
+        except ValueError as exc:
+            assert "realtime" in str(exc).lower()
         else:
             raise AssertionError("Expected ValueError")
 
