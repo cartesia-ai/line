@@ -85,6 +85,37 @@ class TestBuildFullHistory:
         assert isinstance(result[0], AgentToolCalled)
         assert result[0].tool_name == "test"
 
+    async def test_current_turn_agent_send_text_chunks_are_concatenated(self):
+        """Current-turn streamed AgentSendText chunks collapse into one AgentTextSent.
+
+        The LLM streams text as many chunks; within a turn that also makes a
+        tool call (a loopback), the model must see its own just-produced
+        pre-tool speech as one coherent assistant turn, exactly as prior turns
+        are represented — not as a run of one-chunk messages.
+        """
+        local_history = self._annotate(
+            [
+                AgentSendText(text="Let"),
+                AgentSendText(text=" me"),
+                AgentSendText(text=" verify"),
+                AgentSendText(text=" that."),
+                AgentToolCalled(tool_call_id="1", tool_name="verify_otp", tool_args={"code": "123"}),
+                AgentToolReturned(
+                    tool_call_id="1", tool_name="verify_otp", tool_args={"code": "123"}, result="SUCCESS"
+                ),
+            ],
+            event_id="current",
+        )
+        result = _build_full_history([], local_history, current_event_id="current")
+
+        # The four chunks become a single assistant message, placed before the
+        # tool call — not four separate one-chunk messages.
+        assert len(result) == 3
+        assert isinstance(result[0], AgentTextSent)
+        assert result[0].content == "Let me verify that."
+        assert isinstance(result[1], AgentToolCalled)
+        assert isinstance(result[2], AgentToolReturned)
+
     async def test_only_local_history_with_observable_event_prior_excluded(self):
         """Prior local observable events without matching input are excluded."""
         # Prior events (event_id != current_event_id) with no input to match

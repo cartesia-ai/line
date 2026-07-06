@@ -363,8 +363,14 @@ def _build_full_history(
     # Flush any remaining locals from the last trigger
     result.extend(_flush_queue(queue))
 
-    # Append current-turn events (not yet observed, use local version)
-    result.extend(current_local)
+    # Append current-turn events (not yet observed, use local version).
+    # Concatenate contiguous streamed AgentSendText chunks first, mirroring how
+    # prior-turn slices are handled above, so the model sees its own just-produced
+    # speech as one coherent assistant turn rather than as many single-chunk
+    # messages. This matters during a tool loopback within the same turn: the
+    # pre-tool preamble ("Let me verify that.") would otherwise reach the model
+    # as a run of one-token assistant messages instead of a single utterance.
+    result.extend(_concat_contiguous_agent_send_text(current_local))
 
     # Convert matchable OutputEvents to InputEvent counterparts
     return [h for e in result if (h := _to_history_event(e)) is not None]
