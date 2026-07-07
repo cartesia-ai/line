@@ -211,7 +211,5 @@ class StartInput(BaseModel):
     # the agent uses the same API endpoint that minted its credentials,
     # rather than guessing via env var or a hardcoded prod default.
     api_base_url: Optional[str] = None
-    # Per-agent opt-in for speculative (eager-endpointing) generation, forwarded by the harness.
-    eager_generation: Optional[bool] = None
 
     model_config = ConfigDict(populate_by_name=True)
