@@ -169,9 +169,8 @@ class AgentHandedOff(BaseModel):
 class UserTurnStarted(BaseModel):
     type: Literal["user_turn_started"] = "user_turn_started"
     event_id: str = Field(default_factory=_generate_event_id)
-    # Version of this event: 0 by default. A resume (the user kept talking after an eager
-    # end) reuses the turn's event_id at a higher version, so it supersedes the eager
-    # estimate via version-collapse while still firing the cancel.
+    # 0 by default. A resume reuses the turn's event_id at a higher version, so it supersedes
+    # the eager estimate via version-collapse while still firing the cancel.
     version: int = 0
     history: Optional[List["InputEvent"]] = None
 
