@@ -1515,6 +1515,29 @@ class TestEagerTurns:
         assert not any(e.content == "hi" for e in texts)
 
     @pytest.mark.asyncio
+    async def test_resume_supersedes_eager_estimate(self):
+        """A resume reuses the turn's event_id at a bumped version: as a UserTurnStarted it
+        survives collapse as the max version (so it still fires the cancel) and supersedes the
+        eager estimate, dropping it from history."""
+        ws = create_mock_websocket()
+        runner = ConversationRunner(ws, reply_agent, env)
+
+        await _drive(
+            runner,
+            TranscriptionInput(content="hi", event_id="e1", version=1),
+            UserStateInput(value="idle", event_id="e1", version=1),  # eager v1 -> reply
+            UserStateInput(value="speaking", event_id="e1", version=2),  # resume (bumped)
+        )
+
+        # The resume survives collapse as the max version and carries the turn's event_id.
+        starts = [e for e in runner.history if isinstance(e, UserTurnStarted) and e.event_id == "e1"]
+        assert starts and starts[-1].version == 2
+        # The superseded v1 estimate is dropped from history.
+        assert not any(
+            isinstance(e, UserTextSent) and e.event_id == "e1" and e.version == 1 for e in runner.history
+        )
+
+    @pytest.mark.asyncio
     async def test_starting_turn_with_live_task_logs_error(self):
         """Starting a new turn while the previous agent task is still running is a loud
         signal (a resume should already have cancelled it); the task is still cancelled."""

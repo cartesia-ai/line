@@ -523,7 +523,7 @@ class ConversationRunner:
 
         if isinstance(message, UserStateInput):
             if message.value == UserState.SPEAKING:
-                return UserTurnStarted(**event_id_kwargs)
+                return UserTurnStarted(version=message.version or 0, **event_id_kwargs)
             elif message.value == UserState.IDLE:
                 content = self._turn_content(
                     self.history,
