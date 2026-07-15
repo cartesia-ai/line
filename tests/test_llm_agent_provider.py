@@ -4,7 +4,7 @@ import asyncio
 from typing import Annotated, Any, List, Optional, get_type_hints
 
 from line.llm_agent.config import LlmConfig, _normalize_config
-from line.llm_agent.http_provider import _feed_tool_args, _HttpProvider
+from line.llm_agent.http_provider import _feed_tool_args, _HttpProvider, _tool_args_complete
 from line.llm_agent.provider import (
     ChatStream,
     LlmProvider,
@@ -1072,3 +1072,43 @@ class TestNormalizeMessages:
         assert len(tool_msgs) == 2
         assert tool_msgs[0].content == "first"
         assert tool_msgs[1].content == "second"
+
+
+# ---------------------------------------------------------------------------
+# _tool_args_complete
+# ---------------------------------------------------------------------------
+
+
+class TestToolArgsComplete:
+    """Completeness gating for streamed tool-call arguments at stream end.
+
+    A terminal finish_reason (including "stop") must not mark a tool call
+    complete when its argument stream was cut mid-object — the partial JSON
+    would crash json.loads downstream and kill the turn.
+    """
+
+    def test_no_fragments_is_complete(self):
+        # A tool call that never streamed arguments is a valid no-arg call.
+        assert _tool_args_complete(None) is True
+
+    def test_complete_object(self):
+        state = _feed_tool_args(None, '{"city": "Tokyo"}')
+        assert _tool_args_complete(state) is True
+
+    def test_truncated_mid_object(self):
+        state = _feed_tool_args(None, '{"city": ')
+        assert _tool_args_complete(state) is False
+
+    def test_truncated_mid_string(self):
+        state = _feed_tool_args(None, '{"city": "Tok')
+        assert _tool_args_complete(state) is False
+
+    def test_complete_after_many_fragments(self):
+        state = None
+        for frag in ["{", '"query"', ": ", '"orari"', "}"]:
+            state = _feed_tool_args(state, frag)
+        assert _tool_args_complete(state) is True
+
+    def test_empty_object_is_complete(self):
+        state = _feed_tool_args(None, "{}")
+        assert _tool_args_complete(state) is True

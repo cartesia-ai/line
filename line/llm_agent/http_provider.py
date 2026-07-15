@@ -14,6 +14,7 @@ import inspect
 from typing import Any, AsyncIterator, Dict, List, NamedTuple, Optional, Protocol, cast
 
 from litellm import acompletion
+from loguru import logger
 
 from line.llm_agent.config import LlmConfig
 from line.llm_agent.provider import Message, ParsedModelId, StreamChunk, ToolCall
@@ -236,8 +237,20 @@ class _ChatStream:
                 if chunk.choices and chunk.choices[0].finish_reason:
                     finish_reason = chunk.choices[0].finish_reason
                     if finish_reason in ("tool_calls", "stop"):
-                        for tc in tool_calls.values():
-                            tc.is_complete = True
+                        for idx, tc in tool_calls.items():
+                            # A terminal finish reason does not guarantee the argument
+                            # stream was fully delivered (e.g. "stop" after truncation
+                            # or a cut stream). Only mark the call complete when the
+                            # accumulated arguments form complete JSON; otherwise the
+                            # partial args would fail json.loads downstream.
+                            if _tool_args_complete(arg_states.get(idx)):
+                                tc.is_complete = True
+                            else:
+                                logger.warning(
+                                    f"Tool call {tc.name or '<unnamed>'} (id={tc.id or '<no id>'}) "
+                                    f"has incomplete arguments at finish_reason={finish_reason}; "
+                                    "leaving it incomplete so it is skipped"
+                                )
 
                 yield StreamChunk(
                     text=text,
@@ -259,6 +272,19 @@ class _ArgState(NamedTuple):
     depth: int
     in_string: bool
     escape_next: bool
+
+
+def _tool_args_complete(state: Optional[_ArgState]) -> bool:
+    """Whether accumulated tool-call arguments form complete JSON.
+
+    ``None`` means no argument fragments were streamed at all — that is a
+    complete no-arg call (downstream treats empty arguments as ``{}``).
+    Otherwise the brace-depth tracking from ``_feed_tool_args`` tells us if
+    the object was closed and we are not mid-string.
+    """
+    if state is None:
+        return True
+    return state.depth == 0 and not state.in_string
 
 
 def _feed_tool_args(state: Optional[_ArgState], fragment: str) -> _ArgState:
