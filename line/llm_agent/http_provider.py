@@ -147,7 +147,7 @@ class _HttpProvider:
                     llm_msg["name"] = msg.name
 
             result.append(llm_msg)
-        return result
+        return _enforce_tool_adjacency(result)
 
     async def warmup(
         self,
@@ -272,6 +272,53 @@ class _ArgState(NamedTuple):
     depth: int
     in_string: bool
     escape_next: bool
+
+
+def _enforce_tool_adjacency(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Drop tool messages that don't follow an assistant message declaring them.
+
+    Chat-completions providers (OpenAI in particular) reject the whole request
+    with a 400 ("messages with role 'tool' must be a response to a preceeding
+    message with 'tool_calls'") when a ``role: "tool"`` message is not part of
+    the tool-response block immediately after the assistant message whose
+    ``tool_calls`` declared its ``tool_call_id``. ``_normalize_messages``
+    guards the known corruption paths upstream, but a violating sequence
+    observed in production still occasionally reaches the payload — and a 400
+    here kills the entire turn. Enforce the invariant on the final payload:
+    drop the offending tool message (degrading one tool result) and log the
+    role/``tool_call_id`` shape of the conversation so the upstream bug can be
+    root-caused from the warning alone.
+    """
+    validated: List[Dict[str, Any]] = []
+    block_ids: set = set()
+    dropped = False
+
+    for msg in messages:
+        if msg.get("role") == "tool":
+            if msg.get("tool_call_id") in block_ids:
+                validated.append(msg)
+            else:
+                dropped = True
+                logger.warning(
+                    f"Dropping tool message (tool_call_id={msg.get('tool_call_id')!r}, "
+                    f"name={msg.get('name')!r}) not preceded by a matching tool_calls "
+                    "assistant message; the provider would reject the whole request"
+                )
+            continue
+        # Any non-tool message starts a new adjacency block.
+        block_ids = (
+            {tc.get("id") for tc in msg.get("tool_calls", [])} if msg.get("role") == "assistant" else set()
+        )
+        validated.append(msg)
+
+    if dropped:
+        shape = [
+            (m.get("role"), m.get("tool_call_id") or [tc.get("id") for tc in m.get("tool_calls", [])])
+            for m in messages
+        ]
+        logger.warning(f"Conversation shape at tool-adjacency violation (role, tool ids): {shape}")
+
+    return validated
 
 
 def _tool_args_complete(state: Optional[_ArgState]) -> bool:

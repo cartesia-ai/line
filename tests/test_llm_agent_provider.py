@@ -4,7 +4,12 @@ import asyncio
 from typing import Annotated, Any, List, Optional, get_type_hints
 
 from line.llm_agent.config import LlmConfig, _normalize_config
-from line.llm_agent.http_provider import _feed_tool_args, _HttpProvider, _tool_args_complete
+from line.llm_agent.http_provider import (
+    _enforce_tool_adjacency,
+    _feed_tool_args,
+    _HttpProvider,
+    _tool_args_complete,
+)
 from line.llm_agent.provider import (
     ChatStream,
     LlmProvider,
@@ -1112,3 +1117,89 @@ class TestToolArgsComplete:
     def test_empty_object_is_complete(self):
         state = _feed_tool_args(None, "{}")
         assert _tool_args_complete(state) is True
+
+
+# ---------------------------------------------------------------------------
+# _enforce_tool_adjacency
+# ---------------------------------------------------------------------------
+
+
+class TestEnforceToolAdjacency:
+    """Final-payload guard against tool messages OpenAI would 400 on.
+
+    Seen in production as `openai.BadRequestError: messages with role 'tool'
+    must be a response to a preceeding message with 'tool_calls'`, which kills
+    the whole turn. The guard drops the offending tool message instead.
+    """
+
+    def _assistant(self, *ids, content=None):
+        msg = {"role": "assistant"}
+        if content is not None:
+            msg["content"] = content
+        if ids:
+            msg["tool_calls"] = [
+                {"id": i, "type": "function", "function": {"name": "t", "arguments": "{}"}} for i in ids
+            ]
+        return msg
+
+    def test_valid_sequence_untouched(self):
+        messages = [
+            {"role": "system", "content": "s"},
+            {"role": "user", "content": "hi"},
+            self._assistant("x1"),
+            {"role": "tool", "content": "ok", "tool_call_id": "x1"},
+            self._assistant(content="done"),
+        ]
+        assert _enforce_tool_adjacency(list(messages)) == messages
+
+    def test_multiple_responses_same_id_kept(self):
+        messages = [
+            self._assistant("x1"),
+            {"role": "tool", "content": "first", "tool_call_id": "x1"},
+            {"role": "tool", "content": "second", "tool_call_id": "x1"},
+        ]
+        assert _enforce_tool_adjacency(list(messages)) == messages
+
+    def test_multiple_ids_one_block_kept(self):
+        messages = [
+            self._assistant("x1", "x2"),
+            {"role": "tool", "content": "a", "tool_call_id": "x2"},
+            {"role": "tool", "content": "b", "tool_call_id": "x1"},
+        ]
+        assert _enforce_tool_adjacency(list(messages)) == messages
+
+    def test_orphan_tool_message_dropped(self):
+        messages = [
+            {"role": "user", "content": "hi"},
+            {"role": "tool", "content": "orphan", "tool_call_id": "ghost"},
+            self._assistant(content="hello"),
+        ]
+        result = _enforce_tool_adjacency(messages)
+        assert [m["role"] for m in result] == ["user", "assistant"]
+
+    def test_tool_after_plain_assistant_dropped(self):
+        # An assistant message WITHOUT tool_calls in between breaks the block.
+        messages = [
+            self._assistant("x1"),
+            self._assistant(content="interrupting text"),
+            {"role": "tool", "content": "late", "tool_call_id": "x1"},
+        ]
+        result = _enforce_tool_adjacency(messages)
+        assert [m["role"] for m in result] == ["assistant", "assistant"]
+
+    def test_tool_id_not_in_preceding_block_dropped(self):
+        messages = [
+            self._assistant("x1"),
+            {"role": "tool", "content": "ok", "tool_call_id": "x1"},
+            {"role": "tool", "content": "wrong block", "tool_call_id": "x2"},
+        ]
+        result = _enforce_tool_adjacency(messages)
+        assert [m.get("tool_call_id") for m in result if m["role"] == "tool"] == ["x1"]
+
+    def test_tool_as_first_message_dropped(self):
+        messages = [
+            {"role": "tool", "content": "orphan", "tool_call_id": "x1"},
+            {"role": "user", "content": "hi"},
+        ]
+        result = _enforce_tool_adjacency(messages)
+        assert [m["role"] for m in result] == ["user"]
