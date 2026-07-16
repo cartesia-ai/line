@@ -658,6 +658,7 @@ def _supports_http_responses(model_id: ParsedModelId) -> bool:
     try:
         return get_model_info(model=model_id.model).get("mode") != "completion"
     except Exception:
+        logger.debug(f"get_model_info({model_id.model!r}) failed; assuming chat-capable")
         return True
 
 

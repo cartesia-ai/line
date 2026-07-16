@@ -315,7 +315,7 @@ def _enforce_tool_adjacency(messages: List[Dict[str, Any]]) -> List[Dict[str, An
         shape = [
             (m.get("role"), m.get("tool_call_id") or [tc.get("id") for tc in m.get("tool_calls", [])])
             for m in messages
-        ]
+        ][:50]
         logger.warning(f"Conversation shape at tool-adjacency violation (role, tool ids): {shape}")
 
     return validated

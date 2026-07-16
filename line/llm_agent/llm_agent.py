@@ -402,7 +402,8 @@ class LlmAgent:
                     continue
 
                 try:
-                    tool_args = json.loads(tc.arguments) if tc.arguments.strip() else {}
+                    raw = tc.arguments or ""
+                    tool_args = json.loads(raw) if raw.strip() else {}
                 except json.JSONDecodeError as e:
                     # Malformed arguments (e.g. a truncated stream) must not kill the
                     # whole turn — skip this tool call and keep responding.
