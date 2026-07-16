@@ -16,13 +16,9 @@ load_dotenv()
 MODEL_ID = "openai/mercury-2"
 INCEPTION_API_BASE = "https://api.inceptionlabs.ai/v1"
 
-# Mercury 2 decoding control: "instant", "low", "medium", or "high".
-# "instant" skips extended reasoning for the lowest time-to-first-token,
-# which is usually the right trade-off on a live voice call.
-REASONING_EFFORT = "instant"
-
-MAX_OUTPUT_TOKENS = 300
-TEMPERATURE = 0.3
+REASONING_EFFORT = "medium"
+MAX_OUTPUT_TOKENS = 4096
+TEMPERATURE = 0.75
 
 SYSTEM_PROMPT = """You are the order-taker at Mercury Coffee, a quick-service coffee bar. \
 Keep the line moving: short, friendly, instant replies.
@@ -41,9 +37,16 @@ HOW TO WORK THE ORDER
   and tell them the total number of items.
 - After they confirm, thank them and call end_call.
 
-VOICE RULES
-This is a phone call. Plain natural sentences only: no markdown, no lists, no special characters.
-One question at a time. Never mention the tools or your reasoning."""
+TOOL ROUTING EXAMPLES
+User: "Can I get a large cold brew?" -> call add_item("large cold brew").
+User: "Actually, scratch the cold brew." -> call remove_item("large cold brew").
+User: "That's everything." -> call confirm_order().
+User: "What milks do you have?" -> no tool call; answer from the menu.
+
+VOICE RULES (critical)
+Your responses are read aloud by a text-to-speech engine. Respond in natural spoken language
+only: no markdown, no bullet points, no headers, no numbered lists, no special characters.
+Ask for only ONE piece of information at a time. Never mention the tools or your reasoning."""
 
 INTRODUCTION = "Hi, welcome to Mercury Coffee! What can I get started for you?"
 
@@ -106,11 +109,11 @@ async def get_agent(env: AgentEnv, call_request: CallRequest):
             temperature=TEMPERATURE,
             max_tokens=MAX_OUTPUT_TOKENS,
             extra={
-                # Point LiteLLM's OpenAI client at the Inception API.
                 "api_base": INCEPTION_API_BASE,
-                # Mercury-specific parameters go in extra_body so they are
-                # forwarded verbatim to the API.
-                "extra_body": {"reasoning_effort": REASONING_EFFORT},
+                "extra_body": {
+                    "reasoning_effort": REASONING_EFFORT,
+                    "realtime": True,
+                },
             },
         ),
     )

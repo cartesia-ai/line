@@ -2,7 +2,7 @@
 
 A low-latency order-taking voice agent built on [Mercury 2](https://www.inceptionlabs.ai/blog/introducing-mercury-2), Inception Labs' diffusion large language model, and the Cartesia Line SDK.
 
-Mercury 2 generates over 1,000 tokens per second by refining all tokens in parallel instead of decoding them one at a time. On a live voice call that translates directly into lower time-to-first-token, so this example uses a use case where snappy turnaround matters: taking a coffee order with rapid back-and-forth and tool calls on nearly every turn.
+Mercury 2 generates over 1,000 tokens per second by refining all tokens in parallel instead of decoding them one at a time. On a live voice call that cuts both time-to-first-token and end-to-end response latency: a ~300-token reasoning trace completes in under 300 ms, so the model can actually deliberate — tool selection, policy compliance, multi-step workflows — while staying inside the ~500 ms end-to-end LLM budget that natural conversation demands. This example leans into that with a use case where snappy turnaround matters: taking a coffee order with rapid back-and-forth and tool calls on nearly every turn.
 
 The [Inception API](https://docs.inceptionlabs.ai/) is OpenAI-compatible, so Mercury 2 plugs into `LlmAgent` through the SDK's HTTP/LiteLLM backend — no extra dependencies, just a custom `api_base`:
 
@@ -14,7 +14,7 @@ LlmAgent(
         ...,
         extra={
             "api_base": "https://api.inceptionlabs.ai/v1",
-            "extra_body": {"reasoning_effort": "instant"},
+            "extra_body": {"reasoning_effort": "medium", "realtime": True},
         },
     ),
 )
@@ -88,12 +88,19 @@ The Inception API serves several models — see [Models, Endpoints, and Pricing]
 
 ### Reasoning Effort
 
-Mercury 2 is a reasoning model with a `reasoning_effort` control: `"instant"`, `"low"`, `"medium"`, or `"high"`. Higher settings spend more time reasoning before answering; `"instant"` skips extended reasoning for the fastest response, which is usually the right trade-off for voice. It is passed through `extra_body` so LiteLLM forwards it verbatim:
+Mercury 2 is a reasoning model with a `reasoning_effort` control: `"instant"`, `"low"`, `"medium"`, or `"high"`. This example defaults to `"medium"`, [Inception's recommended setting for production voice agents](https://docs.inceptionlabs.ai/usecases/voice/quickstart). How to choose:
+
+- **`instant`** trades intelligence for reflex speed — suitable for acknowledgments, backchannels, and turns that don't require tool calls.
+- **`low`** already beats GPT 4.1 on instruction following at a fraction of the latency; pair it with `realtime` for the most TTFT-sensitive workflows.
+- **`medium`** is the headline setting: it beats GPT 4.1 by 27 points on IFBench and 24 points on Tau3Bench Telecom while still decoding faster than GPT 4.1's non-reasoning baseline. Since this agent makes a tool call on nearly every turn, medium is the right default here.
+- **`high`** spends the most time reasoning for highest intelligence; rarely needed on a live call.
+
+The setting is passed through `extra_body` so LiteLLM forwards it verbatim, along with `realtime`, Inception's recommended low-latency serving mode for voice:
 
 ```python
 extra={
     "api_base": "https://api.inceptionlabs.ai/v1",
-    "extra_body": {"reasoning_effort": "instant"},
+    "extra_body": {"reasoning_effort": "medium", "realtime": True},
 }
 ```
 
@@ -105,12 +112,16 @@ Note: use `extra_body` rather than the `LlmConfig.reasoning_effort` field — th
 LlmConfig(
     system_prompt=SYSTEM_PROMPT,
     introduction=INTRODUCTION,
-    temperature=0.3,
-    max_tokens=300,
+    temperature=0.75,
+    max_tokens=4096,
 )
 ```
 
-Low temperature keeps order read-backs consistent; 300 output tokens is plenty for short conversational turns.
+These follow the [voice quickstart](https://docs.inceptionlabs.ai/usecases/voice/quickstart) recommendations: `temperature=0.75` (the API default) suits most voice use cases — consider lowering toward `0.6` if tool routing needs to be extra consistent. Because Mercury is a reasoning model, its reasoning tokens count against `max_tokens`, so Inception recommends a budget of at least 3,000 at `reasoning_effort="medium"`.
+
+### Prompting
+
+The system prompt in `main.py` follows [Inception's prompt guide](https://docs.inceptionlabs.ai/resources/prompt-guide): persona and menu up top, few-shot tool-routing examples (including a negative example), and critical voice rules — markdown suppression, one question at a time — placed last, where Mercury weights context most heavily.
 
 ## Deploying to Cartesia
 
