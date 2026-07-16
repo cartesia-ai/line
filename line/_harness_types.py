@@ -133,6 +133,13 @@ class TTSConfig(BaseModel):
     voice_id: Optional[str] = None
     pronunciation_dict_id: Optional[str] = None
     language: Optional[str] = None
+    # Generation controls, mirroring `generation_config` on the Cartesia TTS API.
+    # Bounds match the platform's validation (speed 0.6-1.5, volume 0.5-2.0).
+    # Applied at call start via the pre-call config; mid-call updates are not
+    # supported yet, so these are intentionally absent from AgentUpdateCall.
+    speed: Optional[float] = Field(default=None, ge=0.6, le=1.5)
+    volume: Optional[float] = Field(default=None, ge=0.5, le=2.0)
+    emotion: Optional[str] = Field(default=None, min_length=1)
 
 
 class STTConfig(BaseModel):

@@ -79,7 +79,20 @@ from line.events import (
 
 # Call request types
 class PreCallResult(BaseModel):
-    """Result from pre_call_handler containing metadata and config."""
+    """Result from pre_call_handler containing metadata and config.
+
+    ``config`` follows the harness call-config shape, e.g.::
+
+        PreCallResult(
+            config={
+                "tts": TTSConfig(voice_id="...", speed=1.2, emotion="calm").model_dump(exclude_none=True),
+            }
+        )
+
+    The ``tts`` entry mirrors :class:`line.TTSConfig`; its ``speed`` / ``volume`` /
+    ``emotion`` generation controls match ``generation_config`` on the Cartesia
+    TTS API and apply for the duration of the call.
+    """
 
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Metadata to include with the call")
     config: Dict[str, Any] = Field(default_factory=dict, description="Configuration for the call")
