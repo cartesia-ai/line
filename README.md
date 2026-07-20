@@ -125,9 +125,7 @@ from line import PreCallResult, TTSConfig, VoiceAgentApp
 
 async def pre_call(call_request):
     return PreCallResult(
-        config={
-            "tts": TTSConfig(speed=1.2, volume=0.9, emotion="calm").model_dump(exclude_none=True),
-        }
+        config={"tts": TTSConfig(speed=1.2, volume=0.9, emotion="calm").model_dump()},
     )
 
 app = VoiceAgentApp(get_agent=get_agent, pre_call_handler=pre_call)
@@ -138,7 +136,7 @@ You can also pick controls per call, e.g. slow down speech for a support line:
 ```python
 async def pre_call(call_request):
     if call_request.to == SUPPORT_LINE_NUMBER:
-        return PreCallResult(config={"tts": TTSConfig(speed=0.8).model_dump(exclude_none=True)})
+        return PreCallResult(config={"tts": TTSConfig(speed=0.8).model_dump()})
     return PreCallResult()
 ```
 
