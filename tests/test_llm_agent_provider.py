@@ -1125,11 +1125,14 @@ class TestToolArgsComplete:
 
 
 class TestEnforceToolAdjacency:
-    """Final-payload guard against tool messages OpenAI would 400 on.
+    """Final-payload guard against broken tool-call pairing OpenAI would 400 on.
 
     Seen in production as `openai.BadRequestError: messages with role 'tool'
     must be a response to a preceeding message with 'tool_calls'`, which kills
-    the whole turn. The guard drops the offending tool message instead.
+    the whole turn. The guard repairs the pairing in *both* directions so the
+    payload stays well-formed: it drops orphan tool messages AND strips
+    assistant tool_calls that never get a matching response (which OpenAI also
+    rejects).
     """
 
     def _assistant(self, *ids, content=None):
@@ -1141,6 +1144,33 @@ class TestEnforceToolAdjacency:
                 {"id": i, "type": "function", "function": {"name": "t", "arguments": "{}"}} for i in ids
             ]
         return msg
+
+    def _pairing_valid(self, messages) -> bool:
+        """Both directions of OpenAI's tool-call pairing rule hold."""
+        for idx, m in enumerate(messages):
+            if m.get("role") == "tool":
+                # walk back over the contiguous tool run to the assistant
+                k = idx
+                while k > 0 and messages[k].get("role") == "tool":
+                    k -= 1
+                anchor = messages[k]
+                declared = (
+                    {tc.get("id") for tc in anchor.get("tool_calls", [])}
+                    if anchor.get("role") == "assistant"
+                    else set()
+                )
+                if m.get("tool_call_id") not in declared:
+                    return False
+            if m.get("role") == "assistant" and m.get("tool_calls"):
+                declared = {tc.get("id") for tc in m["tool_calls"]}
+                responded = set()
+                k = idx + 1
+                while k < len(messages) and messages[k].get("role") == "tool":
+                    responded.add(messages[k].get("tool_call_id"))
+                    k += 1
+                if declared - responded:
+                    return False
+        return True
 
     def test_valid_sequence_untouched(self):
         messages = [
@@ -1177,15 +1207,48 @@ class TestEnforceToolAdjacency:
         result = _enforce_tool_adjacency(messages)
         assert [m["role"] for m in result] == ["user", "assistant"]
 
-    def test_tool_after_plain_assistant_dropped(self):
+    def test_tool_after_plain_assistant_repaired_both_sides(self):
         # An assistant message WITHOUT tool_calls in between breaks the block.
+        # The displaced tool message must be dropped AND the now-unanswered
+        # tool_calls stripped — leaving the dangling call would still 400.
+        # (Regression for the Bugbot finding on this shape.)
         messages = [
             self._assistant("x1"),
             self._assistant(content="interrupting text"),
             {"role": "tool", "content": "late", "tool_call_id": "x1"},
         ]
         result = _enforce_tool_adjacency(messages)
-        assert [m["role"] for m in result] == ["assistant", "assistant"]
+        # Only the plain-text assistant survives; no dangling tool_calls, no orphan tool.
+        assert [m["role"] for m in result] == ["assistant"]
+        assert result[0].get("content") == "interrupting text"
+        assert all("tool_calls" not in m for m in result)
+        assert self._pairing_valid(result)
+
+    def test_assistant_with_content_and_dangling_call_keeps_text(self):
+        # Assistant carries text AND an unanswered tool call: keep the text,
+        # strip the unanswered call.
+        messages = [
+            {"role": "user", "content": "hi"},
+            {**self._assistant("x1"), "content": "let me check"},
+        ]
+        result = _enforce_tool_adjacency(messages)
+        assert [m["role"] for m in result] == ["user", "assistant"]
+        assert result[1]["content"] == "let me check"
+        assert "tool_calls" not in result[1]
+        assert self._pairing_valid(result)
+
+    def test_partial_block_keeps_answered_strips_unanswered(self):
+        # x1 answered, x2 not: keep x1 + its response, drop x2 from the call list.
+        messages = [
+            self._assistant("x1", "x2"),
+            {"role": "tool", "content": "ok", "tool_call_id": "x1"},
+        ]
+        result = _enforce_tool_adjacency(messages)
+        assert result[0]["tool_calls"] == [
+            {"id": "x1", "type": "function", "function": {"name": "t", "arguments": "{}"}}
+        ]
+        assert [m.get("tool_call_id") for m in result if m["role"] == "tool"] == ["x1"]
+        assert self._pairing_valid(result)
 
     def test_tool_id_not_in_preceding_block_dropped(self):
         messages = [
@@ -1195,6 +1258,7 @@ class TestEnforceToolAdjacency:
         ]
         result = _enforce_tool_adjacency(messages)
         assert [m.get("tool_call_id") for m in result if m["role"] == "tool"] == ["x1"]
+        assert self._pairing_valid(result)
 
     def test_tool_as_first_message_dropped(self):
         messages = [
@@ -1203,6 +1267,16 @@ class TestEnforceToolAdjacency:
         ]
         result = _enforce_tool_adjacency(messages)
         assert [m["role"] for m in result] == ["user"]
+
+    def test_trailing_unanswered_call_stripped(self):
+        # Assistant tool_calls at the very end with no following tool response.
+        messages = [
+            {"role": "user", "content": "hi"},
+            self._assistant("x1"),
+        ]
+        result = _enforce_tool_adjacency(messages)
+        assert [m["role"] for m in result] == ["user"]
+        assert self._pairing_valid(result)
 
 
 class TestNormalizeOutputAdjacency:

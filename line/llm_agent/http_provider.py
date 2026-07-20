@@ -275,48 +275,88 @@ class _ArgState(NamedTuple):
 
 
 def _enforce_tool_adjacency(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Drop tool messages that don't follow an assistant message declaring them.
+    """Repair the tool-call pairing invariant on the final chat-completions payload.
 
     Chat-completions providers (OpenAI in particular) reject the whole request
-    with a 400 ("messages with role 'tool' must be a response to a preceeding
-    message with 'tool_calls'") when a ``role: "tool"`` message is not part of
-    the tool-response block immediately after the assistant message whose
-    ``tool_calls`` declared its ``tool_call_id``. ``_normalize_messages``
-    guards the known corruption paths upstream, but a violating sequence
-    observed in production still occasionally reaches the payload — and a 400
-    here kills the entire turn. Enforce the invariant on the final payload:
-    drop the offending tool message (degrading one tool result) and log the
-    role/``tool_call_id`` shape of the conversation so the upstream bug can be
+    with a 400 when the assistant ``tool_calls`` / ``role: "tool"`` pairing is
+    broken, in *either* direction:
+
+    * a ``role: "tool"`` message that is not part of the tool-response block
+      immediately after the assistant message whose ``tool_calls`` declared its
+      ``tool_call_id`` ("messages with role 'tool' must be a response to a
+      preceeding message with 'tool_calls'"), and
+    * an assistant ``tool_calls`` entry with no matching tool response ("an
+      assistant message with 'tool_calls' must be followed by tool messages
+      responding to each 'tool_call_id'").
+
+    ``_normalize_messages`` repairs the known corruption paths upstream, but a
+    violating sequence observed in production still occasionally reaches the
+    payload — and a 400 here kills the entire turn. Enforce the invariant on
+    the final payload by dropping the unmatched entries on *both* sides so the
+    request stays well-formed (degrading a tool exchange instead of the turn),
+    and log the role/``tool_call_id`` shape so the upstream bug can be
     root-caused from the warning alone.
     """
     validated: List[Dict[str, Any]] = []
-    block_ids: set = set()
     dropped = False
+    i = 0
+    n = len(messages)
 
-    for msg in messages:
-        if msg.get("role") == "tool":
-            if msg.get("tool_call_id") in block_ids:
-                validated.append(msg)
-            else:
+    while i < n:
+        msg = messages[i]
+        role = msg.get("role")
+
+        if role == "assistant" and msg.get("tool_calls"):
+            # Gather the contiguous run of tool messages immediately following;
+            # that run is the only place a valid response for this block can be.
+            j = i + 1
+            following_tools: List[Dict[str, Any]] = []
+            while j < n and messages[j].get("role") == "tool":
+                following_tools.append(messages[j])
+                j += 1
+
+            declared_ids = {tc.get("id") for tc in msg["tool_calls"]}
+            responded_ids = {t.get("tool_call_id") for t in following_tools}
+
+            kept_calls = [tc for tc in msg["tool_calls"] if tc.get("id") in responded_ids]
+            kept_tools = [t for t in following_tools if t.get("tool_call_id") in declared_ids]
+
+            if len(kept_calls) != len(msg["tool_calls"]) or len(kept_tools) != len(following_tools):
                 dropped = True
-                logger.warning(
-                    f"Dropping tool message (tool_call_id={msg.get('tool_call_id')!r}, "
-                    f"name={msg.get('name')!r}) not preceded by a matching tool_calls "
-                    "assistant message; the provider would reject the whole request"
-                )
+
+            if kept_calls:
+                validated.append({**msg, "tool_calls": kept_calls})
+            else:
+                # No surviving tool calls: keep the assistant turn only if it
+                # still carries text, otherwise drop it (an assistant message
+                # with neither content nor tool_calls is itself invalid).
+                stripped = {k: v for k, v in msg.items() if k != "tool_calls"}
+                content = stripped.get("content")
+                if content is not None and str(content).strip():
+                    validated.append(stripped)
+            validated.extend(kept_tools)
+            i = j
             continue
-        # Any non-tool message starts a new adjacency block.
-        block_ids = (
-            {tc.get("id") for tc in msg.get("tool_calls", [])} if msg.get("role") == "assistant" else set()
-        )
+
+        if role == "tool":
+            # Any tool message reached here is not immediately preceded by an
+            # assistant tool_calls block (those are consumed above) — an orphan.
+            dropped = True
+            i += 1
+            continue
+
         validated.append(msg)
+        i += 1
 
     if dropped:
         shape = [
             (m.get("role"), m.get("tool_call_id") or [tc.get("id") for tc in m.get("tool_calls", [])])
             for m in messages
         ][:50]
-        logger.warning(f"Conversation shape at tool-adjacency violation (role, tool ids): {shape}")
+        logger.warning(
+            "Repaired broken tool-call pairing before send (dropped unmatched "
+            f"tool_calls and/or tool messages); conversation shape (role, tool ids): {shape}"
+        )
 
     return validated
 
