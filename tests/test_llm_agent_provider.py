@@ -1203,3 +1203,52 @@ class TestEnforceToolAdjacency:
         ]
         result = _enforce_tool_adjacency(messages)
         assert [m["role"] for m in result] == ["user"]
+
+
+class TestNormalizeOutputAdjacency:
+    """The observe-only sentinel at the end of _normalize_messages.
+
+    Normalization's pairing/reordering should make adjacency violations in its
+    output impossible; these tests feed it the corruption shapes seen upstream
+    and assert the output satisfies the invariant (and thus that the sentinel
+    stays silent on everything we know how to construct).
+    """
+
+    def _adjacency_holds(self, messages):
+        block_ids = set()
+        for msg in messages:
+            if msg.role == "tool":
+                if msg.tool_call_id not in block_ids:
+                    return False
+                continue
+            block_ids = {tc.id for tc in (msg.tool_calls or [])} if msg.role == "assistant" else set()
+        return True
+
+    def test_orphan_tool_response_output_is_valid(self):
+        result = _normalize_messages(
+            [
+                Message(role="user", content="hi"),
+                Message(role="tool", content="orphan", tool_call_id="ghost", name="t"),
+                Message(role="user", content="still there?"),
+            ]
+        )
+        assert result is not None
+        assert self._adjacency_holds(result)
+
+    def test_displaced_and_duplicated_responses_output_is_valid(self):
+        result = _normalize_messages(
+            [
+                Message(role="user", content="go"),
+                Message(role="tool", content="early", tool_call_id="x1", name="t"),
+                Message(
+                    role="assistant",
+                    content=None,
+                    tool_calls=[ToolCall(id="x1", name="t", arguments="{}")],
+                ),
+                Message(role="assistant", content="text in between"),
+                Message(role="tool", content="late dup", tool_call_id="x1", name="t"),
+                Message(role="user", content="and?"),
+            ]
+        )
+        assert result is not None
+        assert self._adjacency_holds(result)

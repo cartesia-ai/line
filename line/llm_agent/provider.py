@@ -188,6 +188,28 @@ def _normalize_messages(messages: List["Message"]) -> Optional[List["Message"]]:
         logger.warning("Skipping LLM call: last user message must be non-empty")
         return None
 
+    # 5. Observe-only sentinel (see _enforce_tool_adjacency in http_provider,
+    # which *enforces* this invariant on the final payload). By construction the
+    # pairing/reordering above should make a violation here impossible — so if
+    # this warning ever fires, the corruption originates inside this function;
+    # if only the payload-side guard fires, the request bypassed Provider.chat.
+    # Together the two probes localize the upstream bug behind the provider 400
+    # "messages with role 'tool' must be a response to a preceeding message
+    # with 'tool_calls'". Log-only on purpose: this function's contract is
+    # repair, the serializer's is enforcement.
+    block_ids: set = set()
+    for msg in result:
+        if msg.role == "tool":
+            if msg.tool_call_id not in block_ids:
+                shape = [(m.role, m.tool_call_id or [tc.id for tc in (m.tool_calls or [])]) for m in result]
+                logger.warning(
+                    f"_normalize_messages produced an orphan tool message "
+                    f"(tool_call_id={msg.tool_call_id!r}, name={msg.name!r}) — normalization bug; "
+                    f"shape: {shape}"
+                )
+            continue
+        block_ids = {tc.id for tc in (msg.tool_calls or [])} if msg.role == "assistant" else set()
+
     return result
 
 
