@@ -14,6 +14,7 @@ import inspect
 from typing import Any, AsyncIterator, Dict, List, NamedTuple, Optional, Protocol, cast
 
 from litellm import acompletion
+from loguru import logger
 
 from line.llm_agent.config import LlmConfig
 from line.llm_agent.provider import Message, ParsedModelId, StreamChunk, ToolCall
@@ -146,7 +147,7 @@ class _HttpProvider:
                     llm_msg["name"] = msg.name
 
             result.append(llm_msg)
-        return result
+        return _enforce_tool_adjacency(result)
 
     async def warmup(
         self,
@@ -236,8 +237,20 @@ class _ChatStream:
                 if chunk.choices and chunk.choices[0].finish_reason:
                     finish_reason = chunk.choices[0].finish_reason
                     if finish_reason in ("tool_calls", "stop"):
-                        for tc in tool_calls.values():
-                            tc.is_complete = True
+                        for idx, tc in tool_calls.items():
+                            # A terminal finish reason does not guarantee the argument
+                            # stream was fully delivered (e.g. "stop" after truncation
+                            # or a cut stream). Only mark the call complete when the
+                            # accumulated arguments form complete JSON; otherwise the
+                            # partial args would fail json.loads downstream.
+                            if _tool_args_complete(arg_states.get(idx)):
+                                tc.is_complete = True
+                            else:
+                                logger.warning(
+                                    f"Tool call {tc.name or '<unnamed>'} (id={tc.id or '<no id>'}) "
+                                    f"has incomplete arguments at finish_reason={finish_reason}; "
+                                    "leaving it incomplete so it is skipped"
+                                )
 
                 yield StreamChunk(
                     text=text,
@@ -259,6 +272,106 @@ class _ArgState(NamedTuple):
     depth: int
     in_string: bool
     escape_next: bool
+
+
+def _enforce_tool_adjacency(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Repair the tool-call pairing invariant on the final chat-completions payload.
+
+    Chat-completions providers (OpenAI in particular) reject the whole request
+    with a 400 when the assistant ``tool_calls`` / ``role: "tool"`` pairing is
+    broken, in *either* direction:
+
+    * a ``role: "tool"`` message that is not part of the tool-response block
+      immediately after the assistant message whose ``tool_calls`` declared its
+      ``tool_call_id`` ("messages with role 'tool' must be a response to a
+      preceeding message with 'tool_calls'"), and
+    * an assistant ``tool_calls`` entry with no matching tool response ("an
+      assistant message with 'tool_calls' must be followed by tool messages
+      responding to each 'tool_call_id'").
+
+    ``_normalize_messages`` repairs the known corruption paths upstream, but a
+    violating sequence observed in production still occasionally reaches the
+    payload — and a 400 here kills the entire turn. Enforce the invariant on
+    the final payload by dropping the unmatched entries on *both* sides so the
+    request stays well-formed (degrading a tool exchange instead of the turn),
+    and log the role/``tool_call_id`` shape so the upstream bug can be
+    root-caused from the warning alone.
+    """
+    validated: List[Dict[str, Any]] = []
+    dropped = False
+    i = 0
+    n = len(messages)
+
+    while i < n:
+        msg = messages[i]
+        role = msg.get("role")
+
+        if role == "assistant" and msg.get("tool_calls"):
+            # Gather the contiguous run of tool messages immediately following;
+            # that run is the only place a valid response for this block can be.
+            j = i + 1
+            following_tools: List[Dict[str, Any]] = []
+            while j < n and messages[j].get("role") == "tool":
+                following_tools.append(messages[j])
+                j += 1
+
+            declared_ids = {tc.get("id") for tc in msg["tool_calls"]}
+            responded_ids = {t.get("tool_call_id") for t in following_tools}
+
+            kept_calls = [tc for tc in msg["tool_calls"] if tc.get("id") in responded_ids]
+            kept_tools = [t for t in following_tools if t.get("tool_call_id") in declared_ids]
+
+            if len(kept_calls) != len(msg["tool_calls"]) or len(kept_tools) != len(following_tools):
+                dropped = True
+
+            if kept_calls:
+                validated.append({**msg, "tool_calls": kept_calls})
+            else:
+                # No surviving tool calls: keep the assistant turn only if it
+                # still carries text, otherwise drop it (an assistant message
+                # with neither content nor tool_calls is itself invalid).
+                stripped = {k: v for k, v in msg.items() if k != "tool_calls"}
+                content = stripped.get("content")
+                if content is not None and str(content).strip():
+                    validated.append(stripped)
+            validated.extend(kept_tools)
+            i = j
+            continue
+
+        if role == "tool":
+            # Any tool message reached here is not immediately preceded by an
+            # assistant tool_calls block (those are consumed above) — an orphan.
+            dropped = True
+            i += 1
+            continue
+
+        validated.append(msg)
+        i += 1
+
+    if dropped:
+        shape = [
+            (m.get("role"), m.get("tool_call_id") or [tc.get("id") for tc in m.get("tool_calls", [])])
+            for m in messages
+        ][:50]
+        logger.warning(
+            "Repaired broken tool-call pairing before send (dropped unmatched "
+            f"tool_calls and/or tool messages); conversation shape (role, tool ids): {shape}"
+        )
+
+    return validated
+
+
+def _tool_args_complete(state: Optional[_ArgState]) -> bool:
+    """Whether accumulated tool-call arguments form complete JSON.
+
+    ``None`` means no argument fragments were streamed at all — that is a
+    complete no-arg call (downstream treats empty arguments as ``{}``).
+    Otherwise the brace-depth tracking from ``_feed_tool_args`` tells us if
+    the object was closed and we are not mid-string.
+    """
+    if state is None:
+        return True
+    return state.depth == 0 and not state.in_string
 
 
 def _feed_tool_args(state: Optional[_ArgState], fragment: str) -> _ArgState:

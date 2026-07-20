@@ -4,7 +4,12 @@ import asyncio
 from typing import Annotated, Any, List, Optional, get_type_hints
 
 from line.llm_agent.config import LlmConfig, _normalize_config
-from line.llm_agent.http_provider import _feed_tool_args, _HttpProvider
+from line.llm_agent.http_provider import (
+    _enforce_tool_adjacency,
+    _feed_tool_args,
+    _HttpProvider,
+    _tool_args_complete,
+)
 from line.llm_agent.provider import (
     ChatStream,
     LlmProvider,
@@ -1072,3 +1077,252 @@ class TestNormalizeMessages:
         assert len(tool_msgs) == 2
         assert tool_msgs[0].content == "first"
         assert tool_msgs[1].content == "second"
+
+
+# ---------------------------------------------------------------------------
+# _tool_args_complete
+# ---------------------------------------------------------------------------
+
+
+class TestToolArgsComplete:
+    """Completeness gating for streamed tool-call arguments at stream end.
+
+    A terminal finish_reason (including "stop") must not mark a tool call
+    complete when its argument stream was cut mid-object — the partial JSON
+    would crash json.loads downstream and kill the turn.
+    """
+
+    def test_no_fragments_is_complete(self):
+        # A tool call that never streamed arguments is a valid no-arg call.
+        assert _tool_args_complete(None) is True
+
+    def test_complete_object(self):
+        state = _feed_tool_args(None, '{"city": "Tokyo"}')
+        assert _tool_args_complete(state) is True
+
+    def test_truncated_mid_object(self):
+        state = _feed_tool_args(None, '{"city": ')
+        assert _tool_args_complete(state) is False
+
+    def test_truncated_mid_string(self):
+        state = _feed_tool_args(None, '{"city": "Tok')
+        assert _tool_args_complete(state) is False
+
+    def test_complete_after_many_fragments(self):
+        state = None
+        for frag in ["{", '"query"', ": ", '"orari"', "}"]:
+            state = _feed_tool_args(state, frag)
+        assert _tool_args_complete(state) is True
+
+    def test_empty_object_is_complete(self):
+        state = _feed_tool_args(None, "{}")
+        assert _tool_args_complete(state) is True
+
+
+# ---------------------------------------------------------------------------
+# _enforce_tool_adjacency
+# ---------------------------------------------------------------------------
+
+
+class TestEnforceToolAdjacency:
+    """Final-payload guard against broken tool-call pairing OpenAI would 400 on.
+
+    Seen in production as `openai.BadRequestError: messages with role 'tool'
+    must be a response to a preceeding message with 'tool_calls'`, which kills
+    the whole turn. The guard repairs the pairing in *both* directions so the
+    payload stays well-formed: it drops orphan tool messages AND strips
+    assistant tool_calls that never get a matching response (which OpenAI also
+    rejects).
+    """
+
+    def _assistant(self, *ids, content=None):
+        msg = {"role": "assistant"}
+        if content is not None:
+            msg["content"] = content
+        if ids:
+            msg["tool_calls"] = [
+                {"id": i, "type": "function", "function": {"name": "t", "arguments": "{}"}} for i in ids
+            ]
+        return msg
+
+    def _pairing_valid(self, messages) -> bool:
+        """Both directions of OpenAI's tool-call pairing rule hold."""
+        for idx, m in enumerate(messages):
+            if m.get("role") == "tool":
+                # walk back over the contiguous tool run to the assistant
+                k = idx
+                while k > 0 and messages[k].get("role") == "tool":
+                    k -= 1
+                anchor = messages[k]
+                declared = (
+                    {tc.get("id") for tc in anchor.get("tool_calls", [])}
+                    if anchor.get("role") == "assistant"
+                    else set()
+                )
+                if m.get("tool_call_id") not in declared:
+                    return False
+            if m.get("role") == "assistant" and m.get("tool_calls"):
+                declared = {tc.get("id") for tc in m["tool_calls"]}
+                responded = set()
+                k = idx + 1
+                while k < len(messages) and messages[k].get("role") == "tool":
+                    responded.add(messages[k].get("tool_call_id"))
+                    k += 1
+                if declared - responded:
+                    return False
+        return True
+
+    def test_valid_sequence_untouched(self):
+        messages = [
+            {"role": "system", "content": "s"},
+            {"role": "user", "content": "hi"},
+            self._assistant("x1"),
+            {"role": "tool", "content": "ok", "tool_call_id": "x1"},
+            self._assistant(content="done"),
+        ]
+        assert _enforce_tool_adjacency(list(messages)) == messages
+
+    def test_multiple_responses_same_id_kept(self):
+        messages = [
+            self._assistant("x1"),
+            {"role": "tool", "content": "first", "tool_call_id": "x1"},
+            {"role": "tool", "content": "second", "tool_call_id": "x1"},
+        ]
+        assert _enforce_tool_adjacency(list(messages)) == messages
+
+    def test_multiple_ids_one_block_kept(self):
+        messages = [
+            self._assistant("x1", "x2"),
+            {"role": "tool", "content": "a", "tool_call_id": "x2"},
+            {"role": "tool", "content": "b", "tool_call_id": "x1"},
+        ]
+        assert _enforce_tool_adjacency(list(messages)) == messages
+
+    def test_orphan_tool_message_dropped(self):
+        messages = [
+            {"role": "user", "content": "hi"},
+            {"role": "tool", "content": "orphan", "tool_call_id": "ghost"},
+            self._assistant(content="hello"),
+        ]
+        result = _enforce_tool_adjacency(messages)
+        assert [m["role"] for m in result] == ["user", "assistant"]
+
+    def test_tool_after_plain_assistant_repaired_both_sides(self):
+        # An assistant message WITHOUT tool_calls in between breaks the block.
+        # The displaced tool message must be dropped AND the now-unanswered
+        # tool_calls stripped — leaving the dangling call would still 400.
+        # (Regression for the Bugbot finding on this shape.)
+        messages = [
+            self._assistant("x1"),
+            self._assistant(content="interrupting text"),
+            {"role": "tool", "content": "late", "tool_call_id": "x1"},
+        ]
+        result = _enforce_tool_adjacency(messages)
+        # Only the plain-text assistant survives; no dangling tool_calls, no orphan tool.
+        assert [m["role"] for m in result] == ["assistant"]
+        assert result[0].get("content") == "interrupting text"
+        assert all("tool_calls" not in m for m in result)
+        assert self._pairing_valid(result)
+
+    def test_assistant_with_content_and_dangling_call_keeps_text(self):
+        # Assistant carries text AND an unanswered tool call: keep the text,
+        # strip the unanswered call.
+        messages = [
+            {"role": "user", "content": "hi"},
+            {**self._assistant("x1"), "content": "let me check"},
+        ]
+        result = _enforce_tool_adjacency(messages)
+        assert [m["role"] for m in result] == ["user", "assistant"]
+        assert result[1]["content"] == "let me check"
+        assert "tool_calls" not in result[1]
+        assert self._pairing_valid(result)
+
+    def test_partial_block_keeps_answered_strips_unanswered(self):
+        # x1 answered, x2 not: keep x1 + its response, drop x2 from the call list.
+        messages = [
+            self._assistant("x1", "x2"),
+            {"role": "tool", "content": "ok", "tool_call_id": "x1"},
+        ]
+        result = _enforce_tool_adjacency(messages)
+        assert result[0]["tool_calls"] == [
+            {"id": "x1", "type": "function", "function": {"name": "t", "arguments": "{}"}}
+        ]
+        assert [m.get("tool_call_id") for m in result if m["role"] == "tool"] == ["x1"]
+        assert self._pairing_valid(result)
+
+    def test_tool_id_not_in_preceding_block_dropped(self):
+        messages = [
+            self._assistant("x1"),
+            {"role": "tool", "content": "ok", "tool_call_id": "x1"},
+            {"role": "tool", "content": "wrong block", "tool_call_id": "x2"},
+        ]
+        result = _enforce_tool_adjacency(messages)
+        assert [m.get("tool_call_id") for m in result if m["role"] == "tool"] == ["x1"]
+        assert self._pairing_valid(result)
+
+    def test_tool_as_first_message_dropped(self):
+        messages = [
+            {"role": "tool", "content": "orphan", "tool_call_id": "x1"},
+            {"role": "user", "content": "hi"},
+        ]
+        result = _enforce_tool_adjacency(messages)
+        assert [m["role"] for m in result] == ["user"]
+
+    def test_trailing_unanswered_call_stripped(self):
+        # Assistant tool_calls at the very end with no following tool response.
+        messages = [
+            {"role": "user", "content": "hi"},
+            self._assistant("x1"),
+        ]
+        result = _enforce_tool_adjacency(messages)
+        assert [m["role"] for m in result] == ["user"]
+        assert self._pairing_valid(result)
+
+
+class TestNormalizeOutputAdjacency:
+    """The observe-only sentinel at the end of _normalize_messages.
+
+    Normalization's pairing/reordering should make adjacency violations in its
+    output impossible; these tests feed it the corruption shapes seen upstream
+    and assert the output satisfies the invariant (and thus that the sentinel
+    stays silent on everything we know how to construct).
+    """
+
+    def _adjacency_holds(self, messages):
+        block_ids = set()
+        for msg in messages:
+            if msg.role == "tool":
+                if msg.tool_call_id not in block_ids:
+                    return False
+                continue
+            block_ids = {tc.id for tc in (msg.tool_calls or [])} if msg.role == "assistant" else set()
+        return True
+
+    def test_orphan_tool_response_output_is_valid(self):
+        result = _normalize_messages(
+            [
+                Message(role="user", content="hi"),
+                Message(role="tool", content="orphan", tool_call_id="ghost", name="t"),
+                Message(role="user", content="still there?"),
+            ]
+        )
+        assert result is not None
+        assert self._adjacency_holds(result)
+
+    def test_displaced_and_duplicated_responses_output_is_valid(self):
+        result = _normalize_messages(
+            [
+                Message(role="user", content="go"),
+                Message(role="tool", content="early", tool_call_id="x1", name="t"),
+                Message(
+                    role="assistant",
+                    content=None,
+                    tool_calls=[ToolCall(id="x1", name="t", arguments="{}")],
+                ),
+                Message(role="assistant", content="text in between"),
+                Message(role="tool", content="late dup", tool_call_id="x1", name="t"),
+                Message(role="user", content="and?"),
+            ]
+        )
+        assert result is not None
+        assert self._adjacency_holds(result)

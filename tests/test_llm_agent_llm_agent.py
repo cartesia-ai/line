@@ -2230,3 +2230,87 @@ async def test_background_tool_responding_to_references_triggering_event(turn_en
         assert evt.responding_to == "evt-A", (
             f"AgentToolReturned responding_to should be 'evt-A', got '{evt.responding_to}'"
         )
+
+
+# =============================================================================
+# Tests: Malformed tool-call arguments must not kill the turn
+# =============================================================================
+
+
+async def test_malformed_tool_arguments_skips_tool_without_crashing(turn_env):
+    """A tool call whose arguments are not valid JSON is skipped, not fatal.
+
+    Seen in production: a stream marked a truncated tool call complete, and the
+    unguarded json.loads raised out of agent.process, silencing the whole turn.
+    """
+    executed = []
+
+    @loopback_tool
+    async def get_weather(ctx, city: Annotated[str, "City name"]) -> str:
+        """Get weather for a city."""
+        executed.append(city)
+        return f"72°F in {city}"
+
+    responses = [
+        [
+            StreamChunk(text="Let me check. "),
+            StreamChunk(
+                tool_calls=[
+                    ToolCall(
+                        id="call_1",
+                        name="get_weather",
+                        arguments='{"city": "NY',  # truncated JSON
+                        is_complete=True,
+                    )
+                ]
+            ),
+            StreamChunk(is_final=True),
+        ],
+    ]
+
+    agent, mock_llm = create_agent_with_mock(responses, tools=[get_weather])
+
+    # Must not raise
+    outputs = await collect_outputs(
+        agent,
+        turn_env,
+        UserTextSent(content="Weather?", history=[UserTextSent(content="Weather?")]),
+    )
+
+    # The tool never ran, but the text generated before the bad call was emitted.
+    assert executed == []
+    text_outputs = [o for o in outputs if isinstance(o, AgentSendText)]
+    assert any("Let me check." in o.text for o in text_outputs)
+
+
+async def test_whitespace_only_tool_arguments_treated_as_empty(turn_env):
+    """Whitespace-only arguments parse as {} instead of raising JSONDecodeError."""
+    executed = []
+
+    @loopback_tool
+    async def ping(ctx) -> str:
+        """No-arg tool."""
+        executed.append(True)
+        return "pong"
+
+    responses = [
+        [
+            StreamChunk(tool_calls=[ToolCall(id="call_1", name="ping", arguments="  ", is_complete=True)]),
+            StreamChunk(is_final=True),
+        ],
+        [
+            StreamChunk(text="Done."),
+            StreamChunk(is_final=True),
+        ],
+    ]
+
+    agent, mock_llm = create_agent_with_mock(responses, tools=[ping])
+
+    outputs = await collect_outputs(
+        agent,
+        turn_env,
+        UserTextSent(content="Ping", history=[UserTextSent(content="Ping")]),
+    )
+
+    assert executed == [True]
+    assert any(isinstance(o, AgentSendText) and o.text == "Done." for o in outputs)

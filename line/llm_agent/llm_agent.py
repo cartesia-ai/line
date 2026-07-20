@@ -401,7 +401,17 @@ class LlmAgent:
                     logger.warning(f"Unknown tool: {tc.name}")
                     continue
 
-                tool_args = json.loads(tc.arguments) if tc.arguments else {}
+                try:
+                    raw = tc.arguments or ""
+                    tool_args = json.loads(raw) if raw.strip() else {}
+                except json.JSONDecodeError as e:
+                    # Malformed arguments (e.g. a truncated stream) must not kill the
+                    # whole turn — skip this tool call and keep responding.
+                    logger.warning(
+                        f"Skipping tool call {tc.name} (id={tc.id}): "
+                        f"malformed arguments ({e}): {tc.arguments[:200]!r}"
+                    )
+                    continue
 
                 normalized_func = _normalize_to_async_gen(tool.func)
 
