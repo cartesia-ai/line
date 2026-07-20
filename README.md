@@ -116,6 +116,34 @@ async def get_agent(env: AgentEnv, call_request: CallRequest):
 
 ---
 
+## Configure the Voice (Speed, Volume, Emotion)
+
+Set TTS generation controls for a call with a `pre_call_handler`. The `tts` config mirrors `generation_config` on the [Cartesia TTS API](https://docs.cartesia.ai/api-reference/tts/tts): `speed` (0.6–1.5), `volume` (0.5–2.0), and `emotion` (e.g. `"calm"`, `"excited"`). Values apply for the duration of the call; omitted fields keep the agent's configured defaults.
+
+```python
+from line import PreCallResult, TTSConfig, VoiceAgentApp
+
+async def pre_call(call_request):
+    return PreCallResult(
+        config={
+            "tts": TTSConfig(speed=1.2, volume=0.9, emotion="calm").model_dump(exclude_none=True),
+        }
+    )
+
+app = VoiceAgentApp(get_agent=get_agent, pre_call_handler=pre_call)
+```
+
+You can also pick controls per call, e.g. slow down speech for a support line:
+
+```python
+async def pre_call(call_request):
+    if call_request.to == SUPPORT_LINE_NUMBER:
+        return PreCallResult(config={"tts": TTSConfig(speed=0.8).model_dump(exclude_none=True)})
+    return PreCallResult()
+```
+
+---
+
 ## Add Tools to Your Agent
 
 ### Built-in Tools

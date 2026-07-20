@@ -482,7 +482,11 @@ class ConversationRunner:
                         break
                     if mapped is None:
                         continue
-                    await self.websocket.send_json(mapped.model_dump())
+                    # exclude_none keeps unset optional fields off the wire —
+                    # the harness treats absent keys as "not provided", so e.g.
+                    # a mid-call ConfigOutput must not emit null generation
+                    # controls (speed/volume/emotion) as explicit overrides.
+                    await self.websocket.send_json(mapped.model_dump(exclude_none=True))
             except asyncio.CancelledError:
                 pass
             except Exception:

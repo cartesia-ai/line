@@ -47,3 +47,22 @@ def test_tts_config_generation_controls_default_to_none():
     # exclude_none keeps unset controls off the wire, so the harness treats
     # them as "not provided" rather than explicit overrides.
     assert config.model_dump(exclude_none=True) == {"voice_id": "voice-123"}
+
+
+def test_config_output_omits_unset_generation_controls_on_the_wire():
+    """Mirrors the websocket send path (model_dump(exclude_none=True)):
+    an AgentUpdateCall-style ConfigOutput must not emit null speed/volume/
+    emotion keys, which the harness would otherwise treat as explicit
+    overrides once mid-call generation-control updates are supported."""
+    from line._harness_types import ConfigOutput, STTConfig
+
+    message = ConfigOutput(
+        tts=TTSConfig(voice_id="voice-123", language="en"),
+        stt=STTConfig(language="en"),
+        language="en",
+    )
+    payload = message.model_dump(exclude_none=True)
+    assert payload["tts"] == {"voice_id": "voice-123", "language": "en"}
+    assert "speed" not in payload["tts"]
+    assert "volume" not in payload["tts"]
+    assert "emotion" not in payload["tts"]
