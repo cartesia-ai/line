@@ -133,6 +133,9 @@ class TTSConfig(BaseModel):
     voice_id: Optional[str] = None
     pronunciation_dict_id: Optional[str] = None
     language: Optional[str] = None
+    speed: Optional[float] = Field(default=None, ge=0.6, le=1.5)
+    volume: Optional[float] = Field(default=None, ge=0.5, le=2.0)
+    emotion: Optional[str] = Field(default=None, min_length=1)
 
 
 class STTConfig(BaseModel):
