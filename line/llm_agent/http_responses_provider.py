@@ -40,15 +40,40 @@ log clarity.
 
 See the consumer repo's ``cartesia-examples/`` for standalone
 reproductions of the duplicate-text and preamble-before-tool patterns.
+
+Speech-leak guard (opt-in)
+--------------------------
+Some reasoning models (observed: ``gpt-5.4-mini``) occasionally write a tool
+call's payload into the streamed ``message`` item — either the bare JSON
+arguments (``{"summary": ...}``) or the whole call expression
+(``record_call_summary({...})``) — instead of, or in addition to, the proper
+``function_call`` item. Streamed as-is, the caller hears raw JSON read out
+loud; when the proper ``function_call`` item is missing, the intended call is
+silently lost as well.
+
+With :class:`~line.llm_agent.config.SpeechLeakGuardConfig` enabled on the
+``LlmConfig``, the streamed message item is buffered with a bounded holdback
+(``lookahead_chars``) and the accumulated text is scanned for
+``detection_pattern``. On a hit the response is aborted *before* its tool
+calls are surfaced or its output committed to history, and the whole
+invocation is retried with a corrective note (and optional reasoning-effort
+override) injected into the retry request only. See ``SpeechLeakGuardConfig``
+for the retry / bridge / fallback semantics.
 """
 
 import asyncio
+import re
 from typing import Any, AsyncIterator, Callable, Dict, List, Optional
 
 from litellm import aresponses
 from loguru import logger
 
-from line.llm_agent.config import LlmConfig
+from line.llm_agent.config import (
+    DEFAULT_SPEECH_LEAK_BRIDGE_TEXT,
+    DEFAULT_SPEECH_LEAK_FALLBACK_TEXT,
+    LlmConfig,
+    SpeechLeakGuardConfig,
+)
 from line.llm_agent.provider import Message, ParsedModelId, StreamChunk, ToolCall
 from line.llm_agent.provider_utils import (
     ConversationEntry,
@@ -67,6 +92,33 @@ _TERMINAL_EVENTS = frozenset(
 )
 
 
+class _SpeechLeakDetected(Exception):
+    """A guarded message item matched the speech-leak detection pattern.
+
+    Raised by :class:`_HttpResponseEventStream` mid-stream, before the
+    response's tool calls are surfaced and before ``on_response_done`` runs —
+    so the aborted attempt executes nothing and leaves no trace in history.
+    Caught by ``_HttpResponsesProvider.chat()`` which decides retry /
+    bridge / fallback per the :class:`SpeechLeakGuardConfig` policy.
+    """
+
+    def __init__(
+        self,
+        *,
+        released_any: bool,
+        phase: str,
+        output_index: int,
+        released_chars: int,
+        suppressed_chars: int,
+    ):
+        super().__init__("speech leak detected in spoken message item")
+        self.released_any = released_any
+        self.phase = phase
+        self.output_index = output_index
+        self.released_chars = released_chars
+        self.suppressed_chars = suppressed_chars
+
+
 class _HttpResponseEventStream:
     """Reads Responses-API streaming events from ``litellm.aresponses`` and
     yields :class:`StreamChunk` objects.
@@ -79,16 +131,26 @@ class _HttpResponseEventStream:
 
     On terminal events the ``on_response_done`` callback is invoked
     with the response dict so the provider can update its history.
+
+    When ``speech_leak_guard`` is an enabled :class:`SpeechLeakGuardConfig`, the
+    streamed message item (if its phase is in ``speech_leak_guard.phases``) is
+    buffered with ``lookahead_chars`` of holdback and scanned for
+    ``detection_pattern``; a hit raises :class:`_SpeechLeakDetected`
+    instead of streaming the payload to TTS.
     """
 
     def __init__(
         self,
         iterator: AsyncIterator[Any],
         on_response_done: Callable[[Dict[str, Any]], None],
+        speech_leak_guard: Optional[SpeechLeakGuardConfig] = None,
     ):
         self._iter = iterator
         self._on_response_done = on_response_done
         self.done = False
+        self._guard = speech_leak_guard if (speech_leak_guard and speech_leak_guard.enabled) else None
+        # re.compile caches internally, so per-stream compilation is cheap.
+        self._guard_re = re.compile(self._guard.detection_pattern) if self._guard else None
 
     async def __aiter__(self) -> AsyncIterator[StreamChunk]:
         tool_calls: Dict[str, ToolCall] = {}
@@ -101,6 +163,14 @@ class _HttpResponseEventStream:
         streaming_index: Optional[int] = None
         dropped_indices_logged: set[int] = set()
         received_content = False
+        # Speech-guard state for the streaming item. guard_active is decided
+        # when the streaming index is claimed (phase in scope?); guard_buf
+        # accumulates the item's full text; guard_released counts chars
+        # already yielded (the tail beyond it is the holdback window).
+        guard_active = False
+        guard_buf = ""
+        guard_released = 0
+        released_any = False  # any text yielded to TTS this response
 
         async for event in self._iter:
             event_type = _event_type(event)
@@ -128,14 +198,48 @@ class _HttpResponseEventStream:
                     continue
                 if streaming_index is None:
                     streaming_index = output_index
+                    phase = message_phases.get(output_index, "(unknown)")
+                    guard_active = self._guard is not None and phase in self._guard.phases
                     logger.debug(
-                        "Responses HTTP: streaming text from output_index={i} phase={p}",
+                        "Responses HTTP: streaming text from output_index={i} phase={p} guarded={g}",
                         i=output_index,
-                        p=message_phases.get(output_index, "(unknown)"),
+                        p=phase,
+                        g=guard_active,
                     )
                 if output_index == streaming_index:
                     received_content = True
-                    yield StreamChunk(text=delta)
+                    if guard_active:
+                        guard_buf += delta
+                        match = self._guard_re.search(guard_buf)
+                        if match:
+                            phase = message_phases.get(output_index, "(unknown)")
+                            suppressed = len(guard_buf) - guard_released
+                            logger.warning(
+                                "Speech-leak guard: tool-call payload detected in spoken "
+                                "text (phase={p}, output_index={i}, match_offset={o}, "
+                                "released_chars={r}, suppressed_chars={s})",
+                                p=phase,
+                                i=output_index,
+                                o=match.start(),
+                                r=guard_released,
+                                s=suppressed,
+                            )
+                            raise _SpeechLeakDetected(
+                                released_any=released_any,
+                                phase=phase,
+                                output_index=output_index,
+                                released_chars=guard_released,
+                                suppressed_chars=suppressed,
+                            )
+                        release_upto = len(guard_buf) - self._guard.lookahead_chars
+                        if release_upto > guard_released:
+                            out = guard_buf[guard_released:release_upto]
+                            guard_released = release_upto
+                            released_any = True
+                            yield StreamChunk(text=out)
+                    else:
+                        released_any = True
+                        yield StreamChunk(text=delta)
                 elif output_index not in dropped_indices_logged:
                     # A second message item is producing text in this response —
                     # log once per dropped index, then silently swallow its
@@ -171,6 +275,18 @@ class _HttpResponseEventStream:
 
             elif event_type == "response.output_item.done":
                 item = event.item
+                if (
+                    item.type == "message"
+                    and guard_active
+                    and int(getattr(event, "output_index", -1)) == streaming_index
+                    and len(guard_buf) > guard_released
+                ):
+                    # Clean item ended with text still in the holdback window —
+                    # flush it. (A leak would have raised before this point.)
+                    out = guard_buf[guard_released:]
+                    guard_released = len(guard_buf)
+                    released_any = True
+                    yield StreamChunk(text=out)
                 if item.type == "function_call":
                     call_id = item.call_id
                     name = item.name
@@ -190,6 +306,13 @@ class _HttpResponseEventStream:
                         tool_calls[call_id] = tc
 
             elif event_type in _TERMINAL_EVENTS:
+                if guard_active and len(guard_buf) > guard_released:
+                    # Defensive: the streaming item never got its
+                    # output_item.done — don't swallow the held tail.
+                    out = guard_buf[guard_released:]
+                    guard_released = len(guard_buf)
+                    released_any = True
+                    yield StreamChunk(text=out)
                 self.done = True
                 response = event.response
                 response_dict = _to_dict(response)
@@ -276,6 +399,63 @@ def _to_dict(obj: Any) -> Dict[str, Any]:
     return dict(getattr(obj, "__dict__", {}) or {})
 
 
+def _apply_speech_leak_retry(body: Dict[str, Any], guard: SpeechLeakGuardConfig) -> None:
+    """Mutate a planned request body into its speech-leak-retry form.
+
+    Applied only to retry requests, after ``_plan_responses_chat`` — so the
+    corrective note is never part of the planner's history bookkeeping and is
+    not re-sent on later turns. (Caveat: with ``store=true`` chaining, the
+    note becomes part of the server-side conversation the accepted response
+    chains from; the default note is harmless-if-persisted by design.)
+    """
+    if guard.retry_note:
+        if guard.retry_note_channel == "instructions":
+            base = body.get("instructions") or ""
+            body["instructions"] = (base + "\n\n" if base else "") + guard.retry_note
+        else:
+            body.setdefault("input", []).append(
+                {
+                    "type": "message",
+                    "role": "developer",
+                    "content": [{"type": "input_text", "text": guard.retry_note}],
+                }
+            )
+    if guard.retry_reasoning_effort:
+        body["reasoning"] = {"effort": guard.retry_reasoning_effort}
+
+
+def _resolve_guard_text(value: Any, *, default: str, what: str) -> str:
+    """Resolve a guard text field that may be a zero-arg callable.
+
+    Callables support language-dynamic agents: the line to speak is computed
+    at speak time, not frozen at config time. A raising callable must not
+    take down leak recovery, so on error the English ``default`` is spoken
+    and the exception logged.
+    """
+    if not callable(value):
+        return value
+    try:
+        return value()
+    except Exception:
+        logger.exception("Speech-leak guard: {w} callable raised; speaking the default line", w=what)
+        return default
+
+
+async def _close_stream_iterator(iterator: Any) -> None:
+    """Best-effort early abort of a litellm ``aresponses`` stream.
+
+    Called when a speech leak is detected mid-stream: the rest of the
+    response is garbage we will never use, so don't wait for it.
+    """
+    aclose = getattr(iterator, "aclose", None)
+    if aclose is None:
+        return
+    try:
+        await aclose()
+    except Exception:  # pragma: no cover - defensive
+        pass
+
+
 # ---------------------------------------------------------------------------
 # _HttpResponsesProvider
 # ---------------------------------------------------------------------------
@@ -317,13 +497,27 @@ class _HttpResponsesProvider:
 
         Retries once when the server has forgotten a
         ``previous_response_id`` before any content was emitted.
+
+        When ``config.speech_leak_guard`` is enabled and a spoken tool-call leak
+        is detected, the invocation is aborted (nothing executed, nothing
+        committed) and retried up to ``speech_leak_guard.max_retries`` times with
+        the corrective note / reasoning override applied; on exhaustion the
+        configured fallback line is yielded and the turn ends with no tool
+        calls.
         """
         web_search_options = kwargs.get("web_search_options")
+        guard = (
+            config.speech_leak_guard if isinstance(config.speech_leak_guard, SpeechLeakGuardConfig) else None
+        )
+        if guard is not None and not guard.enabled:
+            guard = None
 
         async def _iter():
             attempt = 0
+            leak_attempts = 0
             while True:
                 emitted_any = False
+                iterator = None
                 try:
                     lock = self._get_lock()
                     await lock.acquire()
@@ -336,6 +530,8 @@ class _HttpResponsesProvider:
                             config=config,
                             web_search_options=web_search_options,
                         )
+                        if guard is not None and leak_attempts:
+                            _apply_speech_leak_retry(body, guard)
 
                         request_kwargs: Dict[str, Any] = dict(body)
                         request_kwargs["model"] = str(self._model_id)
@@ -352,7 +548,7 @@ class _HttpResponsesProvider:
                                 return
                             self._history = _update(self._history, response_dict)
 
-                        stream = _HttpResponseEventStream(iterator, on_response_done)
+                        stream = _HttpResponseEventStream(iterator, on_response_done, speech_leak_guard=guard)
 
                         async for chunk in stream:
                             emitted_any = True
@@ -360,6 +556,47 @@ class _HttpResponsesProvider:
                     finally:
                         lock.release()
                     return
+                except _SpeechLeakDetected as leak:
+                    # The aborted response executed nothing: tool calls only
+                    # surface on the terminal chunk and history only commits
+                    # via on_response_done, neither of which was reached.
+                    if iterator is not None:
+                        await _close_stream_iterator(iterator)
+                    if leak_attempts >= guard.max_retries:
+                        logger.error(
+                            "Speech-leak guard: retry {n} leaked again "
+                            "(suppressed_chars={s}); speaking fallback and ending turn",
+                            n=leak_attempts,
+                            s=leak.suppressed_chars,
+                        )
+                        fallback = _resolve_guard_text(
+                            guard.fallback_text,
+                            default=DEFAULT_SPEECH_LEAK_FALLBACK_TEXT,
+                            what="fallback_text",
+                        )
+                        if fallback:
+                            yield StreamChunk(text=fallback)
+                        yield StreamChunk(tool_calls=[], is_final=True)
+                        return
+                    leak_attempts += 1
+                    logger.warning(
+                        "Speech-leak guard: retrying LLM invocation "
+                        "(retry {n}/{m}, note_channel={c}, reasoning_effort={e}, "
+                        "caller_heard_partial={h})",
+                        n=leak_attempts,
+                        m=guard.max_retries,
+                        c=guard.retry_note_channel,
+                        e=guard.retry_reasoning_effort or "(unchanged)",
+                        h=leak.released_any,
+                    )
+                    if leak.released_any:
+                        bridge = _resolve_guard_text(
+                            guard.bridge_text,
+                            default=DEFAULT_SPEECH_LEAK_BRIDGE_TEXT,
+                            what="bridge_text",
+                        )
+                        if bridge:
+                            yield StreamChunk(text=bridge)
                 except RuntimeError as exc:
                     if "previous_response_not_found" not in str(exc) or emitted_any or attempt >= 1:
                         raise
