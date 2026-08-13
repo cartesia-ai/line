@@ -39,9 +39,6 @@ single-message responses are unaffected. Phase does not influence which
 item streams; it feeds the logs and the speech-leak guard's skip
 decision (below).
 
-See the consumer repo's ``cartesia-examples/`` for standalone
-reproductions of the duplicate-text and preamble-before-tool patterns.
-
 Speech-leak guard (opt-in)
 --------------------------
 Some reasoning models (observed: ``gpt-5.4-mini``) occasionally write a tool
