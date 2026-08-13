@@ -19,7 +19,7 @@ Two layers under test:
 """
 
 import asyncio
-from typing import Any, AsyncIterator, Dict, List
+from typing import Any, AsyncIterator, Dict, List, Optional
 
 from litellm.types.llms.base import BaseLiteLLMOpenAIResponseObject
 import pytest
@@ -68,7 +68,7 @@ async def _drive(events: List[Dict[str, Any]], guard: SpeechLeakGuardConfig) -> 
 # ---------------------------------------------------------------------------
 
 
-def _msg_added(idx: int, phase: str, item_id: str) -> Dict[str, Any]:
+def _msg_added(idx: int, phase: Optional[str], item_id: str) -> Dict[str, Any]:
     return {
         "type": "response.output_item.added",
         "output_index": idx,
@@ -301,23 +301,105 @@ def test_email_style_readback_is_not_flagged():
     assert "".join(c.text for c in chunks if c.text) == text
 
 
-def test_final_answer_phase_not_guarded_by_default():
-    """Default scope is commentary-only: a JSON-looking final_answer item
-    streams through untouched (leaks have only been observed on commentary)."""
+def test_final_answer_phase_skipped_by_default():
+    """final_answer is in the default skip set: a JSON-looking final_answer
+    item streams through untouched (leaks have only been observed on
+    commentary)."""
     guard = SpeechLeakGuardConfig(enabled=True)
     text = '{"summary": "x"}'
     chunks = _run(_drive(_message_events([text], phase="final_answer"), guard))
     assert "".join(c.text for c in chunks if c.text) == text
 
 
-def test_final_answer_guarded_when_scoped_in():
-    guard = SpeechLeakGuardConfig(enabled=True, phases=frozenset({"commentary", "final_answer"}))
+def test_final_answer_guarded_with_empty_skip_set():
+    """skip_phases=frozenset() guards every spoken item, final_answer included."""
+    guard = SpeechLeakGuardConfig(enabled=True, skip_phases=frozenset())
 
     async def drive():
         return await _drive(_leak_events(['{"a": 1}'], phase="final_answer"), guard)
 
     with pytest.raises(_SpeechLeakDetected):
         _run(drive())
+
+
+# ---------------------------------------------------------------------------
+# Stream-level: unlabeled / unknown phases are guarded (fail closed)
+# ---------------------------------------------------------------------------
+
+
+def _msg_added_no_phase(idx: int, item_id: str) -> Dict[str, Any]:
+    """An output_item.added whose message item carries NO phase attribute —
+    the wire shape of models predating the phase field (gpt-5-mini, gpt-4.1)."""
+    return {
+        "type": "response.output_item.added",
+        "output_index": idx,
+        "item": {"type": "message", "id": item_id},
+    }
+
+
+def test_leak_in_item_without_phase_attribute_is_guarded():
+    """Models that never send ``phase`` must still be protected: absence of a
+    label is not evidence of safety."""
+    guard = SpeechLeakGuardConfig(enabled=True)
+    events = [
+        _msg_added_no_phase(0, "msg_0"),
+        _delta(0, "msg_0", '{"summary": "x"}'),
+    ]
+
+    with pytest.raises(_SpeechLeakDetected) as exc_info:
+        _run(_drive(events, guard))
+    assert exc_info.value.phase is None
+
+
+def test_leak_in_item_with_none_phase_is_guarded():
+    """litellm's typed objects may materialize an absent wire field as an
+    explicit ``phase=None`` — must be treated the same as attr-missing."""
+    guard = SpeechLeakGuardConfig(enabled=True)
+    events = [
+        _msg_added(0, None, "msg_0"),
+        _delta(0, "msg_0", '{"summary": "x"}'),
+    ]
+
+    with pytest.raises(_SpeechLeakDetected):
+        _run(_drive(events, guard))
+
+
+def test_leak_in_unregistered_item_is_guarded():
+    """Deltas arriving for an output_index with no output_item.added at all
+    (degraded stream) must be guarded, not silently exempted."""
+    guard = SpeechLeakGuardConfig(enabled=True)
+    events = [_delta(2, "msg_2", '{"summary": "x"}')]
+
+    with pytest.raises(_SpeechLeakDetected) as exc_info:
+        _run(_drive(events, guard))
+    assert exc_info.value.phase is None
+
+
+def test_leak_in_unrecognized_phase_label_is_guarded():
+    """A future/unknown phase label is not in the skip set → guarded."""
+    guard = SpeechLeakGuardConfig(enabled=True)
+
+    async def drive():
+        return await _drive(_leak_events(['{"a": 1}'], phase="plan"), guard)
+
+    with pytest.raises(_SpeechLeakDetected):
+        _run(drive())
+
+
+def test_clean_unlabeled_item_streams_in_full():
+    """The guard on unlabeled items must not cost any text: a clean item from
+    a phase-less model is held back, then flushed intact."""
+    guard = SpeechLeakGuardConfig(enabled=True)
+    text = "Your appointment is confirmed for Tuesday at three."
+    events = [
+        _msg_added_no_phase(0, "msg_0"),
+        _delta(0, "msg_0", text),
+        _msg_done(0, "commentary", "msg_0", text),
+        _completed(),
+    ]
+    chunks = _run(_drive(events, guard))
+    assert "".join(c.text for c in chunks if c.text) == text
+    assert chunks[-1].is_final is True
 
 
 def test_disabled_guard_streams_leak_verbatim():

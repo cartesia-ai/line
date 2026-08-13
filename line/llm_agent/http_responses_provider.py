@@ -35,8 +35,9 @@ Strategy: phase-blind, "first textual message item wins". The first
 non-empty ``output_text.delta`` claims an ``output_index``; all deltas
 for that index stream as they arrive, and deltas from any later
 message item in the same response are dropped. Tool calls and
-single-message responses are unaffected. Phase is recorded only for
-log clarity.
+single-message responses are unaffected. Phase does not influence which
+item streams; it feeds the logs and the speech-leak guard's skip
+decision (below).
 
 See the consumer repo's ``cartesia-examples/`` for standalone
 reproductions of the duplicate-text and preamble-before-tool patterns.
@@ -106,7 +107,7 @@ class _SpeechLeakDetected(Exception):
         self,
         *,
         released_any: bool,
-        phase: str,
+        phase: Optional[str],
         output_index: int,
         released_chars: int,
         suppressed_chars: int,
@@ -132,11 +133,13 @@ class _HttpResponseEventStream:
     On terminal events the ``on_response_done`` callback is invoked
     with the response dict so the provider can update its history.
 
-    When ``speech_leak_guard`` is an enabled :class:`SpeechLeakGuardConfig`, the
-    streamed message item (if its phase is in ``speech_leak_guard.phases``) is
-    buffered with ``lookahead_chars`` of holdback and scanned for
-    ``detection_pattern``; a hit raises :class:`_SpeechLeakDetected`
-    instead of streaming the payload to TTS.
+    When ``speech_leak_guard`` is an enabled :class:`SpeechLeakGuardConfig`,
+    the streamed message item is buffered with ``lookahead_chars`` of
+    holdback and scanned for ``detection_pattern``; a hit raises
+    :class:`_SpeechLeakDetected` instead of streaming the payload to TTS.
+    Only items explicitly labeled with a ``phase`` in
+    ``speech_leak_guard.skip_phases`` are exempt — an item with a missing or
+    unknown phase label is always guarded.
     """
 
     def __init__(
@@ -154,19 +157,22 @@ class _HttpResponseEventStream:
 
     async def __aiter__(self) -> AsyncIterator[StreamChunk]:
         tool_calls: Dict[str, ToolCall] = {}
-        # output_index -> phase tag, kept for log clarity only. The streaming
-        # decision below is phase-blind — first textual message item in a
+        # output_index -> raw ``phase`` label as the API sent it (None when
+        # the item carries none — models predating the phase field never send
+        # one). Feeds the guard's skip decision and the logs; the *streaming*
+        # decision below stays phase-blind — first textual message item in a
         # response wins; subsequent textual items are dropped.
-        message_phases: Dict[int, str] = {}
+        message_phases: Dict[int, Optional[str]] = {}
         # output_index whose deltas are being streamed this response. Set on
         # the first non-empty delta of any message item.
         streaming_index: Optional[int] = None
         dropped_indices_logged: set[int] = set()
         received_content = False
         # Speech-guard state for the streaming item. guard_active is decided
-        # when the streaming index is claimed (phase in scope?); guard_buf
-        # accumulates the item's full text; guard_released counts chars
-        # already yielded (the tail beyond it is the holdback window).
+        # when the streaming index is claimed (guarded unless the item's
+        # phase label is explicitly in skip_phases); guard_buf accumulates
+        # the item's full text; guard_released counts chars already yielded
+        # (the tail beyond it is the holdback window).
         guard_active = False
         guard_buf = ""
         guard_released = 0
@@ -183,8 +189,7 @@ class _HttpResponseEventStream:
                 output_index = event.output_index
                 item_type = item.type
                 if item_type == "message":
-                    phase = getattr(item, "phase", None) or "final_answer"
-                    message_phases[int(output_index)] = phase
+                    message_phases[int(output_index)] = getattr(item, "phase", None)
                 elif item_type == "function_call":
                     call_id = item.call_id
                     name = item.name
@@ -198,10 +203,13 @@ class _HttpResponseEventStream:
                     continue
                 if streaming_index is None:
                     streaming_index = output_index
-                    phase = message_phases.get(output_index, "(unknown)")
-                    guard_active = self._guard is not None and phase in self._guard.phases
+                    # None covers both an unlabeled item and an item whose
+                    # output_item.added was never seen; neither is in
+                    # skip_phases, so both are guarded (fail closed).
+                    phase = message_phases.get(output_index)
+                    guard_active = self._guard is not None and phase not in self._guard.skip_phases
                     logger.debug(
-                        "Responses HTTP: streaming text from output_index={i} phase={p} guarded={g}",
+                        "Responses HTTP: streaming text from output_index={i} phase={p!r} guarded={g}",
                         i=output_index,
                         p=phase,
                         g=guard_active,
@@ -212,11 +220,11 @@ class _HttpResponseEventStream:
                         guard_buf += delta
                         match = self._guard_re.search(guard_buf)
                         if match:
-                            phase = message_phases.get(output_index, "(unknown)")
+                            phase = message_phases.get(output_index)
                             suppressed = len(guard_buf) - guard_released
                             logger.warning(
                                 "Speech-leak guard: tool-call payload detected in spoken "
-                                "text (phase={p}, output_index={i}, match_offset={o}, "
+                                "text (phase={p!r}, output_index={i}, match_offset={o}, "
                                 "released_chars={r}, suppressed_chars={s})",
                                 p=phase,
                                 i=output_index,
@@ -248,12 +256,12 @@ class _HttpResponseEventStream:
                     # text) and respects "one reply per turn".
                     dropped_indices_logged.add(output_index)
                     logger.debug(
-                        "Responses HTTP: dropping text from output_index={i} phase={p} "
-                        "(already streaming output_index={s} phase={sp})",
+                        "Responses HTTP: dropping text from output_index={i} phase={p!r} "
+                        "(already streaming output_index={s} phase={sp!r})",
                         i=output_index,
-                        p=message_phases.get(output_index, "(unknown)"),
+                        p=message_phases.get(output_index),
                         s=streaming_index,
-                        sp=message_phases.get(streaming_index, "(unknown)"),
+                        sp=message_phases.get(streaming_index),
                     )
 
             elif event_type == "response.function_call_arguments.delta":

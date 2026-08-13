@@ -129,7 +129,7 @@ speech_leak_guard = SpeechLeakGuardConfig(
 )
 ```
 
-Detection, holdback size, guarded message phases, and the retry note are all configurable — see the `SpeechLeakGuardConfig` docstring.
+Every spoken message item is guarded unless it is explicitly labeled with a `phase` in `skip_phases` (default: `{"final_answer"}`). Items with a missing or unrecognized phase label are always guarded — this covers models that predate the Responses API `phase` field (e.g. `gpt-5-mini`, `gpt-4.1`), which never label their messages. Detection pattern, holdback size, the skip set, and the retry note are all configurable — see the `SpeechLeakGuardConfig` docstring.
 
 ## Built-in Tools
 

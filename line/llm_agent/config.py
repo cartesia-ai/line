@@ -63,9 +63,10 @@ class SpeechLeakGuardConfig:
     a guard the caller hears raw JSON read out loud.
 
     When enabled, the ``http_responses`` provider buffers each spoken message
-    item with ``lookahead_chars`` of holdback and scans the accumulated text
-    for ``detection_pattern`` (``re.search``, so a leak is caught anywhere in
-    the item, not just at its head). On a hit the current LLM invocation is
+    item — except those explicitly labeled with a ``phase`` in
+    ``skip_phases`` — with ``lookahead_chars`` of holdback and scans the
+    accumulated text for ``detection_pattern`` (``re.search``, so a leak is
+    caught anywhere in the item, not just at its head). On a hit the current LLM invocation is
     aborted before any of its tool calls execute or its output is committed
     to history, and the whole invocation is retried up to ``max_retries``
     times with ``retry_note`` injected (via ``retry_note_channel``) and an
@@ -88,9 +89,14 @@ class SpeechLeakGuardConfig:
     """
 
     enabled: bool = False
-    # Which message-item phases are guarded. Leaks have only been observed on
-    # ``commentary`` items; add ``"final_answer"`` to guard those too.
-    phases: FrozenSet[str] = frozenset({"commentary"})
+    # Phase labels the guard SKIPS. A spoken message item is guarded unless
+    # its ``phase`` is explicitly one of these — items with a missing or
+    # unknown label are always guarded, because absence of a label is not
+    # evidence of safety (models predating the ``phase`` field, e.g.
+    # ``gpt-5-mini`` / ``gpt-4.1``, never send one). Leaks have only been
+    # observed on ``commentary`` items, so ``final_answer`` is exempt by
+    # default; pass ``frozenset()`` to guard every spoken item.
+    skip_phases: FrozenSet[str] = frozenset({"final_answer"})
     # Chars of holdback between what has streamed in and what is released to
     # TTS. Must comfortably exceed the distance from a leak's start to its
     # first pattern-matchable signature. The degraded-header form (tool name +
