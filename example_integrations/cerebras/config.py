@@ -5,8 +5,8 @@ Contains model settings, prompts, and schemas for the interviewer and judge agen
 """
 
 # Model IDs in LiteLLM format (cerebras/ prefix)
-MODEL_ID = "cerebras/zai-glm-4.7"
-MODEL_ID_BACK = "cerebras/gpt-oss-120b"
+MODEL_ID = "cerebras/gpt-oss-120b"
+MODEL_ID_BACK = "cerebras/gemma-4-31b"
 
 # Model parameters
 MAX_OUTPUT_TOKENS = 100
