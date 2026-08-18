@@ -26,7 +26,14 @@ from line.events import (
 )
 from line.llm_agent.config import LlmConfig
 from line.llm_agent.llm_agent import LlmAgent
-from line.llm_agent.provider import Message, StreamChunk, ToolCall, _ModelConfig, parse_model_id
+from line.llm_agent.provider import (
+    Message,
+    StreamChunk,
+    ToolCall,
+    _ModelConfig,
+    _normalize_messages,
+    parse_model_id,
+)
 from line.llm_agent.tools.decorators import handoff_tool, loopback_tool, passthrough_tool
 from line.llm_agent.tools.system import web_search
 from line.llm_agent.tools.utils import FunctionTool
@@ -2230,3 +2237,169 @@ async def test_background_tool_responding_to_references_triggering_event(turn_en
         assert evt.responding_to == "evt-A", (
             f"AgentToolReturned responding_to should be 'evt-A', got '{evt.responding_to}'"
         )
+
+
+# =============================================================================
+# Background tool result anchoring (drain-time, not yield-time)
+# =============================================================================
+
+
+async def test_background_result_during_inflight_generation_anchors_after_streamed_text(turn_env):
+    """Background results arriving mid-generation must anchor AFTER the streamed text.
+
+    Regression test for a production incident:
+
+    1. Turn A: the LLM starts a background tool (an account lookup); the tool
+       yields a "pending" status and keeps running.
+    2. The user speaks again — turn B starts and its LLM request goes out.
+    3. While that request is in flight, the lookup fails and the background
+       tool yields an error result.
+    4. Turn B's response streams back ("Of course.").
+    5. Turn B's loop drains the error pair and makes the loopback reaction
+       call that should handle the error.
+
+    When the pair was appended to history at yield time (step 3), it landed
+    BEFORE the text streamed in step 4, so the reaction call's messages ended
+    with an assistant message. _normalize_messages then skipped the LLM call
+    entirely and the error was silently dropped — the agent went dead until
+    the caller spoke again. Anchoring at drain time places the pair after the
+    streamed text, so the reaction call sees the tool result last and proceeds.
+    """
+    import asyncio
+
+    tool_pending = asyncio.Event()
+    fail_now = asyncio.Event()
+    error_yielded = asyncio.Event()
+
+    @loopback_tool(is_background=True)
+    async def account_lookup(ctx):
+        """Look up the caller's account in the background."""
+        yield {"status": "pending"}
+        tool_pending.set()
+        await fail_now.wait()
+        yield "ERROR: lookup failed"
+        error_yielded.set()
+
+    responses = [
+        # Call 1 (turn A): LLM starts the background lookup
+        [
+            StreamChunk(text="Let me check."),
+            StreamChunk(
+                tool_calls=[ToolCall(id="tc1", name="account_lookup", arguments="{}", is_complete=True)]
+            ),
+            StreamChunk(is_final=True),
+        ],
+        # Call 2 (turn A): reaction to the "pending" status
+        [
+            StreamChunk(text="I'm pulling up your account."),
+            StreamChunk(is_final=True),
+        ],
+        # Call 3 (turn B): response to the user's interjection. The error
+        # result lands in the queue while this response is in flight (gated
+        # below), reproducing the race.
+        [
+            StreamChunk(text="Of course."),
+            StreamChunk(is_final=True),
+        ],
+        # Call 4 (turn B): loopback reaction to the error result
+        [
+            StreamChunk(text="Sorry, I couldn't pull up the account."),
+            StreamChunk(is_final=True),
+        ],
+    ]
+
+    class MidStreamFailureLLM(MockLLM):
+        """MockLLM whose third response streams only after the background
+        tool has yielded its error, simulating a result arriving while the
+        generation is in flight."""
+
+        def chat(self, messages: List[Message], tools=None, **kwargs) -> MockStream:
+            call_index = self._call_count
+            stream = super().chat(messages, tools, **kwargs)
+            if call_index != 2:
+                return stream
+
+            async def gated():
+                fail_now.set()
+                # Wait until the error pair has been queued (the tool only
+                # resumes past its yield once the queue consumed the item).
+                await asyncio.wait_for(error_yielded.wait(), timeout=5.0)
+                async for chunk in stream:
+                    yield chunk
+
+            return gated()
+
+    mock_llm = MidStreamFailureLLM(responses)
+    agent = LlmAgent(model="gpt-4o", api_key="test-key", tools=[account_lookup])
+    agent._llm = mock_llm
+
+    # Turn A — starts the background lookup
+    first_event = UserTextSent(
+        content="I need help with my account",
+        history=[UserTextSent(content="I need help with my account")],
+    )
+
+    async def run_first_process():
+        async for _ in agent.process(turn_env, first_event):
+            pass
+
+    first_task = asyncio.create_task(run_first_process())
+    await asyncio.wait_for(tool_pending.wait(), timeout=5.0)
+    for _ in range(100):
+        if mock_llm._call_count >= 2:
+            break
+        await asyncio.sleep(0)
+    assert mock_llm._call_count >= 2, f"Expected >= 2 LLM calls, got {mock_llm._call_count}"
+
+    # User speaks again — turn A is cancelled, turn B begins
+    first_task.cancel()
+    try:
+        await first_task
+    except asyncio.CancelledError:
+        pass
+
+    second_event = UserTextSent(
+        content="Stop.",
+        history=[
+            UserTextSent(content="I need help with my account"),
+            AgentTextSent(content="Let me check."),
+            AgentTextSent(content="I'm pulling up your account."),
+            UserTextSent(content="Stop."),
+        ],
+    )
+    second_outputs = await collect_outputs(agent, turn_env, second_event)
+
+    # The error result must have been drained and reacted to within turn B
+    error_returned = [
+        o for o in second_outputs if isinstance(o, AgentToolReturned) and "ERROR" in str(o.result)
+    ]
+    assert len(error_returned) == 1, (
+        f"Expected the error tool result to be drained in turn B, got: "
+        f"{[o.result for o in second_outputs if isinstance(o, AgentToolReturned)]}"
+    )
+    assert mock_llm._call_count == 4, (
+        f"Expected the loopback reaction call to happen, got {mock_llm._call_count} LLM calls"
+    )
+
+    # The reaction call's messages must end with the tool result, not with the
+    # assistant text streamed while the result was waiting in the queue.
+    reaction_messages = mock_llm._recorded_messages[3]
+    assert reaction_messages[-1].role == "tool", (
+        f"Reaction call must end with the tool result, got role="
+        f"'{reaction_messages[-1].role}' content={reaction_messages[-1].content!r}"
+    )
+    assistant_text_idx = next(
+        i for i, m in enumerate(reaction_messages) if m.role == "assistant" and m.content == "Of course."
+    )
+    tool_result_idx = next(
+        i for i, m in enumerate(reaction_messages) if m.role == "tool" and "ERROR" in (m.content or "")
+    )
+    assert assistant_text_idx < tool_result_idx, (
+        "The error tool result must be anchored after the text streamed while it was waiting in the queue"
+    )
+
+    # And a real provider would not skip the reaction call
+    assert _normalize_messages(reaction_messages) is not None, (
+        "Reaction call would be skipped by _normalize_messages "
+        "(conversation must not end with an assistant message)"
+    )
