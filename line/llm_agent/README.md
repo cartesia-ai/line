@@ -97,6 +97,40 @@ config = LlmConfig.from_call_request(
 - `system_prompt=""` is treated as None and falls back to defaults (a valid system prompt is always required)
 - `introduction=""` is preserved (agent waits for user to speak first rather than using a default)
 
+### Speech-Leak Guard (`http_responses` backend)
+
+Some reasoning models occasionally write a tool call's payload into the spoken message — bare JSON arguments (`{"summary": ...}`) or the whole call expression (`record_call_summary({...})`) — instead of, or in addition to, the proper function-call item. Without a guard, the caller hears raw JSON read out loud by TTS.
+
+`SpeechLeakGuardConfig` (opt-in, read only by the `http_responses` backend) buffers streamed spoken text with a small holdback window and scans it for tool-call signatures. On a hit, the LLM invocation is aborted before any tool calls execute or history commits, then retried with a corrective note; if the caller already heard part of the bad attempt, a bridge line is spoken first, and if every attempt leaks, a fallback line is spoken and the turn ends.
+
+```python
+from line.llm_agent import LlmConfig, SpeechLeakGuardConfig
+
+config = LlmConfig(
+    system_prompt="...",
+    speech_leak_guard=SpeechLeakGuardConfig(
+        enabled=True,
+        # Optional tuning (defaults shown in the dataclass):
+        # max_retries=1,
+        # retry_reasoning_effort="medium",  # decorrelate the retry
+        # bridge_text="Sorry, let me try that again.",
+        # fallback_text="I'm having technical difficulties. Should I try again?",
+    ),
+)
+```
+
+For agents whose spoken language can change mid-call, `bridge_text` and `fallback_text` also accept zero-arg callables, invoked at speak time:
+
+```python
+speech_leak_guard = SpeechLeakGuardConfig(
+    enabled=True,
+    bridge_text=lambda: BRIDGE_LINES[current_language()],
+    fallback_text=lambda: FALLBACK_LINES[current_language()],
+)
+```
+
+Every spoken message item is guarded unless it is explicitly labeled with a `phase` in `skip_phases` (default: `{"final_answer"}`). Items with a missing or unrecognized phase label are always guarded — this covers models that predate the Responses API `phase` field (e.g. `gpt-5-mini`, `gpt-4.1`), which never label their messages. Detection pattern, holdback size, the skip set, and the retry note are all configurable — see the `SpeechLeakGuardConfig` docstring.
+
 ## Built-in Tools
 
 The SDK provides commonly-used tools out of the box:

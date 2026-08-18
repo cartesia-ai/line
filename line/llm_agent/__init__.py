@@ -9,7 +9,12 @@ See README.md for examples and detailed documentation.
 """
 
 # Configuration
-from line.llm_agent.config import FALLBACK_INTRODUCTION, FALLBACK_SYSTEM_PROMPT, LlmConfig
+from line.llm_agent.config import (
+    FALLBACK_INTRODUCTION,
+    FALLBACK_SYSTEM_PROMPT,
+    LlmConfig,
+    SpeechLeakGuardConfig,
+)
 
 # History
 from line.llm_agent.history import History
@@ -59,6 +64,7 @@ __all__ = [
     "LLMProvider",
     # Configuration
     "LlmConfig",
+    "SpeechLeakGuardConfig",
     "FALLBACK_SYSTEM_PROMPT",
     "FALLBACK_INTRODUCTION",
     # Tool decorators
