@@ -52,6 +52,9 @@ MAX_OUTPUT_TOKENS = 600
 TEMPERATURE = 0.7
 MAX_RESULTS = 5
 FETCH_MAX_CHARS = 3000
+# Keenable returns whole-page text on every search result; a voice turn only
+# needs enough to decide whether to fetch the page.
+SNIPPET_MAX_CHARS = 500
 
 
 class KeenableTools:
@@ -106,8 +109,13 @@ class KeenableTools:
             parts = [f"Search Results for: '{query}'\n"]
             for i, result in enumerate(results):
                 parts.append(f"\n--- Source {i + 1}: {result.get('title', 'Untitled')} ---\n")
-                if result.get("description"):
-                    parts.append(f"{result['description']}\n")
+                # Keenable returns both `snippet` and `description`: `snippet` carries
+                # the page text and `description` is the page's meta description,
+                # which is empty for most pages.
+                page_text = str(result.get("snippet") or result.get("description") or "")
+                snippet = " ".join(page_text.split())[:SNIPPET_MAX_CHARS]
+                if snippet:
+                    parts.append(f"{snippet}\n")
                 parts.append(f"URL: {result.get('url', '')}\n")
 
             logger.info(f"Search completed: {len(results)} sources found")
