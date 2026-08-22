@@ -6,6 +6,8 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import Iterator, List, Literal, Optional, Union
 
+from loguru import logger
+
 from line.events import (
     AgentDtmfSent,
     AgentEndCall,
@@ -70,6 +72,10 @@ class _InsertEntry:
     entry: CustomHistoryEntry
     anchor: _Anchor
     position: Literal["before", "after"]
+    # Index of the anchor among content-equal events at mutation time, used to
+    # re-locate it in rebuilt histories where object/event_id identity is not stable.
+    anchor_occurrence: int = 0
+    warned: bool = False
 
 
 @dataclass
@@ -79,9 +85,51 @@ class _ReplaceSegment:
     events: List[HistoryEvent]
     start: _Anchor
     end: _Anchor
+    start_occurrence: int = 0
+    end_occurrence: int = 0
+    warned: bool = False
 
 
 _Mutation = Union[_InsertEntry, _ReplaceSegment]
+
+# Fields excluded when comparing events for anchor resolution. event_id is excluded
+# because rebuilt histories do not preserve it: converted events (e.g. the
+# AgentTextSent produced from a local AgentSendText) get a fresh event_id on every
+# rebuild, and once the harness observes an event, the canonical input version
+# carries the harness's event_id rather than the local one.
+_ANCHOR_IDENTITY_FIELDS = {"event_id", "history"}
+
+
+def _content_equal(a: HistoryEvent, b: HistoryEvent) -> bool:
+    """Compare two history events by content, ignoring unstable identity fields."""
+    if type(a) is not type(b):
+        return False
+    return a.model_dump(exclude=_ANCHOR_IDENTITY_FIELDS) == b.model_dump(exclude=_ANCHOR_IDENTITY_FIELDS)
+
+
+def _anchor_occurrence(merged: List[HistoryEvent], anchor: HistoryEvent) -> int:
+    """Return the anchor's index among content-equal events in the merged history.
+
+    Recorded at mutation time so that duplicate content (e.g. two identical
+    "Okay." replies) resolves to the intended occurrence in rebuilt histories.
+    """
+    idx = merged.index(anchor)
+    return sum(1 for e in merged[:idx] if _content_equal(e, anchor))
+
+
+def _resolve_anchor(result: List[HistoryEvent], anchor: HistoryEvent, occurrence: int) -> Optional[int]:
+    """Locate an anchor in a rebuilt history by content.
+
+    Returns the index of the occurrence-th content-equal event, the last
+    content-equal event if fewer occurrences exist than recorded (best effort),
+    or None if the anchor's content is no longer present.
+    """
+    matches = [i for i, e in enumerate(result) if _content_equal(e, anchor)]
+    if not matches:
+        return None
+    if occurrence < len(matches):
+        return matches[occurrence]
+    return matches[-1]
 
 
 # ---------------------------------------------------------------------------
@@ -152,11 +200,20 @@ class History:
             position = "after"
 
         # Validate real anchors exist in the current history
+        anchor_occurrence = 0
         if anchor is not _SEQUENCE_START:
             if anchor not in merged:
                 raise ValueError(f"Anchor event not found in history: {anchor}")
+            anchor_occurrence = _anchor_occurrence(merged, anchor)
 
-        self._mutations.append(_InsertEntry(entry=entry, anchor=anchor, position=position))
+        self._mutations.append(
+            _InsertEntry(
+                entry=entry,
+                anchor=anchor,
+                position=position,
+                anchor_occurrence=anchor_occurrence,
+            )
+        )
         self._cache = None
 
     def update(
@@ -190,12 +247,16 @@ class History:
 
         # Validate real anchors exist in the current history
         merged = self._ensure_merged()
+        start_occurrence = 0
+        end_occurrence = 0
         if resolved_start is not _SEQUENCE_START:
             if resolved_start not in merged:
                 raise ValueError(f"Start event not found in history: {resolved_start}")
+            start_occurrence = _anchor_occurrence(merged, resolved_start)
         if resolved_end is not _SEQUENCE_START:
             if resolved_end not in merged:
                 raise ValueError(f"End event not found in history: {resolved_end}")
+            end_occurrence = _anchor_occurrence(merged, resolved_end)
 
         # Check ordering when both are real events
         if resolved_start is not _SEQUENCE_START and resolved_end is not _SEQUENCE_START:
@@ -206,7 +267,15 @@ class History:
                     f"End event (index {end_idx}) appears before start event (index {start_idx})"
                 )
 
-        self._mutations.append(_ReplaceSegment(events=events, start=resolved_start, end=resolved_end))
+        self._mutations.append(
+            _ReplaceSegment(
+                events=events,
+                start=resolved_start,
+                end=resolved_end,
+                start_occurrence=start_occurrence,
+                end_occurrence=end_occurrence,
+            )
+        )
         self._cache = None
 
     def __iter__(self) -> Iterator[HistoryEvent]:
@@ -248,20 +317,50 @@ class History:
                 if mutation.anchor is _SEQUENCE_START:
                     # "after" _SEQUENCE_START → insert at beginning
                     result.insert(0, mutation.entry)
+                    continue
+                idx = _resolve_anchor(result, mutation.anchor, mutation.anchor_occurrence)
+                if idx is None:
+                    self._warn_skipped_mutation(mutation, mutation.anchor)
+                    continue
+                if mutation.position == "before":
+                    result.insert(idx, mutation.entry)
                 else:
-                    idx = result.index(mutation.anchor)
-                    if mutation.position == "before":
-                        result.insert(idx, mutation.entry)
-                    else:
-                        result.insert(idx + 1, mutation.entry)
+                    result.insert(idx + 1, mutation.entry)
             elif isinstance(mutation, _ReplaceSegment):
                 # _SEQUENCE_START → virtual position before index 0
-                start_idx = 0 if mutation.start is _SEQUENCE_START else result.index(mutation.start)
-                end_excl = 0 if mutation.end is _SEQUENCE_START else result.index(mutation.end) + 1
+                start_idx = 0
+                if mutation.start is not _SEQUENCE_START:
+                    resolved = _resolve_anchor(result, mutation.start, mutation.start_occurrence)
+                    if resolved is None:
+                        self._warn_skipped_mutation(mutation, mutation.start)
+                        continue
+                    start_idx = resolved
+                end_excl = 0
+                if mutation.end is not _SEQUENCE_START:
+                    resolved = _resolve_anchor(result, mutation.end, mutation.end_occurrence)
+                    if resolved is None:
+                        self._warn_skipped_mutation(mutation, mutation.end)
+                        continue
+                    end_excl = resolved + 1
                 result[start_idx:end_excl] = mutation.events
 
         self._cache = result
         return result
+
+    @staticmethod
+    def _warn_skipped_mutation(mutation: _Mutation, anchor: _Anchor) -> None:
+        """Warn (once per mutation) that its anchor is missing from the rebuilt history.
+
+        The mutation stays queued: if the anchor's content reappears in a later
+        rebuild (e.g. the canonical input version of a still-streaming message
+        arrives), the mutation is applied again.
+        """
+        if not mutation.warned:
+            logger.warning(
+                f"History mutation skipped: anchor {type(anchor).__name__} no longer "
+                f"present in rebuilt history. It will be re-applied if the anchor reappears."
+            )
+            mutation.warned = True
 
 
 # ---------------------------------------------------------------------------
