@@ -1,3 +1,15 @@
+> [!WARNING]
+> **The Line SDK is deprecated.** Cartesia stops hosting Line agents on
+> **November 20, 2026**. After that date your agents will stop taking calls and
+> the SDK will no longer be supported.
+>
+> [Cartesia managed agents](https://docs.cartesia.ai/agents) replace it. You
+> configure the agent and we run it, with no repository to maintain and no
+> deploys. Start with the
+> [migration guide](https://docs.cartesia.ai/agents/migrate-from-line).
+>
+> Existing releases stay installable from PyPI. Nothing is being yanked.
+
 # Cartesia Line SDK
 
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/cartesia-ai/line)

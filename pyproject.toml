@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cartesia-line"
-version = "0.2.17"
-description = "Cartesia Voice Agents SDK"
+version = "0.3.0"
+description = "Cartesia Voice Agents SDK (deprecated; hosting ends 2026-11-20)"
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [
@@ -14,7 +14,7 @@ authors = [
 license = {text = "Apache 2.0"}
 keywords = ["voice", "agents", "ai", "cartesia"]
 classifiers = [
-    "Development Status :: 4 - Beta",
+    "Development Status :: 7 - Inactive",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: Apache Software License",
     "Operating System :: OS Independent",
@@ -26,7 +26,7 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Typing :: Typed",
 ]
-urls = {Repository = "https://github.com/cartesia-ai/line", Documentation = "https://docs.cartesia.ai/line/", Homepage = "https://cartesia.ai/agents"}
+urls = {Repository = "https://github.com/cartesia-ai/line", Documentation = "https://docs.cartesia.ai/line/", Homepage = "https://cartesia.ai/agents", "Migration guide" = "https://docs.cartesia.ai/agents/migrate-from-line"}
 
 
 dependencies = [

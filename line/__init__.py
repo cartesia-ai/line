@@ -1,3 +1,15 @@
+import warnings
+
+# DeprecationWarning is filtered out by default outside __main__, so it would
+# never reach the people who need to see this.
+warnings.warn(
+    "The Cartesia Line SDK is deprecated. Cartesia stops hosting Line agents on "
+    "2026-11-20, after which they will no longer take calls. Migrate to Cartesia "
+    "managed agents: https://docs.cartesia.ai/agents",
+    UserWarning,
+    stacklevel=2,
+)
+
 # Core voice agent components
 # Agent types
 from line.agent import (
