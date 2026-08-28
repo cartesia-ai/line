@@ -1,5 +1,6 @@
 # Core voice agent components
 # Agent types
+from line._harness_types import TTSConfig
 from line.agent import (
     Agent,
     AgentCallable,
@@ -61,6 +62,7 @@ __all__ = [
     "CallRequest",
     "AgentConfig",
     "PreCallResult",
+    "TTSConfig",
     # Agent types
     "Agent",
     "AgentCallable",
