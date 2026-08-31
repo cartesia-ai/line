@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Literal, Optional, Union
 import uuid
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field
 
 
 def _generate_event_id() -> str:
@@ -55,18 +55,31 @@ class AgentEndCall(BaseModel):
     interruptible: bool = True
 
 
+TransferDestinationType = Literal["phone", "sip_uri"]
+
+
+class TransferDestination(BaseModel):
+    """One typed transfer target; type determines how value is rendered downstream."""
+
+    type: TransferDestinationType
+    value: str
+
+
 class AgentTransferCall(BaseModel):
     type: Literal["agent_transfer_call"] = "agent_transfer_call"
-    target_phone_number: Optional[str] = None
-    target_sip_uri: Optional[str] = None
+    transfer_destination: TransferDestination
     responding_to: Optional[str] = None
     interruptible: bool = True
 
-    @model_validator(mode="after")
-    def has_exactly_one_destination(self) -> "AgentTransferCall":
-        if (self.target_phone_number is None) == (self.target_sip_uri is None):
-            raise ValueError("AgentTransferCall requires exactly one transfer destination")
-        return self
+    @property
+    def target_phone_number(self) -> Optional[str]:
+        """Compatibility accessor; consumers should use transfer_destination."""
+        return self.transfer_destination.value if self.transfer_destination.type == "phone" else None
+
+    @property
+    def target_sip_uri(self) -> Optional[str]:
+        """Compatibility accessor; consumers should use transfer_destination."""
+        return self.transfer_destination.value if self.transfer_destination.type == "sip_uri" else None
 
 
 class AgentSendDtmf(BaseModel):
@@ -262,6 +275,7 @@ __all__ = [
     "AgentSendText",
     "AgentSendDtmf",
     "AgentEndCall",
+    "TransferDestination",
     "AgentTransferCall",
     "AgentToolCalled",
     "AgentToolReturned",

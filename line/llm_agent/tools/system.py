@@ -23,6 +23,7 @@ from line.events import (
     AgentTransferCall,
     AgentUpdateCall,
     CallStarted,
+    TransferDestination,
 )
 from line.knowledge_base import DEFAULT_TOP_K, KnowledgeBaseError, _warn_if_long_timeout
 from line.llm_agent.tools import http_server_tool_utils
@@ -392,11 +393,12 @@ class TransferCallTool:
             """
             if self.message:
                 yield AgentSendText(text=self.message, interruptible=self.interruptible)
-            yield AgentTransferCall(
-                target_phone_number=fixed_number,
-                target_sip_uri=fixed_sip_uri,
-                interruptible=self.interruptible,
+            destination = (
+                TransferDestination(type="phone", value=fixed_number)
+                if fixed_number is not None
+                else TransferDestination(type="sip_uri", value=fixed_sip_uri)
             )
+            yield AgentTransferCall(transfer_destination=destination, interruptible=self.interruptible)
 
         return construct_function_tool(
             _transfer_call_fixed_impl,
@@ -435,7 +437,10 @@ class TransferCallTool:
 
             if self.message:
                 yield AgentSendText(text=self.message, interruptible=self.interruptible)
-            yield AgentTransferCall(target_phone_number=normalized_number, interruptible=self.interruptible)
+            yield AgentTransferCall(
+                transfer_destination=TransferDestination(type="phone", value=normalized_number),
+                interruptible=self.interruptible,
+            )
 
         return construct_function_tool(
             _transfer_call_impl,
