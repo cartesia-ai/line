@@ -8,8 +8,6 @@ from typing import Any, Dict, Literal, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from line.events import TransferDestination
-
 ########################################################
 #  Wire message types for the Cartesia voice-agent websocket protocol.
 ########################################################
@@ -99,6 +97,16 @@ class ToolCallOutput(BaseModel):
     result: Optional[str] = None
     id: Optional[str] = None
     responding_to: Optional[str] = None
+
+
+TransferDestinationType = Literal["phone", "sip_uri"]
+
+
+class TransferDestination(BaseModel):
+    """One typed transfer target on the Line-to-harness wire protocol."""
+
+    type: TransferDestinationType
+    value: str
 
 
 class TransferOutput(BaseModel):

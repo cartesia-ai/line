@@ -1181,7 +1181,7 @@ class TestEndCallAndTransferCallMapping:
         """AgentTransferCall(interruptible=False) maps to TransferOutput(interruptible=False)."""
         result = self._map(
             AgentTransferCall(
-                transfer_destination={"type": "phone", "value": "+14155551234"},
+                target_phone_number="+14155551234",
                 interruptible=False,
             )
         )
@@ -1191,25 +1191,23 @@ class TestEndCallAndTransferCallMapping:
 
     def test_transfer_call_interruptible_true_by_default(self):
         """AgentTransferCall() defaults to interruptible=True."""
-        result = self._map(AgentTransferCall(transfer_destination={"type": "phone", "value": "+14155551234"}))
+        result = self._map(AgentTransferCall(target_phone_number="+14155551234"))
         assert isinstance(result, TransferOutput)
         assert result.interruptible is True
 
     def test_sip_transfer_forwards_sip_uri(self):
-        result = self._map(
-            AgentTransferCall(transfer_destination={"type": "sip_uri", "value": "sip:7500@pbx.example.com"})
-        )
+        result = self._map(AgentTransferCall(target_sip_uri="sip:7500@pbx.example.com"))
         assert isinstance(result, TransferOutput)
         assert result.target_phone_number is None
         assert result.target_sip_uri == "sip:7500@pbx.example.com"
 
-    def test_legacy_phone_transfer_constructor_is_upgraded(self):
+    def test_phone_transfer_is_typed_for_the_harness(self):
         result = self._map(AgentTransferCall(target_phone_number="+14155551234"))
         assert isinstance(result, TransferOutput)
         assert result.transfer_destination.type == "phone"
         assert result.transfer_destination.value == "+14155551234"
 
-    def test_legacy_sip_transfer_constructor_is_upgraded(self):
+    def test_sip_transfer_is_typed_for_the_harness(self):
         result = self._map(AgentTransferCall(target_sip_uri="sip:7500@pbx.example.com"))
         assert isinstance(result, TransferOutput)
         assert result.transfer_destination.type == "sip_uri"
