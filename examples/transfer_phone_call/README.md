@@ -27,12 +27,14 @@ send_dtmf(button="1")
 ```
 
 ### `transfer_call`
-Transfers the call to another phone number. Validates E.164 format.
+Transfers the call to another phone number, or to a configured SIP URI.
 
 ```python
 # Optional spoken line before transfer is fixed when you build the tool (not chosen by the model):
 tools=[transfer_call(message="Transferring you now..."), send_dtmf]
 # The model only passes the destination: transfer_call(target_phone_number="+14155551234")
+# SIP destinations must be pinned by the application; the model cannot supply one:
+transfer_to_extension = transfer_call(target_sip_uri="sip:7500@pbx.example.com")
 ```
 
 ### `end_call`
@@ -58,5 +60,5 @@ Agent: I'll transfer you to that number now.
 ## Key Concepts
 
 - **`send_dtmf`**: Passthrough tool that yields `AgentSendDtmf` event
-- **`transfer_call`**: Passthrough tool with phone number validation using `phonenumbers` library
+- **`transfer_call`**: Passthrough tool with E.164 phone validation and pinned SIP URI support
 - **`end_call`**: Passthrough tool to gracefully end the conversation

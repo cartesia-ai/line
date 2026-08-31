@@ -1190,6 +1190,12 @@ class TestEndCallAndTransferCallMapping:
         assert isinstance(result, TransferOutput)
         assert result.interruptible is True
 
+    def test_sip_transfer_forwards_sip_uri(self):
+        result = self._map(AgentTransferCall(target_sip_uri="sip:7500@pbx.example.com"))
+        assert isinstance(result, TransferOutput)
+        assert result.target_phone_number is None
+        assert result.target_sip_uri == "sip:7500@pbx.example.com"
+
 
 # ============================================================
 # AgentUpdateCall -> ConfigOutput mapping tests

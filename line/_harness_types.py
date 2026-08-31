@@ -101,7 +101,8 @@ class ToolCallOutput(BaseModel):
 
 class TransferOutput(BaseModel):
     type: Literal["transfer"] = "transfer"
-    target_phone_number: str
+    target_phone_number: Optional[str] = None
+    target_sip_uri: Optional[str] = None
     responding_to: Optional[str] = None
     interruptible: bool = True
 

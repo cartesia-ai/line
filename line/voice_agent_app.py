@@ -684,11 +684,11 @@ class ConversationRunner:
                 interruptible=event.interruptible,
             )
         if isinstance(event, AgentTransferCall):
-            logger.info(
-                f"<- 📱 Transfer to: {event.target_phone_number} (interruptible={event.interruptible})"
-            )
+            destination = event.target_phone_number or event.target_sip_uri
+            logger.info(f"<- 📱 Transfer to: {destination} (interruptible={event.interruptible})")
             return TransferOutput(
                 target_phone_number=event.target_phone_number,
+                target_sip_uri=event.target_sip_uri,
                 responding_to=event.responding_to,
                 interruptible=event.interruptible,
             )

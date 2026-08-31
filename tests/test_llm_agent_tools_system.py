@@ -219,6 +219,24 @@ async def test_transfer_call_valid_number(mock_ctx, anyio_backend):
     assert events[0].target_phone_number == "+14155551234"
 
 
+async def test_transfer_call_pinned_sip_uri(mock_ctx, anyio_backend):
+    tool = transfer_call(target_sip_uri="sip:7500@pbx.example.com")
+    events = await collect_events(tool.as_function_tool().func(mock_ctx))
+
+    assert len(events) == 1
+    assert isinstance(events[0], AgentTransferCall)
+    assert events[0].target_phone_number is None
+    assert events[0].target_sip_uri == "sip:7500@pbx.example.com"
+
+
+async def test_transfer_call_rejects_phone_and_sip_destinations(anyio_backend):
+    with pytest.raises(ValueError, match="either target_phone_number or target_sip_uri"):
+        transfer_call(
+            target_phone_number="+14155551234",
+            target_sip_uri="sip:7500@pbx.example.com",
+        )
+
+
 async def test_transfer_call_valid_number_with_message(mock_ctx, anyio_backend):
     """Test that a tool configured with message= sends it before transfer."""
     tool = transfer_call(message="Transferring you now")

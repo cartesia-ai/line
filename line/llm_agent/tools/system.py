@@ -8,6 +8,7 @@ import asyncio
 from dataclasses import dataclass, field
 import json
 import logging
+import re
 from typing import Annotated, Any, Dict, Literal, Optional
 from urllib.parse import quote as _url_quote
 
@@ -33,6 +34,8 @@ DtmfButton = Literal["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "*", "#"]
 
 # Logger for system tools
 logger = logging.getLogger(__name__)
+
+_SIP_URI_PATTERN = re.compile(r"^sips?:[^\s<>@]+@[^\s<>@]+$", re.IGNORECASE)
 
 # Sentinel for chainable ``__call__`` configs: distinguishes "argument omitted
 # (inherit the current value)" from "explicitly passed None". Needed for
@@ -288,11 +291,10 @@ class TransferCallTool:
 
     - **Dynamic** (default): the LLM provides ``target_phone_number`` at call
       time. It is validated and normalized to E.164 on each call.
-    - **Pinned**: pass ``target_phone_number`` at construction
-      (``transfer_call(target_phone_number="+14155551234")``). The number is
-      validated once at construction and hidden from the LLM, which then only
-      decides *whether* to transfer. This matches the common "escalate to a
-      fixed support/human line" pattern.
+    - **Pinned**: pass ``target_phone_number`` or ``target_sip_uri`` at
+      construction. The destination is validated once at construction and hidden
+      from the LLM, which then only decides *whether* to transfer. This matches
+      the common "escalate to a fixed support/human line" pattern.
 
     The optional fixed ``message`` and ``interruptible`` flag are set at
     construction in both modes, not by the LLM at tool-call time.
@@ -317,15 +319,21 @@ class TransferCallTool:
     def __init__(
         self,
         target_phone_number: Optional[str] = None,
+        target_sip_uri: Optional[str] = None,
         message: Optional[str] = None,
         interruptible: bool = True,
         active_turns: Optional[int] = None,
     ):
+        if target_phone_number is not None and target_sip_uri is not None:
+            raise ValueError(
+                "TransferCallTool accepts either target_phone_number or target_sip_uri, not both."
+            )
         # When pinned, validate/normalize once at construction so a bad config
         # fails fast rather than at call time.
         self.target_phone_number = (
             self._normalize_number(target_phone_number) if target_phone_number is not None else None
         )
+        self.target_sip_uri = self._validate_sip_uri(target_sip_uri) if target_sip_uri is not None else None
         self.message = message
         self.interruptible = interruptible
         # User turns this tool stays available before LlmAgent drops it (None = whole call).
@@ -352,30 +360,43 @@ class TransferCallTool:
             raise ValueError(f"TransferCallTool: target_phone_number {number!r} is not a valid phone number.")
         return phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.E164)
 
+    @staticmethod
+    def _validate_sip_uri(uri: str) -> str:
+        """Validate the minimum safe shape for a pinned SIP transfer destination."""
+        value = uri.strip()
+        if not _SIP_URI_PATTERN.fullmatch(value):
+            raise ValueError(f"TransferCallTool: target_sip_uri {uri!r} is not a SIP URI.")
+        return value
+
     def _create_function_tool(self) -> FunctionTool:
         """Create the underlying FunctionTool for the configured mode."""
         ft = (
-            self._create_fixed_number_tool()
-            if self.target_phone_number is not None
+            self._create_fixed_destination_tool()
+            if self.target_phone_number is not None or self.target_sip_uri is not None
             else self._create_dynamic_number_tool()
         )
         ft.active_turns = self.active_turns
         return ft
 
-    def _create_fixed_number_tool(self) -> FunctionTool:
-        """Pinned destination: no LLM-facing parameter; transfer to the preset number."""
+    def _create_fixed_destination_tool(self) -> FunctionTool:
+        """Pinned destination: no LLM-facing parameter; transfer to the preset target."""
         fixed_number = self.target_phone_number
+        fixed_sip_uri = self.target_sip_uri
 
         async def _transfer_call_fixed_impl(ctx: ToolEnv):
             """Transfer the call to the preconfigured destination number.
 
             Exposes no LLM-facing parameter: the destination is pinned at
             construction and hidden from the model, so the schema carries no
-            ``target_phone_number`` for it to supply.
+            destination for it to supply.
             """
             if self.message:
                 yield AgentSendText(text=self.message, interruptible=self.interruptible)
-            yield AgentTransferCall(target_phone_number=fixed_number, interruptible=self.interruptible)
+            yield AgentTransferCall(
+                target_phone_number=fixed_number,
+                target_sip_uri=fixed_sip_uri,
+                interruptible=self.interruptible,
+            )
 
         return construct_function_tool(
             _transfer_call_fixed_impl,
@@ -430,6 +451,7 @@ class TransferCallTool:
     def __call__(
         self,
         target_phone_number: Optional[str] = None,
+        target_sip_uri: Optional[str] = None,
         message: Optional[str] = None,
         interruptible: Optional[bool] = None,
         active_turns: Any = _INHERIT,
@@ -444,15 +466,26 @@ class TransferCallTool:
         Args:
             target_phone_number: Optional pinned destination (E.164). When set,
                 the number is hidden from the LLM and validated at construction.
+            target_sip_uri: Optional pinned SIP destination. When set, the URI is
+                hidden from the LLM and validated at construction.
             message: Optional message spoken before transfer.
             interruptible: Whether the transfer_call tool is interruptible.
             active_turns: User turns the tool stays available before the agent drops it
                 (``None`` = whole call). Omit to inherit the current value.
         """
+        resolved_phone_number = (
+            target_phone_number
+            if target_phone_number is not None
+            else (None if target_sip_uri is not None else self.target_phone_number)
+        )
+        resolved_sip_uri = (
+            target_sip_uri
+            if target_sip_uri is not None
+            else (None if target_phone_number is not None else self.target_sip_uri)
+        )
         return TransferCallTool(
-            target_phone_number=(
-                target_phone_number if target_phone_number is not None else self.target_phone_number
-            ),
+            target_phone_number=resolved_phone_number,
+            target_sip_uri=resolved_sip_uri,
             message=message if message is not None else self.message,
             interruptible=interruptible if interruptible is not None else self.interruptible,
             active_turns=self.active_turns if active_turns is _INHERIT else active_turns,
