@@ -333,7 +333,7 @@ class TransferCallTool:
         self.target_phone_number = (
             self._normalize_number(target_phone_number) if target_phone_number is not None else None
         )
-        self.target_sip_uri = self._validate_sip_uri(target_sip_uri) if target_sip_uri is not None else None
+        self.target_sip_uri = self._normalize_sip_uri(target_sip_uri) if target_sip_uri is not None else None
         self.message = message
         self.interruptible = interruptible
         # User turns this tool stays available before LlmAgent drops it (None = whole call).
@@ -361,8 +361,8 @@ class TransferCallTool:
         return phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.E164)
 
     @staticmethod
-    def _validate_sip_uri(uri: str) -> str:
-        """Validate the minimum safe shape for a pinned SIP transfer destination."""
+    def _normalize_sip_uri(uri: str) -> str:
+        """Strip surrounding whitespace and validate a pinned SIP transfer destination."""
         value = uri.strip()
         if not _SIP_URI_PATTERN.fullmatch(value):
             raise ValueError(f"TransferCallTool: target_sip_uri {uri!r} is not a SIP URI.")
