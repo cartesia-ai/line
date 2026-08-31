@@ -260,7 +260,9 @@ from line.llm_agent import passthrough_tool
 async def transfer_to_support(ctx, reason: Annotated[str, "Why they need support"]):
     """Transfer to support team."""
     yield AgentSendText(text="Transferring you to support now.")
-    yield AgentTransferCall(target_phone_number="+18005551234")
+    yield AgentTransferCall(
+        transfer_destination={"type": "phone", "value": "+18005551234"}
+    )
 
 agent = LlmAgent(tools=[transfer_to_support, end_call], ...)
 ```

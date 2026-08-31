@@ -1203,6 +1203,18 @@ class TestEndCallAndTransferCallMapping:
         assert result.target_phone_number is None
         assert result.target_sip_uri == "sip:7500@pbx.example.com"
 
+    def test_legacy_phone_transfer_constructor_is_upgraded(self):
+        result = self._map(AgentTransferCall(target_phone_number="+14155551234"))
+        assert isinstance(result, TransferOutput)
+        assert result.transfer_destination.type == "phone"
+        assert result.transfer_destination.value == "+14155551234"
+
+    def test_legacy_sip_transfer_constructor_is_upgraded(self):
+        result = self._map(AgentTransferCall(target_sip_uri="sip:7500@pbx.example.com"))
+        assert isinstance(result, TransferOutput)
+        assert result.transfer_destination.type == "sip_uri"
+        assert result.transfer_destination.value == "sip:7500@pbx.example.com"
+
 
 # ============================================================
 # AgentUpdateCall -> ConfigOutput mapping tests
