@@ -35,18 +35,9 @@ DtmfButton = Literal["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "*", "#"]
 # Logger for system tools
 logger = logging.getLogger(__name__)
 
-# Keep this grammar aligned with Product's SIPURI schema. It deliberately omits
-# credentials, URI parameters, and headers: transfer tools name destinations,
-# not general-purpose SIP requests.
-_SIP_HOST_LABEL = r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
-_SIP_IPV4_OCTET = r"(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9][0-9]?|0)"
-_SIP_PORT = r"(?:[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])"
-_SIP_HOST = (
-    rf"(?:{_SIP_IPV4_OCTET}(?:\.{_SIP_IPV4_OCTET}){{3}}|"
-    rf"(?![0-9]+(?:\.[0-9]+){{3}}(?::|$)){_SIP_HOST_LABEL}(?:\.{_SIP_HOST_LABEL})*)"
-)
-_SIP_USER = r"[A-Za-z0-9!$&'()*+,._~%=-]+"
-_SIP_URI_PATTERN = re.compile(rf"^sips?:{_SIP_USER}@{_SIP_HOST}(?::{_SIP_PORT})?$", re.IGNORECASE)
+# Keep this grammar aligned with Product's SIPURI schema. It deliberately checks
+# only the minimum `sip[s]:user@host` shape, not the complete SIP URI grammar.
+_SIP_URI_PATTERN = re.compile(r"^sips?:[^@\s]+@[^@\s]+$")
 
 # Sentinel for chainable ``__call__`` configs: distinguishes "argument omitted
 # (inherit the current value)" from "explicitly passed None". Needed for
@@ -373,7 +364,7 @@ class TransferCallTool:
 
     @staticmethod
     def _normalize_sip_uri(uri: str) -> str:
-        """Strip surrounding whitespace and validate a pinned SIP transfer destination."""
+        """Trim and validate a pinned SIP URI in the supported Product format."""
         value = uri.strip()
         if not _SIP_URI_PATTERN.fullmatch(value):
             raise ValueError(f"TransferCallTool: target_sip_uri {uri!r} is not a SIP URI.")
