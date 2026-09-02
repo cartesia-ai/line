@@ -143,7 +143,7 @@ from line.llm_agent import end_call, send_dtmf, transfer_call, web_search, http_
 |------|------|-------------|
 | `end_call` | passthrough | End the call |
 | `send_dtmf` | passthrough | Send DTMF tones (0-9, *, #) |
-| `transfer_call` | passthrough | Transfer to a phone number (E.164 format) |
+| `transfer_call` | passthrough | Transfer to an E.164 phone number, or a pinned SIP URI such as `sip:7500@pbx.example.com` |
 | `web_search` | loopback | Web search with native LLM support or DuckDuckGo fallback |
 | `http_server_tool` | factory | Create HTTP webhook tools from JSON schemas |
 | `agent_as_handoff` | handoff | Create a handoff tool from another agent |

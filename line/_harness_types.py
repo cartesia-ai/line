@@ -99,11 +99,31 @@ class ToolCallOutput(BaseModel):
     responding_to: Optional[str] = None
 
 
+TransferDestinationType = Literal["phone", "sip_uri"]
+
+
+class TransferDestination(BaseModel):
+    """One typed transfer target on the Line-to-harness wire protocol."""
+
+    type: TransferDestinationType
+    value: str
+
+
 class TransferOutput(BaseModel):
     type: Literal["transfer"] = "transfer"
-    target_phone_number: str
+    transfer_destination: TransferDestination
     responding_to: Optional[str] = None
     interruptible: bool = True
+
+    @property
+    def target_phone_number(self) -> Optional[str]:
+        """Compatibility accessor; consumers should use transfer_destination."""
+        return self.transfer_destination.value if self.transfer_destination.type == "phone" else None
+
+    @property
+    def target_sip_uri(self) -> Optional[str]:
+        """Compatibility accessor; consumers should use transfer_destination."""
+        return self.transfer_destination.value if self.transfer_destination.type == "sip_uri" else None
 
 
 class EndCallOutput(BaseModel):

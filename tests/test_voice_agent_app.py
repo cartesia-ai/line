@@ -1179,7 +1179,12 @@ class TestEndCallAndTransferCallMapping:
 
     def test_transfer_call_interruptible_false(self):
         """AgentTransferCall(interruptible=False) maps to TransferOutput(interruptible=False)."""
-        result = self._map(AgentTransferCall(target_phone_number="+14155551234", interruptible=False))
+        result = self._map(
+            AgentTransferCall(
+                target_phone_number="+14155551234",
+                interruptible=False,
+            )
+        )
         assert isinstance(result, TransferOutput)
         assert result.target_phone_number == "+14155551234"
         assert result.interruptible is False
@@ -1189,6 +1194,24 @@ class TestEndCallAndTransferCallMapping:
         result = self._map(AgentTransferCall(target_phone_number="+14155551234"))
         assert isinstance(result, TransferOutput)
         assert result.interruptible is True
+
+    def test_sip_transfer_forwards_sip_uri(self):
+        result = self._map(AgentTransferCall(target_sip_uri="sip:7500@pbx.example.com"))
+        assert isinstance(result, TransferOutput)
+        assert result.target_phone_number is None
+        assert result.target_sip_uri == "sip:7500@pbx.example.com"
+
+    def test_phone_transfer_is_typed_for_the_harness(self):
+        result = self._map(AgentTransferCall(target_phone_number="+14155551234"))
+        assert isinstance(result, TransferOutput)
+        assert result.transfer_destination.type == "phone"
+        assert result.transfer_destination.value == "+14155551234"
+
+    def test_sip_transfer_is_typed_for_the_harness(self):
+        result = self._map(AgentTransferCall(target_sip_uri="sip:7500@pbx.example.com"))
+        assert isinstance(result, TransferOutput)
+        assert result.transfer_destination.type == "sip_uri"
+        assert result.transfer_destination.value == "sip:7500@pbx.example.com"
 
 
 # ============================================================

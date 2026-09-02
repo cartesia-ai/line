@@ -219,6 +219,56 @@ async def test_transfer_call_valid_number(mock_ctx, anyio_backend):
     assert events[0].target_phone_number == "+14155551234"
 
 
+async def test_transfer_call_pinned_sip_uri(mock_ctx, anyio_backend):
+    tool = transfer_call(target_sip_uri="sip:7500@pbx.example.com")
+    events = await collect_events(tool.as_function_tool().func(mock_ctx))
+
+    assert len(events) == 1
+    assert isinstance(events[0], AgentTransferCall)
+    assert events[0].target_phone_number is None
+    assert events[0].target_sip_uri == "sip:7500@pbx.example.com"
+
+
+async def test_transfer_call_rejects_sip_uri_with_surrounding_whitespace(anyio_backend):
+    with pytest.raises(ValueError, match="not a SIP URI"):
+        transfer_call(target_sip_uri="  sip:7500@pbx.example.com  ")
+
+
+@pytest.mark.parametrize(
+    "sip_uri",
+    [
+        "7500@pbx.example.com",
+        "sip:@pbx.example.com",
+        "sip:7500@",
+        "SIP:7500@pbx.example.com",
+        "sips:7500@pbx.example.com invalid",
+    ],
+)
+async def test_transfer_call_rejects_invalid_sip_uris(sip_uri, anyio_backend):
+    with pytest.raises(ValueError, match="not a SIP URI"):
+        transfer_call(target_sip_uri=sip_uri)
+
+
+@pytest.mark.parametrize(
+    "sip_uri",
+    [
+        "sip:7500@999.999.999.999",
+        "sip:7500@pbx.example.com:99999",
+        "sip:7500@pbx.example.com;transport=tcp",
+    ],
+)
+async def test_transfer_call_accepts_basic_product_sip_uri_shape(sip_uri, anyio_backend):
+    assert transfer_call(target_sip_uri=sip_uri).target_sip_uri == sip_uri
+
+
+async def test_transfer_call_rejects_phone_and_sip_destinations(anyio_backend):
+    with pytest.raises(ValueError, match="either target_phone_number or target_sip_uri"):
+        transfer_call(
+            target_phone_number="+14155551234",
+            target_sip_uri="sip:7500@pbx.example.com",
+        )
+
+
 async def test_transfer_call_valid_number_with_message(mock_ctx, anyio_backend):
     """Test that a tool configured with message= sends it before transfer."""
     tool = transfer_call(message="Transferring you now")

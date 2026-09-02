@@ -44,6 +44,7 @@ from line._harness_types import (
     STTConfig,
     ToolCallOutput,
     TranscriptionInput,
+    TransferDestination,
     TransferOutput,
     TTSConfig,
     UserStateInput,
@@ -684,11 +685,20 @@ class ConversationRunner:
                 interruptible=event.interruptible,
             )
         if isinstance(event, AgentTransferCall):
+            destination = TransferDestination(
+                type="phone" if event.target_phone_number is not None else "sip_uri",
+                value=(
+                    event.target_phone_number
+                    if event.target_phone_number is not None
+                    else event.target_sip_uri
+                ),
+            )
             logger.info(
-                f"<- 📱 Transfer to: {event.target_phone_number} (interruptible={event.interruptible})"
+                f"<- 📱 Transfer to {destination.type}: {destination.value} "
+                f"(interruptible={event.interruptible})"
             )
             return TransferOutput(
-                target_phone_number=event.target_phone_number,
+                transfer_destination=destination,
                 responding_to=event.responding_to,
                 interruptible=event.interruptible,
             )
