@@ -335,7 +335,7 @@ class TransferCallTool:
         self.target_phone_number = (
             self._normalize_number(target_phone_number) if target_phone_number is not None else None
         )
-        self.target_sip_uri = self._normalize_sip_uri(target_sip_uri) if target_sip_uri is not None else None
+        self.target_sip_uri = self._validate_sip_uri(target_sip_uri) if target_sip_uri is not None else None
         self.message = message
         self.interruptible = interruptible
         # User turns this tool stays available before LlmAgent drops it (None = whole call).
@@ -363,12 +363,11 @@ class TransferCallTool:
         return phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.E164)
 
     @staticmethod
-    def _normalize_sip_uri(uri: str) -> str:
-        """Trim and validate a pinned SIP URI in the supported Product format."""
-        value = uri.strip()
-        if not _SIP_URI_PATTERN.fullmatch(value):
+    def _validate_sip_uri(uri: str) -> str:
+        """Validate a pinned SIP URI in the supported Product format."""
+        if not _SIP_URI_PATTERN.fullmatch(uri):
             raise ValueError(f"TransferCallTool: target_sip_uri {uri!r} is not a SIP URI.")
-        return value
+        return uri
 
     def _create_function_tool(self) -> FunctionTool:
         """Create the underlying FunctionTool for the configured mode."""

@@ -229,10 +229,9 @@ async def test_transfer_call_pinned_sip_uri(mock_ctx, anyio_backend):
     assert events[0].target_sip_uri == "sip:7500@pbx.example.com"
 
 
-async def test_transfer_call_pinned_sip_uri_is_trimmed(anyio_backend):
-    tool = transfer_call(target_sip_uri="  sip:7500@pbx.example.com  ")
-
-    assert tool.target_sip_uri == "sip:7500@pbx.example.com"
+async def test_transfer_call_rejects_sip_uri_with_surrounding_whitespace(anyio_backend):
+    with pytest.raises(ValueError, match="not a SIP URI"):
+        transfer_call(target_sip_uri="  sip:7500@pbx.example.com  ")
 
 
 @pytest.mark.parametrize(
