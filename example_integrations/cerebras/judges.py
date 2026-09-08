@@ -59,7 +59,7 @@ class BackgroundJudge:
                 max_tokens=50,
                 # Pass structured output schema via extra
                 extra={
-                    "reasoning_effort": JUDGE_REASONING_EFFORT,
+                    "extra_body": {"reasoning_effort": JUDGE_REASONING_EFFORT},
                     "response_format": {
                         "type": "json_schema",
                         "json_schema": {
