@@ -9,7 +9,9 @@ MODEL_ID = "cerebras/gpt-oss-120b"
 MODEL_ID_BACK = "cerebras/qwen-3.8-27b"
 
 # Model parameters
-MAX_OUTPUT_TOKENS = 100
+INTERVIEWER_REASONING_EFFORT = "low"
+JUDGE_REASONING_EFFORT = "none"
+MAX_OUTPUT_TOKENS = 512
 TEMPERATURE = 0.4
 
 # Introduction message spoken when the call starts
@@ -26,7 +28,7 @@ Do not tell the user about the tools you use. The tools are only for you.
 Speak naturally, like a real interviewer.
 Based on the conversation so far, respond to the user briefly and ask the next question.
 Do not communicate your reasoning steps or thinking process to the user.
-Be concise, like a coach. /no_think .
+Be concise, like a coach.
 """
 
 # Technical expertise judge prompt

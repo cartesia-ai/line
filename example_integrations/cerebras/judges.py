@@ -13,6 +13,7 @@ import os
 from typing import List, Optional
 
 from config import (
+    JUDGE_REASONING_EFFORT,
     MODEL_ID_BACK,
     PROMPT_AGENT1,
     PROMPT_AGENT2,
@@ -58,6 +59,7 @@ class BackgroundJudge:
                 max_tokens=50,
                 # Pass structured output schema via extra
                 extra={
+                    "reasoning_effort": JUDGE_REASONING_EFFORT,
                     "response_format": {
                         "type": "json_schema",
                         "json_schema": {
