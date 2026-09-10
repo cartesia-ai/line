@@ -383,7 +383,19 @@ class ConversationRunner:
 
     ######### Run Loop Methods #########
 
-    async def run(self):
+    async def run(self) -> None:
+        try:
+            await self._run()
+        finally:
+            # A disconnect, receive error, or cancellation must also stop a
+            # protected tool, even with custom run/cancel filters.
+            if self.env._dtmf.active:
+                await self._cancel_agent_task()
+            self.env._dtmf.close()
+        if self.agent_task:
+            await self.agent_task
+
+    async def _run(self) -> None:
         """
         Run the conversation loop.
 
@@ -439,11 +451,10 @@ class ConversationRunner:
                 await self.send_error(f"Error in websocket loop (likely message processing): {error_msg}")
                 await self.websocket.close()
 
-        if self.agent_task:
-            await self.agent_task
-
     async def _handle_event(self, turn_env: TurnEnv, event: InputEvent) -> None:
         """Apply run/cancel filters for a single event."""
+        if self.env._dtmf.handle_event(event):
+            return
         if self.run_filter(event):
             await self._start_agent_task(turn_env, event)
         elif self.cancel_filter(event):

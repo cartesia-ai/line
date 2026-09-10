@@ -445,6 +445,14 @@ async def my_tool(ctx: ToolEnv, ...) -> str:
     print(ctx.turn_env)
 ```
 
+### Collecting DTMF input
+
+Use `@dtmf_tool` to collect keypad input until `#` or a two-second inter-digit
+timeout, then invoke an async callback. It handles the prompt and protects the
+collection and callback from speech interruption. See the
+[keypad input example](../../README.md#collect-keypad-input) for usage and timeout
+settings.
+
 ### Long-Running Tools
 
 By default, tool calls are terminated when the agent is interrupted. If you have a tool that takes a long time to complete, use `is_background=True` to keep it running:
