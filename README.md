@@ -227,6 +227,65 @@ search_orders = http_server_tool(
 {"ok": false, "status": null, "error": "Request timed out after 5.0s."}
 ```
 
+### Collect keypad input
+
+Use `@dtmf_tool` for a step such as collecting and verifying a PIN. The SDK
+speaks the prompt, buffers the caller's key presses, and calls your async
+callback when the caller presses `#` or pauses for two seconds.
+
+```python
+from line.llm_agent import LlmAgent, ToolEnv, dtmf_tool
+
+@dtmf_tool(
+    prompt="Please enter your PIN, then press pound or wait two seconds.",
+    inter_digit_timeout=2.0,
+    finish_on_key="#",
+)
+async def verify_pin(ctx: ToolEnv, digits: str):
+    """Collect and verify the caller's PIN."""
+    if len(digits) != 4 or not digits.isdigit():
+        return {"status": "invalid_format"}
+    return await verify_pin_with_backend(digits)  # Your application's verification function.
+
+# Include verify_pin in your agent's tools alongside its other tools.
+agent = LlmAgent(model="gpt-4o", api_key="...", tools=[verify_pin])
+```
+
+The LLM invokes `verify_pin()` without arguments. The SDK supplies `digits`,
+including any leading zeroes, and excludes the terminator. The tool owns its
+spoken prompt, so the agent should call it when ready to collect input.
+
+Collection is active before the prompt is sent. Each key resets the inter-digit
+timer; the two-second timeout starts with the first key, not when the prompt
+starts. Each completed collection invokes the callback once. The callback's
+return value becomes the tool result for the LLM.
+
+During collection and verification, any user speech cannot cancel the
+callback or start another agent run. After the result is recorded, the SDK lets
+any overlapping speech turn end before generating the next reply.
+
+Additional optional settings:
+
+| Setting | Default | Behavior |
+|---|---|---|
+| `first_digit_timeout` | `15.0` seconds | Maximum wait for the first key after sending the prompt. |
+| `max_digits` | `64` | Input beyond this limit fails without submitting a truncated value. |
+| `callback_timeout` | `30.0` seconds | Cancels a callback that takes too long. |
+
+No input, including pressing `#` with an empty buffer, returns
+`{"status": "no_input"}` without invoking the callback. Too many digits returns
+`{"status": "too_many_digits"}`. A callback timeout returns
+`{"status": "callback_timeout"}`. Handle PIN length and other application rules
+in the callback. Each invocation starts with an empty buffer, and only one
+collection can be active per call.
+
+The tool description tells the LLM to offer a fresh entry for `no_input` or
+`too_many_digits`. On `callback_timeout`, the processing outcome is unknown;
+the model is instructed not to claim success or automatically retry verification.
+
+SDK DTMF receipt logs omit button values. The original DTMF events remain in
+event history.
+
 ### Loopback Tools — Fetch Data & Call APIs
 
 Results go back to the LLM for a natural language response:

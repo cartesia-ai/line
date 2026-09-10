@@ -10,6 +10,7 @@ from line.llm_agent.tools.decorators import (
     loopback_tool,
     passthrough_tool,
 )
+from line.llm_agent.tools.dtmf import dtmf_tool
 
 # System tools
 from line.llm_agent.tools.system import (
@@ -41,6 +42,7 @@ __all__ = [
     "loopback_tool",
     "passthrough_tool",
     "handoff_tool",
+    "dtmf_tool",
     # System tools
     "DtmfButton",
     "WebSearchTool",

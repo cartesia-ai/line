@@ -7,8 +7,12 @@ loopback, passthrough, and handoff tools.
 uv run pytest tests/test_llm_agent.py -v
 """
 
+import asyncio
+from contextlib import asynccontextmanager, suppress
 from typing import Annotated, List, Optional
+from unittest.mock import AsyncMock, MagicMock
 
+from fastapi import WebSocket, WebSocketDisconnect
 import pytest
 
 from line.agent import AgentEnv, TurnEnv
@@ -22,7 +26,10 @@ from line.events import (
     CallStarted,
     LogMetric,
     OutputEvent,
+    UserDtmfSent,
     UserTextSent,
+    UserTurnEnded,
+    UserTurnStarted,
 )
 from line.llm_agent.config import LlmConfig
 from line.llm_agent.llm_agent import LlmAgent
@@ -35,8 +42,10 @@ from line.llm_agent.provider import (
     parse_model_id,
 )
 from line.llm_agent.tools.decorators import handoff_tool, loopback_tool, passthrough_tool
+from line.llm_agent.tools.dtmf import dtmf_tool
 from line.llm_agent.tools.system import web_search
 from line.llm_agent.tools.utils import FunctionTool
+from line.voice_agent_app import ConversationRunner
 
 # Use anyio for async test support with asyncio backend only (trio not installed)
 pytestmark = [pytest.mark.anyio, pytest.mark.parametrize("anyio_backend", ["asyncio"])]
@@ -2403,3 +2412,148 @@ async def test_background_result_during_inflight_generation_anchors_after_stream
         "Reaction call would be skipped by _normalize_messages "
         "(conversation must not end with an assistant message)"
     )
+
+
+@asynccontextmanager
+async def dtmf_conversation(tool, custom_filters=False):
+    """Run the real SDK tool loop and websocket runner against a scripted LLM."""
+    agent, llm = create_agent_with_mock(
+        responses=[
+            [StreamChunk(tool_calls=[ToolCall(id="pin", name=tool.name, arguments="{}", is_complete=True)])],
+            [StreamChunk(text="Your PIN is verified.", is_final=True)],
+            [StreamChunk(text="You're welcome.", is_final=True)],
+        ],
+        tools=[tool],
+        config=LlmConfig(introduction=""),
+    )
+    incoming = asyncio.Queue()
+    outgoing = asyncio.Queue()
+
+    async def receive():
+        message = await incoming.get()
+        if isinstance(message, Exception):
+            raise message
+        return message
+
+    async def next_output(kind, **fields):
+        while True:
+            output = await asyncio.wait_for(outgoing.get(), timeout=2)
+            if output["type"] == kind and all(output.get(k) == v for k, v in fields.items()):
+                return output
+
+    ws = MagicMock(spec=WebSocket)
+    ws.receive_json = receive
+    ws.send_json = outgoing.put
+    ws.close = AsyncMock()
+    # In addition to defaults, try filters that normally run on every key and
+    # cancel on every transcription. Deliberately omit CallEnded to test cleanup.
+    spec = (
+        (agent, [CallStarted, UserTurnEnded, UserDtmfSent], [UserTurnStarted, UserTextSent])
+        if custom_filters
+        else agent
+    )
+    runner = ConversationRunner(ws, spec, AgentEnv())
+    task = asyncio.create_task(runner.run())
+    try:
+        # Wait for initialization before sending the turn that invokes the tool.
+        await next_output("log_metric", name="agent_turn_ms")
+        incoming.put_nowait({"type": "user_state", "value": "speaking"})
+        incoming.put_nowait({"type": "message", "content": "I'd like to verify my PIN."})
+        incoming.put_nowait({"type": "user_state", "value": "idle"})
+        await next_output("message", content="Enter your PIN, then press pound or wait.")
+        yield runner, task, incoming, next_output, llm
+    finally:
+        if not task.done():
+            incoming.put_nowait(WebSocketDisconnect())
+        with suppress(asyncio.CancelledError):
+            await asyncio.wait_for(task, timeout=2)
+        await agent.cleanup()
+
+
+@pytest.mark.parametrize("finish_on_pound", [True, False])
+@pytest.mark.parametrize("custom_filters", [True, False])
+async def test_dtmf_tool_through_websocket_runner(finish_on_pound, custom_filters):
+    backend_started = asyncio.Event()
+    backend_release = asyncio.Event()
+    submitted = []
+
+    @dtmf_tool(prompt="Enter your PIN, then press pound or wait.", inter_digit_timeout=0.02)
+    async def verify_pin(ctx, digits):
+        submitted.append(digits)
+        backend_started.set()
+        await backend_release.wait()
+        return {"status": "verified"}
+
+    async with dtmf_conversation(verify_pin, custom_filters) as (runner, task, incoming, output, llm):
+        for digit in "0123":
+            incoming.put_nowait({"type": "dtmf", "button": digit})
+        incoming.put_nowait({"type": "user_state", "value": "speaking"})
+        incoming.put_nowait({"type": "message", "content": "Done."})
+        if finish_on_pound:
+            incoming.put_nowait({"type": "dtmf", "button": "#"})
+        await asyncio.wait_for(backend_started.wait(), timeout=2)
+        # More keys and a completed speech turn cannot restart the callback.
+        incoming.put_nowait({"type": "dtmf", "button": "#"})
+        incoming.put_nowait({"type": "user_state", "value": "idle"})
+        incoming.put_nowait({"type": "user_state", "value": "speaking"})
+        incoming.put_nowait({"type": "message", "content": "Just sent it."})
+        # Drain input before releasing the callback without depending on sleeps.
+        while not incoming.empty():
+            await asyncio.sleep(0)
+        backend_release.set()
+        returned = await output("tool_call", result='{"status": "verified"}')
+        assert returned["arguments"] == {}
+        assert submitted == ["0123"]
+        assert llm._call_count == 1
+        assert runner.env._dtmf.active
+        # Only after the overlapping speech ends can the next LLM reply begin.
+        incoming.put_nowait({"type": "user_state", "value": "idle"})
+        await output("message", content="Your PIN is verified.")
+        assert llm._call_count == 2
+        assert not runner.env._dtmf.active
+        messages = llm._recorded_messages[1]
+        assert any(m.role == "tool" and "verified" in m.content for m in messages)
+        assert not any(m.content and "0123" in m.content for m in messages)
+        incoming.put_nowait({"type": "user_state", "value": "speaking"})
+        incoming.put_nowait({"type": "message", "content": "Thank you."})
+        incoming.put_nowait({"type": "user_state", "value": "idle"})
+        await output("message", content="You're welcome.")
+        assert llm._call_count == 3
+        assert submitted == ["0123"]
+        assert not task.done()
+
+
+@pytest.mark.parametrize("phase", ["collection", "callback", "overlapping_speech"])
+@pytest.mark.parametrize("shutdown", ["disconnect", "receive_error", "cancel"])
+async def test_dtmf_runner_shutdown_cleans_up(phase, shutdown):
+    backend_started = asyncio.Event()
+    backend_cancelled = asyncio.Event()
+
+    @dtmf_tool(prompt="Enter your PIN, then press pound or wait.")
+    async def verify_pin(ctx, digits):
+        backend_started.set()
+        if phase == "callback":
+            try:
+                await asyncio.Future()
+            finally:
+                backend_cancelled.set()
+        return {"status": "verified"}
+
+    async with dtmf_conversation(verify_pin, custom_filters=True) as (runner, task, incoming, output, llm):
+        if phase != "collection":
+            if phase == "overlapping_speech":
+                incoming.put_nowait({"type": "user_state", "value": "speaking"})
+            for digit in "1234#":
+                incoming.put_nowait({"type": "dtmf", "button": digit})
+            await asyncio.wait_for(backend_started.wait(), timeout=2)
+            if phase == "overlapping_speech":
+                await output("tool_call", result='{"status": "verified"}')
+        if shutdown == "cancel":
+            task.cancel()
+        else:
+            incoming.put_nowait(WebSocketDisconnect() if shutdown == "disconnect" else RuntimeError("broken"))
+        with suppress(asyncio.CancelledError):
+            await asyncio.wait_for(task, timeout=2)
+        assert not runner.env._dtmf.active
+        assert backend_cancelled.is_set() == (phase == "callback")
+        assert llm._call_count == 1
