@@ -28,16 +28,18 @@ def dtmf_tool(
     a separate timeout, measured from when the prompt is sent.
 
     Speech cannot cancel or restart the agent during collection or the callback.
-    A speech turn that overlaps this step is consumed through its end. Hangup
-    still cancels the operation. Only one collection can be active per call.
+    A speech turn that overlaps this step is consumed through its end, even if
+    another event cancels collection. Hangup still cancels the operation. Only
+    one collection can be active per call.
 
     Empty input returns ``{"status": "no_input"}``; exceeding ``max_digits``
     returns ``{"status": "too_many_digits"}``. Neither invokes the callback.
     Callback timeout returns ``{"status": "callback_timeout"}``. Otherwise the
     callback's return value becomes the tool result for the LLM.
 
-    Requires a transport that delivers DTMF events to VoiceAgentApp. This helper
-    does not redact recordings, transcripts, or logs.
+    Requires a transport that delivers DTMF events to VoiceAgentApp. The SDK's
+    DTMF receipt log omits button values, but events retain them. This helper
+    does not provide general recording, transcript, or log redaction.
     """
     if not prompt.strip():
         raise ValueError("prompt must not be empty")
@@ -91,7 +93,10 @@ def dtmf_tool(
         description = (func.__doc__ or "").strip()
         description += (
             " Collect keypad input from the caller and process it. "
-            "This tool speaks its own prompt; call it without asking for digits first."
+            "This tool speaks its own prompt; call it without asking for digits first. "
+            "On no_input or too_many_digits, the callback was not run; offer a fresh entry attempt. "
+            "On callback_timeout, the processing outcome is unknown; do not claim success "
+            "or automatically retry verification."
         )
         return FunctionTool(name=func.__name__, description=description.strip(), func=collect, parameters={})
 

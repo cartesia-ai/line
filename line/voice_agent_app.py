@@ -495,13 +495,17 @@ class ConversationRunner:
 
     async def _cancel_agent_task(self) -> None:
         """Cancel any running agent iterable task."""
-        if self.agent_task and not self.agent_task.done():
-            self.agent_task.cancel()
-            try:
-                await self.agent_task
-            except asyncio.CancelledError:
-                pass
-        self.agent_task = None
+        try:
+            if self.agent_task and not self.agent_task.done():
+                self.agent_task.cancel()
+                try:
+                    await self.agent_task
+                except asyncio.CancelledError:
+                    pass
+        finally:
+            # A tool paused at a yield may not finalize with its consumer task.
+            self.env._dtmf.cancel()
+            self.agent_task = None
 
     async def send_error(self, error: str):
         """Send an error message via WebSocket."""
@@ -614,7 +618,7 @@ class ConversationRunner:
             logger.info("-> 🧑🔊 User started speaking")
         elif isinstance(processed_event, UserDtmfSent):
             event = UserDtmfSent(history=processed_history, **base_data)
-            logger.info(f"-> 🧑🔔 User DTMF received: {event.button}")
+            logger.info("-> 🧑🔔 User DTMF received")
         elif isinstance(processed_event, UserTextSent):
             event = UserTextSent(history=processed_history, **base_data)
             logger.info(f'-> 🧑🗣️ User said: "{event.content}"')

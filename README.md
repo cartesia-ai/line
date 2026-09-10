@@ -279,6 +279,12 @@ No input, including pressing `#` with an empty buffer, returns
 in the callback. Each invocation starts with an empty buffer, and only one
 collection can be active per call.
 
+The tool description tells the LLM to offer a fresh entry for `no_input` or
+`too_many_digits`. On `callback_timeout`, the processing outcome is unknown;
+the model is instructed not to claim success or automatically retry verification.
+
+SDK DTMF receipt logs omit button values. The original DTMF events remain in
+event history.
 
 ### Loopback Tools — Fetch Data & Call APIs
 

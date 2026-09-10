@@ -4,14 +4,17 @@ import asyncio
 from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Callable
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
+from fastapi import WebSocket
+from loguru import logger
 import pytest
 
 from line.agent import AgentEnv, TurnEnv
 from line.events import AgentSendText, UserDtmfSent, UserTextSent, UserTurnEnded, UserTurnStarted
 from line.llm_agent import ToolEnv, dtmf_tool
 from line.llm_agent.schema_converter import function_tool_to_litellm
+from line.voice_agent_app import ConversationRunner
 
 
 @dataclass
@@ -93,6 +96,13 @@ def test_schema_has_no_model_supplied_digits():
     assert schema["parameters"]["properties"] == {}
     assert schema["parameters"].get("required", []) == []
     assert "Verify the caller's PIN" in schema["description"]
+
+
+def test_schema_describes_collection_failures():
+    tool, _ = make_tool()
+    description = function_tool_to_litellm(tool)["function"]["description"]
+    for status in ("no_input", "too_many_digits", "callback_timeout"):
+        assert status in description
 
 
 async def test_pound_captures_input_before_prompt_is_consumed(clock):
@@ -319,3 +329,90 @@ async def test_callback_error_waits_for_speech_and_releases_guard(clock):
     with pytest.raises(ValueError, match="Verification unavailable"):
         await result
     assert not env._dtmf.active
+
+
+@pytest.mark.parametrize("phase", ["prompt", "collection", "callback"])
+async def test_runner_cancellation_allows_retry_before_old_generator_closes(clock, phase):
+    env = AgentEnv()
+    prompt_sent = asyncio.Event()
+    callback_started = asyncio.Event()
+    callback_cancelled = asyncio.Event()
+
+    @dtmf_tool(prompt="Enter your PIN.")
+    async def verify_pin(ctx: ToolEnv, digits: str):
+        if digits == "11":
+            callback_started.set()
+            try:
+                await asyncio.Future()
+            finally:
+                callback_cancelled.set()
+        return {"status": "verified", "length": len(digits)}
+
+    # Retain the old tool generator to exercise delayed finalization explicitly.
+    old_stream = verify_pin.func(ToolEnv(TurnEnv(env)))
+    retry = None
+
+    async def agent(turn_env, event):
+        async for output in old_stream:
+            yield output
+
+    async def send(_):
+        prompt_sent.set()
+        if phase == "prompt":
+            await asyncio.Future()
+
+    ws = MagicMock(spec=WebSocket)
+    ws.send_json = send
+    runner = ConversationRunner(ws, agent, env)
+    try:
+        await runner._handle_event(TurnEnv(env), UserTurnEnded())
+        await asyncio.wait_for(prompt_sent.wait(), timeout=1)
+        feed(env, "11#" if phase == "callback" else "1")
+        if phase == "callback":
+            await asyncio.wait_for(callback_started.wait(), timeout=1)
+        assert env._dtmf.handle_event(UserTurnStarted())
+        await runner._cancel_agent_task()
+        assert not env._dtmf.active
+        assert all(timer.cancelled for timer in clock.timers)
+        assert callback_cancelled.is_set() == (phase == "callback")
+        # Cancellation still consumes the old "done" turn, not the next turn.
+        assert env._dtmf.handle_event(UserTextSent(content="done"))
+        assert env._dtmf.handle_event(UserTurnEnded())
+        assert not env._dtmf.handle_event(UserTurnStarted())
+        assert not env._dtmf.handle_event(UserTurnEnded())
+
+        _, retry = await start(verify_pin, env)
+        await old_stream.aclose()
+        assert env._dtmf.active
+        feed(env, "22#")
+        assert await anext(retry) == {"status": "verified", "length": 2}
+        await finish(retry)
+        assert not env._dtmf.active
+    finally:
+        await runner._cancel_agent_task()
+        await old_stream.aclose()
+        if retry is not None:
+            await retry.aclose()
+
+
+@pytest.mark.parametrize("collecting", [False, True])
+async def test_dtmf_logs_omit_buttons_but_preserve_events(clock, collecting):
+    tool, _ = make_tool()
+    env = AgentEnv()
+    stream = None
+    if collecting:
+        _, stream = await start(tool, env)
+    runner = ConversationRunner(MagicMock(spec=WebSocket), AsyncMock(), env)
+    messages = []
+    sink = logger.add(messages.append, format="{message}")
+    try:
+        for button in "0123456789*#":
+            event, runner.history = runner._process_input_event(runner.history, UserDtmfSent(button=button))
+            assert event.button == button
+            assert event.history[-1].button == button
+        assert len(messages) == 12
+        assert all(str(message).strip() == "-> 🧑🔔 User DTMF received" for message in messages)
+    finally:
+        logger.remove(sink)
+        if stream is not None:
+            await stream.aclose()

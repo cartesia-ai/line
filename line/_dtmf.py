@@ -69,7 +69,14 @@ class _DtmfInput:
         try:
             yield capture
         finally:
-            capture.close()
+            # A cancelled generator may close after a new collection starts.
+            if self._capture is capture:
+                self.cancel()
+
+    def cancel(self) -> None:
+        """Release the collector while preserving the overlapping speech turn."""
+        if self._capture is not None:
+            self._capture.close()
             self._capture = None
 
     def handle_event(self, event: InputEvent) -> bool:
@@ -97,8 +104,6 @@ class _DtmfInput:
             await self._speech_idle.wait()
 
     def close(self) -> None:
-        if self._capture is not None:
-            self._capture.close()
-        self._capture = None
+        self.cancel()
         self._suppress_turn = False
         self._speech_idle.set()
