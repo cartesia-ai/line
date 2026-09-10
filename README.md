@@ -260,10 +260,9 @@ timer; the two-second timeout starts with the first key, not when the prompt
 starts. Each completed collection invokes the callback once. The callback's
 return value becomes the tool result for the LLM.
 
-During collection and verification, speech such as "done" cannot cancel the
+During collection and verification, any user speech cannot cancel the
 callback or start another agent run. After the result is recorded, the SDK lets
-any overlapping speech turn end before generating the next reply. Normal speech
-interruption resumes afterward. A hangup still cancels the operation.
+any overlapping speech turn end before generating the next reply.
 
 Additional optional settings:
 
@@ -280,8 +279,6 @@ No input, including pressing `#` with an empty buffer, returns
 in the callback. Each invocation starts with an empty buffer, and only one
 collection can be active per call.
 
-This tool requires `VoiceAgentApp` and a transport that delivers DTMF events. It
-does not add transport support or redact recordings, transcripts, or logs.
 
 ### Loopback Tools — Fetch Data & Call APIs
 
