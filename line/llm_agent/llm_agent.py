@@ -5,6 +5,7 @@ See README.md for examples and documentation.
 """
 
 import asyncio
+from dataclasses import dataclass
 import inspect
 import json
 import time
@@ -57,6 +58,7 @@ from line.llm_agent.tools.utils import (
     ClassTool,
     FunctionTool,
     ToolEnv,
+    ToolResult,
     ToolType,
     _merge_tools,
     _normalize_tools,
@@ -70,6 +72,13 @@ _OUTPUT_EVENT_TYPES: Tuple[type, ...] = get_args(OutputEvent)
 # Type alias for tools that can be passed to LlmAgent.
 # Plain callables are automatically wrapped via the @tool decorator.
 ToolSpec = Union[FunctionTool, WebSearchTool, ClassTool, Callable]
+
+
+@dataclass(frozen=True)
+class _BackgroundToolResult:
+    called: AgentToolCalled
+    returned: AgentToolReturned
+    run_llm: bool = True
 
 
 class LlmAgent:
@@ -136,10 +145,8 @@ class LlmAgent:
         self._introduction_sent = False
         self.history = History()
         self._handoff_target: Optional[AgentCallable] = None  # Normalized process function
-        # Queue for events from backgrounded tools that need to trigger loopback
-        self._background_event_queue: BackgroundQueue[Tuple[AgentToolCalled, AgentToolReturned]] = (
-            BackgroundQueue()
-        )
+        # Results enter history when drained, with loopback controlled per result.
+        self._background_event_queue: BackgroundQueue[_BackgroundToolResult] = BackgroundQueue()
         # Cache for thought signatures (Gemini 3+ models)
         # Maps tool_call_id -> thought_signature
         self._tool_signatures: Dict[str, str] = {}
@@ -149,7 +156,7 @@ class LlmAgent:
 
     def _get_background_event_queue(
         self,
-    ) -> "BackgroundQueue[Tuple[AgentToolCalled, AgentToolReturned]]":
+    ) -> "BackgroundQueue[_BackgroundToolResult]":
         return self._background_event_queue
 
     def set_tools(self, tools: List[ToolSpec]) -> None:
@@ -315,20 +322,21 @@ class LlmAgent:
             # These events were produced since the last iteration (or from previous process() invocations)
             if is_first_iteration or should_loopback:
                 # Drain any immediately available events (non-blocking)
-                while (pair := self._get_background_event_queue().get_nowait()) is not None:
-                    called_evt, returned_evt = self._anchor_background_pair(pair)
+                while (result := self._get_background_event_queue().get_nowait()) is not None:
+                    called_evt, returned_evt = self._anchor_background_result(result)
                     yield called_evt
                     yield returned_evt
             else:
-                # Otherwise wait for either: all sources complete OR new event arrives
-                result = await self._get_background_event_queue().get()
-                if result is None:
-                    # All background sources completed with no more events
-                    # this generation process is completed - exit loop
-                    break
-                called_evt, returned_evt = self._anchor_background_pair(result)
-                yield called_evt
-                yield returned_evt
+                # Record silent updates without spending a generation iteration.
+                # Keep waiting until a result requests inference or all tools finish.
+                while not should_loopback:
+                    result = await self._get_background_event_queue().get()
+                    if result is None:
+                        return
+                    called_evt, returned_evt = self._anchor_background_result(result)
+                    yield called_evt
+                    yield returned_evt
+                    should_loopback = result.run_llm
 
             is_first_iteration = False
             should_loopback = False
@@ -409,7 +417,7 @@ class LlmAgent:
                 # inside _execute_backgroundable_tool, not here
                 if tool.tool_type == ToolType.GENERAL and tool.is_background:
                     # Backgroundable tool: run in a shielded task that survives cancellation
-                    # Each yielded value triggers a loopback with AgentToolCalled/AgentToolReturned pair
+                    # Each result records an event pair and may request loopback.
                     self._execute_backgroundable_tool(
                         normalized_func, ctx, tool_args, tc.id, tc.name, triggering_event_id
                     )
@@ -418,7 +426,7 @@ class LlmAgent:
                 if tool.tool_type == ToolType.GENERAL:
                     # Branch per yielded value:
                     #   - OutputEvent → emit directly to the user (passthrough)
-                    #   - raw value  → wrap as a synthetic tool result and trigger loopback
+                    #   - other value → record a result; ToolResult controls loopback
                     n = 0
                     yielded_raw = False
                     closed = False
@@ -430,10 +438,13 @@ class LlmAgent:
                                     yield value
                                 else:
                                     yielded_raw = True
-                                    should_loopback = True
+                                    tool_result = (
+                                        value if isinstance(value, ToolResult) else ToolResult(value)
+                                    )
+                                    should_loopback = should_loopback or tool_result.run_llm
                                     call_id = f"{tc.id}-{n}"
                                     tool_called_output, tool_returned_output = _construct_tool_events(
-                                        call_id, tc.name, tool_args, value
+                                        call_id, tc.name, tool_args, tool_result.value
                                     )
                                     self.history._append_local(tool_called_output)
                                     self.history._append_local(tool_returned_output)
@@ -659,8 +670,8 @@ class LlmAgent:
                 )
         return messages
 
-    def _anchor_background_pair(
-        self, pair: Tuple[AgentToolCalled, AgentToolReturned]
+    def _anchor_background_result(
+        self, result: _BackgroundToolResult
     ) -> Tuple[AgentToolCalled, AgentToolReturned]:
         """Append a drained background tool event pair to local history.
 
@@ -671,24 +682,23 @@ class LlmAgent:
         history would end with the agent's own speech and the loopback reaction
         call would be skipped by the "conversation cannot end with assistant
         message" validation — silently dropping the tool result. Anchoring at
-        drain time guarantees the pair is the last thing in history when the
-        reaction LLM call that immediately follows builds its messages.
+        drain time preserves this ordering for results that request a reaction.
+        Silent results use the same ordering but do not request an LLM call.
 
         Both appends happen synchronously before the events are yielded
         downstream, so a cancellation delivered at the yield cannot leave a
         dequeued pair missing from history.
 
         Args:
-            pair: The (AgentToolCalled, AgentToolReturned) pair popped from the
-                background event queue.
+            result: The result popped from the background event queue.
 
         Returns:
-            The same pair, for convenient unpacking at the call site.
+            The recorded event pair, for yielding to the caller.
         """
-        called_evt, returned_evt = pair
+        called_evt, returned_evt = result.called, result.returned
         self.history._append_local(called_evt)
         self.history._append_local(returned_evt)
-        return pair
+        return called_evt, returned_evt
 
     def _execute_backgroundable_tool(
         self,
@@ -708,30 +718,33 @@ class LlmAgent:
         The source is subscribed to the background queue, which shields it
         from cancellation. Events are only queued here — they enter local
         history when a generation loop drains them (see
-        _anchor_background_pair), so they land after anything the agent
+        _anchor_background_result), so they land after anything the agent
         streamed while the result was waiting in the queue.
+
+        Plain values request loopback. ToolResult carries an explicit choice.
 
         responding_to is set to the triggering_event_id (captured at subscription
         time) so background results reference the event that originally triggered
         the tool, not whatever event happens to be processing when results are drained.
         """
 
-        async def generate_events() -> AsyncIterable[Tuple[AgentToolCalled, AgentToolReturned]]:
+        async def generate_events() -> AsyncIterable[_BackgroundToolResult]:
             n = 0
             try:
                 async for value in normalized_func(ctx, **tool_args):
+                    result = value if isinstance(value, ToolResult) else ToolResult(value)
                     call_id = f"{tc_id}-{n}"
-                    called, returned = _construct_tool_events(call_id, tc_name, tool_args, value)
+                    called, returned = _construct_tool_events(call_id, tc_name, tool_args, result.value)
                     called.responding_to = triggering_event_id
                     returned.responding_to = triggering_event_id
-                    yield (called, returned)
+                    yield _BackgroundToolResult(called, returned, result.run_llm)
                     n += 1
             except Exception as e:
                 logger.error(f"Error in Tool Call {tc_name}: {e}\n{traceback.format_exc(limit=-10)}")
                 called, returned = _construct_tool_events(f"{tc_id}-{n}", tc_name, tool_args, f"error: {e}")
                 called.responding_to = triggering_event_id
                 returned.responding_to = triggering_event_id
-                yield (called, returned)
+                yield _BackgroundToolResult(called, returned)
 
         self._get_background_event_queue().subscribe(generate_events())
 

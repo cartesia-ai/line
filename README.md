@@ -321,6 +321,32 @@ async def search_database(ctx, query: Annotated[str, "Search query"]) -> str:
     return results
 ```
 
+To record progress without triggering an extra LLM response, yield
+`ToolResult(value, run_llm=False)`:
+
+```python
+from typing import Annotated
+from line.llm_agent import ToolResult, loopback_tool
+
+@loopback_tool(is_background=True)
+async def verify_submission(ctx, submission_id: Annotated[str, "The submission to verify"]):
+    """Verify a submission and report the outcome."""
+    yield ToolResult({"status": "in_progress"}, run_llm=False)
+    result = await verify_with_backend(submission_id)
+    yield result
+```
+
+The progress value enters conversation history and is reported as a tool result,
+without requesting inference. If the caller speaks while verification runs, the
+next LLM turn sees that progress. The final plain value triggers a response as
+usual. `verify_with_backend` is your application's verification function.
+
+Plain values and `ToolResult(value)` keep the existing loopback behavior. The
+wrapper also works for foreground tools, but does not change whether a tool can
+be cancelled. `run_llm=False` controls only the response to that result: other
+tools and user turns can still trigger inference. It does not mark a result as
+final or prevent duplicate backend operations.
+
 ---
 
 ## Context Management

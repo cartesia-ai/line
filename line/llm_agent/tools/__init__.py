@@ -32,6 +32,7 @@ from line.llm_agent.tools.utils import (
     ParameterInfo,
     PassthroughToolFn,
     ToolEnv,
+    ToolResult,
     ToolType,
     construct_function_tool,
 )
@@ -54,6 +55,7 @@ __all__ = [
     # Utility types
     "ToolType",
     "ToolEnv",
+    "ToolResult",
     "LoopbackToolFn",
     "PassthroughToolFn",
     "HandoffToolFn",
