@@ -1220,10 +1220,24 @@ class TestUpdateCallMapping:
         assert result.stt.language == "multilingual"
         assert result.language == "multilingual"
 
+    def test_normalization_forwarded_on_tts(self):
+        """normalization rides on the TTS config only, verbatim."""
+        result = self._map(AgentUpdateCall(normalization="off"))
+        assert result.tts.normalization == "off"
+        assert result.stt is None
+
+    def test_normalization_locale_with_language(self):
+        """A locale-pinned normalizer travels alongside a language switch."""
+        result = self._map(AgentUpdateCall(language="en", normalization="en-IN"))
+        assert result.tts.language == "en"
+        assert result.tts.normalization == "en-IN"
+        assert result.stt.language == "en"
+
     def test_all_none_defaults(self):
         """No fields set -> TTS language None, STT config None (no change)."""
         result = self._map(AgentUpdateCall())
         assert result.tts.language is None
+        assert result.tts.normalization is None
         assert result.stt is None
 
 

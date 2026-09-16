@@ -723,13 +723,14 @@ class ConversationRunner:
             logger.info(
                 f"<- ⚙️ Update call: voice_id={event.voice_id}, "
                 f"pronunciation_dict_id={event.pronunciation_dict_id}, "
-                f"language={event.language}"
+                f"language={event.language}, normalization={event.normalization}"
             )
             return ConfigOutput(
                 tts=TTSConfig(
                     voice_id=event.voice_id,
                     pronunciation_dict_id=event.pronunciation_dict_id,
                     language=event.language,
+                    normalization=event.normalization,
                 ),
                 stt=STTConfig(language=event.language) if event.language is not None else None,
                 language=event.language,
