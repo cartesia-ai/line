@@ -160,6 +160,22 @@ class _RealtimeProvider:
         self._history = []
         await self._ensure_connected()
 
+    async def _discard_connection(self) -> None:
+        """Close the socket and forget its history after a failed sync.
+
+        A failed ``_setup_chat`` can leave events sent but never acked. Those
+        late acks would be read as acks for the next request and desync the
+        history, so the next ``chat()`` reconnects and rebuilds instead.
+        """
+        self._history = []
+        ws = self._ws
+        if _ws_is_closed(ws):
+            return
+        try:
+            await ws.close()
+        except BaseException:
+            pass
+
     async def _setup_chat(self, messages, tools, config, *, web_search_options=None):
         lock = self._get_lock()
         await lock.acquire()
@@ -184,7 +200,10 @@ class _RealtimeProvider:
                 self._history = update(self._history, ack)
             await self._ws.send(json.dumps({"type": "response.create"}))
         except BaseException:
-            lock.release()
+            try:
+                await self._discard_connection()
+            finally:
+                lock.release()
             raise
 
         def on_response_done(response):
