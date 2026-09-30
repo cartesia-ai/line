@@ -173,6 +173,16 @@ class CustomOutput(BaseModel):
     responding_to: Optional[str] = None
 
 
+class ResponseEndOutput(BaseModel):
+    """Sent once an agent task has finished yielding, whether it completed or was cancelled.
+
+    Lets the harness close the TTS turn right away instead of waiting out its inactivity timer.
+    """
+
+    type: Literal["response_end"] = "response_end"
+    responding_to: Optional[str] = None
+
+
 OutputMessage = Union[
     ErrorOutput,
     DTMFOutput,
@@ -184,6 +194,7 @@ OutputMessage = Union[
     LogMetricOutput,
     ConfigOutput,
     CustomOutput,
+    ResponseEndOutput,
 ]
 
 
