@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import AsyncIterable, Union, overload
 
 from line.agent import Agent, TurnEnv, call_agent
-from line.events import AgentSendText, InputEvent, OutputEvent
+from line.events import AgentEndCall, AgentSendText, AgentTransferCall, InputEvent, OutputEvent
 
 
 @overload
@@ -76,6 +76,12 @@ async def _buffer_events(events: AsyncIterable[OutputEvent], strategy: str) -> A
 
     async for output in events:
         if not isinstance(output, AgentSendText):
+            # Hang-up and transfer end the turn on the wire, so text still held in
+            # the buffer must be sent first or the last word never reaches the caller.
+            if isinstance(output, (AgentEndCall, AgentTransferCall)) and text_buffer:
+                yield AgentSendText(text=text_buffer, interruptible=last_interruptible)
+                text_buffer = ""
+                last_interruptible = True
             yield output
             continue
 
