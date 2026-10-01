@@ -1098,6 +1098,111 @@ class TestHistory:
         assert contents == ["a", "injected", "replaced", "c"]
 
     # ------------------------------------------------------------------
+    # Anchor stability across rebuilds (converted/canonicalized events)
+    # ------------------------------------------------------------------
+
+    async def test_add_entry_after_agents_own_message_survives_rebuild(self):
+        """add_entry anchored to the agent's own (converted) message must not crash.
+
+        Regression test: the AgentTextSent visible in history for a current-turn
+        AgentSendText is recreated with a fresh event_id on every rebuild, so
+        exact-equality anchor lookup raised
+        ValueError("... is not in list") on the first read after add_entry.
+        """
+        user = UserTextSent(content="hi")
+        h = History()
+        h._set_input([user], user.event_id)
+        h._append_local(AgentSendText(text="Hello there."))
+
+        merged = list(h)
+        assert isinstance(merged[-1], AgentTextSent)
+
+        h.add_entry("supervisor note", after=merged[-1])
+        result = list(h)  # previously raised ValueError here
+
+        assert len(result) == 3
+        assert isinstance(result[0], UserTextSent)
+        assert isinstance(result[1], AgentTextSent)
+        assert isinstance(result[2], CustomHistoryEntry)
+        assert result[2].content == "supervisor note"
+
+    async def test_add_entry_anchor_survives_canonical_replacement(self):
+        """A mutation anchored to a local conversion still applies once the harness
+        sends the canonical version of the same message on the next turn."""
+        user = UserTextSent(content="hi")
+        h = History()
+        h._set_input([user], user.event_id)
+        h._append_local(AgentSendText(text="Hello there."))
+
+        merged = list(h)
+        h.add_entry("supervisor note", after=merged[-1])
+
+        # Next turn: the harness observed the reply (its own event_id) plus new input.
+        canonical = AgentTextSent(content="Hello there.")
+        user2 = UserTextSent(content="how are you?")
+        h._set_input([user, canonical, user2], user2.event_id)
+
+        result = list(h)
+        assert len(result) == 4
+        assert isinstance(result[0], UserTextSent)
+        assert isinstance(result[1], AgentTextSent)
+        assert result[1].content == "Hello there."
+        assert isinstance(result[2], CustomHistoryEntry)
+        assert result[2].content == "supervisor note"
+        assert isinstance(result[3], UserTextSent)
+
+    async def test_add_entry_duplicate_content_targets_correct_occurrence(self):
+        """With two content-identical messages, the mutation lands on the anchored one."""
+        a1 = AgentTextSent(content="Okay.")
+        a2 = AgentTextSent(content="Okay.")
+        h = self._make_history([a1, a2])
+        merged = list(h)
+
+        h.add_entry("note", after=merged[1])
+        result = list(h)
+
+        assert len(result) == 3
+        assert isinstance(result[0], AgentTextSent)
+        assert isinstance(result[1], AgentTextSent)
+        assert isinstance(result[2], CustomHistoryEntry)
+
+    async def test_update_segment_anchored_to_converted_event(self):
+        """update() with start/end on a converted local event must not crash."""
+        user = UserTextSent(content="hi")
+        h = History()
+        h._set_input([user], user.event_id)
+        h._append_local(AgentSendText(text="Hello there."))
+
+        merged = list(h)
+        h.update([CustomHistoryEntry(content="redacted")], start=merged[1], end=merged[1])
+
+        result = list(h)  # previously raised ValueError here
+        assert len(result) == 2
+        assert isinstance(result[0], UserTextSent)
+        assert isinstance(result[1], CustomHistoryEntry)
+        assert result[1].content == "redacted"
+
+    async def test_mutation_skipped_gracefully_when_anchor_content_changes(self):
+        """If the anchor's content genuinely disappears (e.g. the anchored streaming
+        message grows), the mutation is skipped with a warning instead of crashing."""
+        user = UserTextSent(content="hi")
+        h = History()
+        h._set_input([user], user.event_id)
+        h._append_local(AgentSendText(text="Hello"))
+
+        merged = list(h)
+        h.add_entry("note", after=merged[-1])
+
+        # More streamed chunks arrive: concatenation changes the converted content.
+        h._append_local(AgentSendText(text=" there."))
+
+        result = list(h)  # no crash; the entry is simply not applied
+        assert len(result) == 2
+        assert isinstance(result[0], UserTextSent)
+        assert isinstance(result[1], AgentTextSent)
+        assert result[1].content == "Hello there."
+
+    # ------------------------------------------------------------------
     # Cache invalidation
     # ------------------------------------------------------------------
 
