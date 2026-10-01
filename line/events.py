@@ -96,6 +96,9 @@ class AgentUpdateCall(BaseModel):
     voice_id: Optional[str] = None
     pronunciation_dict_id: Optional[str] = None
     language: Optional[str] = None
+    # TTS text normalization: "auto", "off", or a locale code (e.g. "en-IN") pinning
+    # the normalizer locale. Unset leaves the current setting unchanged.
+    normalization: Optional[str] = None
     responding_to: Optional[str] = None
 
 
