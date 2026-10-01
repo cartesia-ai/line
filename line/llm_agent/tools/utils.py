@@ -91,6 +91,21 @@ class ToolEnv:
         return self.turn_env.knowledge_base()
 
 
+@dataclass(frozen=True)
+class ToolResult:
+    """A tool's context payload and whether it requests another LLM response.
+
+    Return or yield this instead of a plain value to control loopback. With
+    ``run_llm=False``, the value is still recorded in history and reported as a
+    tool result, but does not itself trigger inference. Other tools and user
+    turns can still trigger inference. This does not change cancellation or
+    signal whether a background tool has finished.
+    """
+
+    value: Any
+    run_llm: bool = True
+
+
 # -------------------------
 # Tool Function Protocols
 # -------------------------
@@ -101,6 +116,7 @@ class ToolFn(Protocol):
 
     - OutputEvent instances pass through directly to the user.
     - Raw values (str, dict, etc.) are sent back to the LLM as the tool result.
+    - ToolResult controls whether recording its value also requests loopback.
 
     Signature: (ctx: ToolEnv, **kwargs) -> AsyncIterable[Any] | Awaitable[Any] | Any
     """
