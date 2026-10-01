@@ -27,6 +27,7 @@ from line.llm_agent.provider import ChatStream, LLMProvider, LlmProvider
 
 # Tool decorators
 from line.llm_agent.tools.decorators import handoff_tool, loopback_tool, passthrough_tool
+from line.llm_agent.tools.dtmf import dtmf_tool
 
 # Built-in tools
 from line.llm_agent.tools.system import (
@@ -71,6 +72,7 @@ __all__ = [
     "loopback_tool",
     "passthrough_tool",
     "handoff_tool",
+    "dtmf_tool",
     # Built-in tools
     "end_call",
     "send_dtmf",
