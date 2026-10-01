@@ -8,6 +8,7 @@ import pytest
 
 from line.events import (
     AgentEndCall,
+    AgentSendCustom,
     AgentSendText,
     AgentTextSent,
     AgentToolCalled,
@@ -758,6 +759,61 @@ class TestBuildFullHistory:
         assert result[4].content == "All right, bye."
         assert isinstance(result[5], UserTextSent)
         assert result[5].content == "Bye."
+
+    # =========================================================================
+    # Tests: AgentSendCustom filtering (issue #262)
+    # =========================================================================
+
+    async def test_agent_send_custom_from_tool_current_turn_is_dropped(self):
+        """AgentSendCustom yielded by a tool must not crash the loopback completion.
+
+        Regression test for #262: a tool that yields AgentSendCustom followed by a
+        raw result gets [AgentSendCustom, AgentToolCalled, AgentToolReturned]
+        appended to local history. The loopback LLM call in the same turn then
+        rebuilds history — previously _to_history_event raised
+        ValueError("Unknown event type in history: AgentSendCustom").
+        """
+        local_history = self._annotate(
+            [
+                AgentSendCustom(metadata={"type": "show_form", "form_id": "contact"}),
+                AgentToolCalled(tool_call_id="1-0", tool_name="my_tool", tool_args={}),
+                AgentToolReturned(
+                    tool_call_id="1-0", tool_name="my_tool", tool_args={}, result="tool result"
+                ),
+            ],
+            event_id="current",
+        )
+
+        result = _build_full_history([], local_history, current_event_id="current")
+
+        # AgentSendCustom is filtered out; the tool call/result pair survives.
+        assert len(result) == 2
+        assert isinstance(result[0], AgentToolCalled)
+        assert isinstance(result[1], AgentToolReturned)
+        assert result[1].result == "tool result"
+
+    async def test_agent_send_custom_prior_turn_is_dropped(self):
+        """AgentSendCustom in a prior turn is drained with the slice and filtered out,
+        without disturbing matching of the surrounding events."""
+        user0 = UserTextSent(content="Show me the form")
+        input_history = [
+            user0,
+            AgentTextSent(content="Here you go."),
+        ]
+        local_history = self._annotate(
+            [
+                AgentSendCustom(metadata={"type": "show_form"}),
+                AgentSendText(text="Here you go."),
+            ],
+            event_id=user0.event_id,
+        )
+
+        result = _build_full_history(input_history, local_history, current_event_id="current")
+
+        assert len(result) == 2
+        assert isinstance(result[0], UserTextSent)
+        assert isinstance(result[1], AgentTextSent)
+        assert result[1].content == "Here you go."
 
 
 # =============================================================================
