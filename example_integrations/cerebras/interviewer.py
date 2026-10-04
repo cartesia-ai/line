@@ -9,7 +9,14 @@ import asyncio
 import os
 from typing import Annotated, AsyncIterable
 
-from config import INTERVIEWER_REASONING_EFFORT, INTRODUCTION, MAX_OUTPUT_TOKENS, MODEL_ID, PROMPT_MAIN, TEMPERATURE
+from config import (
+    INTERVIEWER_REASONING_EFFORT,
+    INTRODUCTION,
+    MAX_OUTPUT_TOKENS,
+    MODEL_ID,
+    PROMPT_MAIN,
+    TEMPERATURE,
+)
 from judges import create_judges, run_all_judges
 from loguru import logger
 
