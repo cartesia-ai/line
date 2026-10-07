@@ -40,6 +40,8 @@ from line.events import (
     UserDtmfSent,
     UserTextSent,
     UserTurnEnded,
+    UserTurnLikelyEnded,
+    UserTurnResumed,
     UserTurnStarted,
 )
 from line.knowledge_base import KnowledgeBase, KnowledgeBaseError
@@ -88,6 +90,8 @@ __all__ = [
     "UserDtmfSent",
     "UserTextSent",
     "UserTurnEnded",
+    "UserTurnLikelyEnded",
+    "UserTurnResumed",
     "AgentTurnStarted",
     "AgentTextSent",
     "AgentDtmfSent",

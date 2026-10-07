@@ -183,6 +183,22 @@ class UserTextSent(BaseModel):
     history: Optional[List["InputEvent"]] = None
 
 
+class UserTurnLikelyEnded(BaseModel):
+    """An unconfirmed transcript used internally to prepare an LlmAgent reply."""
+
+    type: Literal["user_turn_likely_ended"] = "user_turn_likely_ended"
+    content: str
+    event_id: str = Field(default_factory=_generate_event_id)
+    history: Optional[List["InputEvent"]] = None
+
+
+class UserTurnResumed(BaseModel):
+    type: Literal["user_turn_resumed"] = "user_turn_resumed"
+    eager_event_id: str
+    event_id: str = Field(default_factory=_generate_event_id)
+    history: Optional[List["InputEvent"]] = None
+
+
 class UserTurnEnded(BaseModel):
     type: Literal["user_turn_ended"] = "user_turn_ended"
     content: List[Union[UserDtmfSent, UserTextSent]] = Field(default_factory=list)
@@ -232,6 +248,8 @@ class UserCustomSent(BaseModel):
 InputEvent = Union[
     CallStarted,
     UserTurnStarted,
+    UserTurnLikelyEnded,
+    UserTurnResumed,
     UserDtmfSent,
     UserTextSent,
     UserTurnEnded,
@@ -277,6 +295,8 @@ __all__ = [
     "CallStarted",
     "CallEnded",
     "UserTurnStarted",
+    "UserTurnLikelyEnded",
+    "UserTurnResumed",
     "UserDtmfSent",
     "UserTextSent",
     "UserTurnEnded",

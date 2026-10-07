@@ -29,7 +29,21 @@ class DTMFInput(BaseModel):
 
 class UserStateInput(BaseModel):
     value: str
+    eager_event_id: Optional[str] = None
+    turn_end_reason: Optional[Literal["confirmed", "teardown"]] = None
     type: Literal["user_state"] = "user_state"
+    event_id: Optional[str] = None
+
+
+class UserTurnEagerInput(BaseModel):
+    type: Literal["user_turn_eager"] = "user_turn_eager"
+    content: str
+    event_id: str
+
+
+class UserTurnResumedInput(BaseModel):
+    type: Literal["user_turn_resumed"] = "user_turn_resumed"
+    eager_event_id: str
     event_id: Optional[str] = None
 
 
@@ -62,6 +76,8 @@ InputMessage = Union[
     TranscriptionInput,
     DTMFInput,
     UserStateInput,
+    UserTurnEagerInput,
+    UserTurnResumedInput,
     AgentStateInput,
     ValidationErrorInput,
     AgentSpeechInput,

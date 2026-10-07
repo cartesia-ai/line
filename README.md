@@ -461,6 +461,13 @@ Line leverages [LiteLLM](https://github.com/BerriAI/litellm) to support 100+ LLM
 - **[Agents Guide](https://docs.cartesia.ai/line/sdk/agents)** — LlmAgent, custom agents, conversation loop
 - **[Events Reference](https://docs.cartesia.ai/line/sdk/events)** — Input/output events
 
+### Eager endpointing preview
+
+Direct `LlmAgent` applications can opt in with
+`VoiceAgentApp(get_agent=get_agent, eager_endpointing=True)`. The SDK prepares the
+first completion early and runs agent code and tools only after confirmation.
+See [supported backends, lifecycle, and rollout requirements](docs/eager-endpointing.md).
+
 ## Getting Help
 
 - [Full Documentation](https://docs.cartesia.ai/line/introduction)

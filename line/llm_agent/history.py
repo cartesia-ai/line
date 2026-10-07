@@ -219,6 +219,15 @@ class History:
     # Private API (called by LlmAgent)
     # ------------------------------------------------------------------
 
+    def _fork(self) -> "History":
+        """Make an isolated view for building a candidate prompt."""
+        history = History()
+        history._input_history = list(self._input_history)
+        history._local_history = list(self._local_history)
+        history._current_event_id = self._current_event_id
+        history._mutations = list(self._mutations)
+        return history
+
     def _set_input(self, input_history: List[InputEvent], current_event_id: str) -> None:
         """Update merge sources from a new process() call."""
         self._input_history = input_history

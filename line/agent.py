@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import asyncio
-from typing import AsyncIterable, Callable, Optional, Protocol, Sequence, Union
+from typing import TYPE_CHECKING, AsyncIterable, Callable, Optional, Protocol, Sequence, Union
 
 from line.events import InputEvent, OutputEvent
 from line.knowledge_base import KnowledgeBase
+
+if TYPE_CHECKING:
+    from line.llm_agent.prepared_response import PreparedResponse
 
 
 # Equivalent to a constructor type in TS where a class provides a process method.
@@ -65,6 +68,7 @@ class TurnEnv:
 
     def __init__(self, agent_env: AgentEnv):
         self.agent_env = agent_env
+        self._prepared_response: Optional[PreparedResponse] = None
 
     def knowledge_base(self) -> KnowledgeBase:
         return self.agent_env.knowledge_base()

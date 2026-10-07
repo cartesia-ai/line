@@ -5,6 +5,7 @@ See README.md for examples and documentation.
 """
 
 import asyncio
+from copy import deepcopy
 import inspect
 import json
 import time
@@ -41,10 +42,12 @@ from line.events import (
     LogMetric,
     OutputEvent,
     UserTextSent,
+    UserTurnLikelyEnded,
 )
 from line.llm_agent.background_queue import BackgroundQueue
 from line.llm_agent.config import LlmConfig, _merge_configs, _normalize_config
 from line.llm_agent.history import _HISTORY_EVENT_TYPES, History
+from line.llm_agent.prepared_response import PreparedResponse
 from line.llm_agent.provider import (
     LlmProvider,
     Message,
@@ -163,6 +166,26 @@ class LlmAgent:
     def set_config(self, config: LlmConfig) -> None:
         """Replace the agent's config."""
         self._config = _normalize_config(config)
+
+    async def _prepare_response(self, event: UserTurnLikelyEnded) -> Optional[PreparedResponse]:
+        """Prepare only inference, leaving process(), history and tools for the final."""
+        if self._handoff_target is not None or not self._llm.supports_eager_endpointing:
+            return None
+        if not event.content.strip():
+            return None
+        history = self.history._fork()
+        candidate = UserTextSent(content=event.content)
+        history._set_input([*(event.history or []), candidate], event.event_id)
+        messages = await self._build_messages(history=list(history))
+        next_turn = self._user_turns_seen + 1
+        specs = [
+            t
+            for t in _merge_tools(self._tools, None)
+            if getattr(t, "active_turns", None) is None or next_turn <= t.active_turns
+        ]
+        tools, web_search_options = _normalize_tools(specs, model_id=self._model_id)
+        kwargs = {"web_search_options": web_search_options} if web_search_options else {}
+        return PreparedResponse(event.event_id, self._llm, messages, tools, deepcopy(self._config), kwargs)
 
     async def process(
         self,
@@ -344,16 +367,20 @@ class LlmAgent:
             if web_search_options:
                 chat_kwargs["web_search_options"] = web_search_options
 
-            stream = self._llm.chat(
-                messages,
-                tools or None,
-                config=config,
-                **chat_kwargs,
-            )
+            prepared = env._prepared_response if _iteration == 0 else None
+            if prepared is not None and prepared.claim(messages, tools, config, chat_kwargs):
+                stream = prepared
+            else:
+                prepared = None
+                stream = self._llm.chat(messages, tools or None, config=config, **chat_kwargs)
             async for chunk in stream:
                 # Track time to first chunk (text or tool call)
                 if not first_chunk_logged and (chunk.text or chunk.tool_calls):
-                    first_chunk_ms = (time.perf_counter() - response_start_time) * 1000
+                    first_chunk_ms = (
+                        prepared.first_chunk_ms
+                        if prepared is not None and prepared.first_chunk_ms is not None
+                        else (time.perf_counter() - response_start_time) * 1000
+                    )
                     logger.info(f"Time to first chunk: {first_chunk_ms:.2f}ms")
                     yield LogMetric(name="llm_first_chunk_ms", value=first_chunk_ms)
                     first_chunk_logged = True
@@ -364,7 +391,11 @@ class LlmAgent:
 
                     # Track time to first text
                     if not first_text_logged:
-                        first_text_ms = (time.perf_counter() - response_start_time) * 1000
+                        first_text_ms = (
+                            prepared.first_text_ms
+                            if prepared is not None and prepared.first_text_ms is not None
+                            else (time.perf_counter() - response_start_time) * 1000
+                        )
                         logger.info(f"Time to first text: {first_text_ms:.2f}ms")
                         yield LogMetric(name="llm_first_text_ms", value=first_text_ms)
                         first_text_logged = True

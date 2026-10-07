@@ -10,6 +10,8 @@ ConversationRunner - Manages the websocket loop for a single conversation,
     3) serializing yield OutputEvents back to websocket
 """
 
+from __future__ import annotations
+
 import asyncio
 from datetime import datetime, timezone
 from importlib.metadata import version as _pkg_version
@@ -17,7 +19,7 @@ import json
 import os
 import re
 import traceback
-from typing import Any, AsyncIterable, Awaitable, Callable, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, AsyncIterable, Awaitable, Callable, Dict, List, Optional, Tuple
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
@@ -49,6 +51,8 @@ from line._harness_types import (
     TransferOutput,
     TTSConfig,
     UserStateInput,
+    UserTurnEagerInput,
+    UserTurnResumedInput,
     ValidationErrorInput,
 )
 from line.agent import Agent, AgentEnv, AgentSpec, EventFilter, TurnEnv
@@ -75,8 +79,12 @@ from line.events import (
     UserDtmfSent,
     UserTextSent,
     UserTurnEnded,
+    UserTurnLikelyEnded,
     UserTurnStarted,
 )
+
+if TYPE_CHECKING:
+    from line.llm_agent.prepared_response import PreparedResponse
 
 
 # Call request types
@@ -144,6 +152,8 @@ class VoiceAgentApp:
         self,
         get_agent: Callable[[AgentEnv, CallRequest], Awaitable[AgentSpec]],
         pre_call_handler: Optional[Callable[[CallRequest], Awaitable[Optional[PreCallResult]]]] = None,
+        *,
+        eager_endpointing: bool = False,
     ):
         """
         Initialize the VoiceAgentApp.
@@ -151,10 +161,12 @@ class VoiceAgentApp:
         Args:
             get_agent: Async function that creates a Node from AgentEnv and CallRequest.
             pre_call_handler: Optional async function to configure call settings before connection.
+            eager_endpointing: Prepare replies early for direct LlmAgent instances using HTTP.
         """
         self.fastapi_app = FastAPI()
         self.get_agent = get_agent
         self.pre_call_handler = pre_call_handler
+        self.eager_endpointing = eager_endpointing
         self.ws_route = "/ws"
 
         self.fastapi_app.add_api_route("/chats", self.create_chat_session, methods=["POST"])
@@ -219,6 +231,8 @@ class VoiceAgentApp:
             "cartesia_version": CARTESIA_VERSION,
             "metadata": metadata,
         }
+        if self.eager_endpointing:
+            response["capabilities"] = ["eager_endpointing_v1"]
         if config:
             response["config"] = config
         return response
@@ -267,7 +281,7 @@ class VoiceAgentApp:
         )
         try:
             agent_spec = await self.get_agent(env, call_request)
-            runner = ConversationRunner(websocket, agent_spec, env)
+            runner = ConversationRunner(websocket, agent_spec, env, eager_endpointing=self.eager_endpointing)
         except Exception:
             error_msg = traceback.format_exc()
             error_string = f"Error in get_agent for {call_request.call_id}: {error_msg}"
@@ -311,7 +325,9 @@ class ConversationRunner:
     the websocket.
     """
 
-    def __init__(self, websocket: WebSocket, agent_spec: AgentSpec, env: AgentEnv):
+    def __init__(
+        self, websocket: WebSocket, agent_spec: AgentSpec, env: AgentEnv, *, eager_endpointing: bool = False
+    ):
         """
         Initialize the ConversationRunner.
 
@@ -321,6 +337,8 @@ class ConversationRunner:
             env: Per-call environment, passed through to TurnEnv so tools
                 can resolve call-scoped resources (e.g. knowledge base).
         """
+        from line.llm_agent import LlmAgent
+
         self.websocket = websocket
         self.env = env
         self._shutdown_event: asyncio.Event = asyncio.Event()
@@ -329,6 +347,14 @@ class ConversationRunner:
 
         self.agent_callable, self.run_filter, self.cancel_filter = self._prepare_agent(agent_spec)
         self.agent_task: Optional[asyncio.Task] = None
+        self._eager_agent = agent_spec if eager_endpointing and type(agent_spec) is LlmAgent else None
+        self._prepared: Optional[PreparedResponse] = None
+        self._eager_tasks: set[asyncio.Task] = set()
+        self._call_ending = False
+        if eager_endpointing and self._eager_agent is None:
+            logger.warning(
+                "Eager endpointing requires a direct LlmAgent with default filters; using final turns"
+            )
 
     @property
     def shutdown_event(self) -> asyncio.Event:
@@ -404,18 +430,12 @@ class ConversationRunner:
                     logger.warning(f"Dropping unparseable websocket message: {message}")
                     continue
 
-                # Convert and process the input message
-                event = self._convert_input_message(input_msg)
-                if event is None:
-                    continue
-                ev, self.history = self._process_input_event(self.history, event)
-                if ev is None:
-                    continue
-                await self._handle_event(TurnEnv(agent_env=self.env), ev)
+                await self._handle_input_message(input_msg)
 
             except WebSocketDisconnect:
                 logger.info("WebSocket disconnected in loop")
                 self.shutdown_event.set()
+                self._discard_prepared()
                 end_event, self.history = self._process_input_event(self.history, CallEnded())
                 await self._handle_event(TurnEnv(agent_env=self.env), end_event)
             except json.JSONDecodeError as e:
@@ -440,8 +460,77 @@ class ConversationRunner:
                 await self.send_error(f"Error in websocket loop (likely message processing): {error_msg}")
                 await self.websocket.close()
 
+        self._discard_prepared()
         if self.agent_task:
             await self.agent_task
+        await self._close_eager_tasks()
+
+    async def _handle_input_message(self, message: InputMessage) -> None:
+        if self._call_ending:
+            return
+        if isinstance(message, UserTurnEagerInput):
+            self._discard_prepared()
+            if self._eager_agent is not None and len(self._eager_tasks) < 4:
+                event = UserTurnLikelyEnded(
+                    content=message.content,
+                    event_id=message.event_id,
+                    history=_get_processed_history(self.emitted_agent_text, self.history),
+                )
+                try:
+                    self._prepared = await self._eager_agent._prepare_response(event)
+                except Exception:
+                    logger.warning("Could not prepare eager response; using the confirmed turn")
+                    return
+                if self._prepared is not None:
+                    task = self._prepared.task
+                    self._eager_tasks.add(task)
+                    task.add_done_callback(self._eager_tasks.discard)
+            return
+        if isinstance(message, UserTurnResumedInput):
+            if self._prepared is not None and self._prepared.event_id == message.eager_event_id:
+                self._discard_prepared()
+            return
+        if isinstance(message, UserStateInput) and message.turn_end_reason == "teardown":
+            self._call_ending = True
+            self._discard_prepared()
+            await self._cancel_agent_task()
+            return
+        event = self._convert_input_message(message)
+        if event is None:
+            return
+        if isinstance(event, (UserTurnStarted, UserDtmfSent, UserCustomSent)):
+            self._discard_prepared()
+        event, self.history = self._process_input_event(self.history, event)
+        if event is None:
+            return
+        env = TurnEnv(agent_env=self.env)
+        if isinstance(event, UserTurnEnded):
+            if (
+                self._prepared is not None
+                and isinstance(message, UserStateInput)
+                and message.turn_end_reason == "confirmed"
+                and message.eager_event_id == self._prepared.event_id
+            ):
+                env._prepared_response, self._prepared = self._prepared, None
+            else:
+                self._discard_prepared()
+        await self._handle_event(env, event)
+
+    def _discard_prepared(self) -> None:
+        if self._prepared is not None:
+            self._prepared.abort()
+            self._prepared = None
+
+    async def _close_eager_tasks(self) -> None:
+        tasks = list(self._eager_tasks)
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            _, pending = await asyncio.wait(tasks, timeout=1)
+            for task in pending:
+                task.cancel()
+            if pending:
+                logger.warning("Eager provider cleanup exceeded one second")
 
     async def _handle_event(self, turn_env: TurnEnv, event: InputEvent) -> None:
         """Apply run/cancel filters for a single event."""
@@ -481,6 +570,9 @@ class ConversationRunner:
                 await self.send_error(f"Error in agent.process: {error_msg}")
                 await self.websocket.close()
                 return
+            finally:
+                if turn_env._prepared_response is not None:
+                    turn_env._prepared_response.abort()
             if not self.shutdown_event.is_set():
                 await self._send_response_end(responding_to_id)
 

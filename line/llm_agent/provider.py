@@ -332,6 +332,13 @@ class LlmProvider:
                 api_key=api_key,
             )
 
+    @property
+    def supports_eager_endpointing(self) -> bool:
+        """The first release supports independent HTTP chat-completion streams."""
+        from line.llm_agent.http_provider import _HttpProvider
+
+        return isinstance(self._backend, _HttpProvider)
+
     def chat(
         self,
         messages: List[Message],
