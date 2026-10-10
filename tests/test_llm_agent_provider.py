@@ -1,6 +1,7 @@
 """Tests for the LlmProvider facade and HTTP backend."""
 
 import asyncio
+import json
 from typing import Annotated, Any, List, Optional, get_type_hints
 
 from line.llm_agent.config import LlmConfig, _normalize_config
@@ -742,6 +743,21 @@ class TestIncrementalConcatenation:
         s2 = _feed_tool_args(s1, "}")
         assert s2.args == "{}"
         assert s2.depth == 0
+
+    def test_trailing_whitespace_keeps_complete_object(self):
+        state = None
+        for frag in ['{"query":', '"hello"}', " "]:
+            state = _feed_tool_args(state, frag)
+
+        assert json.loads(state.args) == {"query": "hello"}
+        assert state.depth == 0
+
+    def test_resend_after_trailing_whitespace_still_replaces(self):
+        state = None
+        for frag in ['{"city": "Tokyo"}', "\n", '{"city": "Paris"}']:
+            state = _feed_tool_args(state, frag)
+
+        assert state.args == '{"city": "Paris"}'
 
 
 class TestGeminiReplace:
