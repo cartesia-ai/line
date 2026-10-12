@@ -1,0 +1,13 @@
+[project]
+name = "inception-mercury-ordering"
+version = "0.1.0"
+description = "A quick-service ordering voice agent using Inception Mercury 2 and Cartesia Line SDK"
+requires-python = ">=3.10"
+dependencies = [
+    "cartesia-line==0.2.16",
+    "loguru>=0.7.0",
+    "python-dotenv>=1.0.0",
+]
+
+[project.scripts]
+mercury-ordering = "main:app.run"
