@@ -34,6 +34,8 @@ dependencies = [
     "loguru>=0.7.0,<1",
     "fastapi>=0.115.0,<0.135.2",
     "aiohttp>=3.8.0,<4",
+    "Brotli>=1.2.1",
+    "brotlicffi>=1.2.1.0; platform_python_implementation != 'CPython'",
     "pydantic>=2.0.0,<3",
     "uvicorn>=0.35.0,<1",
     "websockets>=13.0.0,<14",
