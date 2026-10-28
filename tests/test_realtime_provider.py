@@ -1,9 +1,19 @@
 """Tests for the Realtime WebSocket provider."""
 
+import json
+
+import pytest
+from websockets.protocol import State as WsState
+
 from line.llm_agent.config import LlmConfig, _normalize_config
-from line.llm_agent.provider import Message, ToolCall
+from line.llm_agent.provider import Message, ParsedModelId, ToolCall
 from line.llm_agent.provider_utils import _context_identity, _expand_messages
-from line.llm_agent.realtime_provider import RECONNECT_THRESHOLD, _plan_chat, _track_output_items
+from line.llm_agent.realtime_provider import (
+    RECONNECT_THRESHOLD,
+    _plan_chat,
+    _RealtimeProvider,
+    _track_output_items,
+)
 
 
 def _cfg(**overrides):
@@ -314,3 +324,48 @@ def test_expand_messages_preserves_assistant_text_before_tool_call():
             ("assistant_tool_call", (("get_weather", '{"city":"NYC"}', "call_1"),)),
         ),
     ]
+
+
+# ---------------------------------------------------------------------------
+# _setup_chat failure handling
+# ---------------------------------------------------------------------------
+
+
+class _FakeWs:
+    """Minimal websocket stand-in that replays scripted server messages."""
+
+    def __init__(self, incoming):
+        self._incoming = list(incoming)
+        self.sent = []
+        self.state = WsState.OPEN
+
+    async def send(self, data):
+        self.sent.append(json.loads(data))
+
+    async def recv(self):
+        return json.dumps(self._incoming.pop(0))
+
+    async def close(self):
+        self.state = WsState.CLOSED
+
+
+async def test_setup_chat_discards_connection_when_ack_errors():
+    """An error ack leaves later acks unread, so the socket must not be reused."""
+    provider = _RealtimeProvider(ParsedModelId(provider="openai", model="gpt-realtime"))
+    ws = _FakeWs(
+        [
+            {"type": "error", "error": {"message": "item not found"}},
+            {"type": "conversation.item.created", "item": {"id": "late_ack"}},
+        ]
+    )
+    provider._ws = ws
+    provider._history = [(_ctx_id(), None)]
+
+    messages = [Message(role="user", content="a"), Message(role="user", content="b")]
+    with pytest.raises(RuntimeError, match="item not found"):
+        await provider._setup_chat(messages, None, _cfg())
+
+    assert len(ws.sent) == 2  # both creates were sent, one ack is still on the wire
+    assert ws.state == WsState.CLOSED
+    assert provider._history == []
+    assert not provider._get_lock().locked()
