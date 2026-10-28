@@ -10,8 +10,10 @@ import pytest
 
 from line.agent import AgentEnv, TurnEnv
 from line.events import (
+    AgentEndCall,
     AgentSendText,
     AgentToolCalled,
+    AgentTransferCall,
     InputEvent,
     LogMetric,
     OutputEvent,
@@ -237,6 +239,43 @@ async def test_non_text_events_pass_through(anyio_backend):
     assert outputs[2] == tool_called
     assert isinstance(outputs[3], AgentSendText)
     assert outputs[3].text == "world"
+
+
+async def test_end_call_flushes_buffered_text_first(anyio_backend):
+    """Text held in the buffer is emitted before AgentEndCall so the last word is not lost."""
+    end_call = AgentEndCall()
+    agent = MockAgent(
+        [
+            AgentSendText(text="Thanks for"),
+            AgentSendText(text=" calling, goodbye."),
+            end_call,
+        ]
+    )
+    outputs = await _collect(word_buffer(agent))
+
+    assert outputs[-1] == end_call
+    assert "".join(_texts(outputs[:-1])) == "Thanks for calling, goodbye."
+    assert _texts(outputs[:-1])[-1] == "goodbye."
+
+
+async def test_transfer_call_flushes_buffered_text_first(anyio_backend):
+    """Text held in the buffer is emitted before AgentTransferCall."""
+    transfer = AgentTransferCall(target_phone_number="+15551234567")
+    agent = MockAgent([AgentSendText(text="Transferring"), transfer])
+    outputs = await _collect(word_buffer(agent))
+
+    assert len(outputs) == 2
+    assert isinstance(outputs[0], AgentSendText)
+    assert outputs[0].text == "Transferring"
+    assert outputs[1] == transfer
+
+
+async def test_end_call_flush_keeps_uninterruptible_flag(anyio_backend):
+    agent = MockAgent([AgentSendText(text="Bye", interruptible=False), AgentEndCall()])
+    outputs = await _collect(word_buffer(agent))
+
+    assert isinstance(outputs[0], AgentSendText)
+    assert outputs[0].interruptible is False
 
 
 # =============================================================================
