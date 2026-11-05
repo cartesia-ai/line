@@ -40,10 +40,12 @@ from line._harness_types import (
     LogMetricOutput,
     MessageOutput,
     OutputMessage,
+    ResponseEndOutput,
     StartInput,
     STTConfig,
     ToolCallOutput,
     TranscriptionInput,
+    TransferDestination,
     TransferOutput,
     TTSConfig,
     UserStateInput,
@@ -478,8 +480,23 @@ class ConversationRunner:
                 logger.error(f"Error in agent.process: {error_msg}")
                 await self.send_error(f"Error in agent.process: {error_msg}")
                 await self.websocket.close()
+                return
+            if not self.shutdown_event.is_set():
+                await self._send_response_end(responding_to_id)
 
         self.agent_task = asyncio.create_task(runner())
+
+    async def _send_response_end(self, responding_to: Optional[str]) -> None:
+        """Tell the harness this task has no more output, completed or cancelled.
+
+        The harness otherwise learns a reply is over from 2.5s of silence, during which a
+        barge-in loses the reply's transcript. Tasks are serialized (cancel is awaited before
+        the next starts), so this always lands after the task's own messages.
+        """
+        try:
+            await self.websocket.send_json(ResponseEndOutput(responding_to=responding_to).model_dump())
+        except Exception as e:
+            logger.warning(f"Failed to send response_end via WebSocket: {e}")
 
     async def _cancel_agent_task(self) -> None:
         """Cancel any running agent iterable task."""
@@ -684,11 +701,20 @@ class ConversationRunner:
                 interruptible=event.interruptible,
             )
         if isinstance(event, AgentTransferCall):
+            destination = TransferDestination(
+                type="phone" if event.target_phone_number is not None else "sip_uri",
+                value=(
+                    event.target_phone_number
+                    if event.target_phone_number is not None
+                    else event.target_sip_uri
+                ),
+            )
             logger.info(
-                f"<- 📱 Transfer to: {event.target_phone_number} (interruptible={event.interruptible})"
+                f"<- 📱 Transfer to {destination.type}: {destination.value} "
+                f"(interruptible={event.interruptible})"
             )
             return TransferOutput(
-                target_phone_number=event.target_phone_number,
+                transfer_destination=destination,
                 responding_to=event.responding_to,
                 interruptible=event.interruptible,
             )

@@ -136,7 +136,7 @@ agent = LlmAgent(
 |------|--------------|
 | `end_call` | Ends the call |
 | `send_dtmf` | Presses phone buttons (0-9, *, #) |
-| `transfer_call` | Transfers to a phone number (E.164). LLM-supplied by default, or pin a fixed destination with `transfer_call(target_phone_number="+1...")` |
+| `transfer_call` | Transfers to an E.164 phone number (LLM-supplied by default) or a pinned destination. Pin a phone with `transfer_call(target_phone_number="+1...")` or a SIP URI with `transfer_call(target_sip_uri="sip:7500@pbx.example.com")`. |
 | `voicemail` | Ends the call when you reach a voicemail, optionally leaving a message first. Configure with `voicemail(message="…")`. See [Voicemail detection](#voicemail-detection-outbound-calls). |
 | `web_search` | Searches the web (native LLM search or DuckDuckGo fallback) |
 | `knowledge_base` | Looks up information from the agent's knowledge base via natural-language query. Call `knowledge_base(filters={...}, top_k=10)` to pre-filter retrievals or override `top_k` |

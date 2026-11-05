@@ -316,7 +316,7 @@ class LlmAgent:
             if is_first_iteration or should_loopback:
                 # Drain any immediately available events (non-blocking)
                 while (pair := self._get_background_event_queue().get_nowait()) is not None:
-                    called_evt, returned_evt = pair
+                    called_evt, returned_evt = self._anchor_background_pair(pair)
                     yield called_evt
                     yield returned_evt
             else:
@@ -326,7 +326,7 @@ class LlmAgent:
                     # All background sources completed with no more events
                     # this generation process is completed - exit loop
                     break
-                called_evt, returned_evt = result
+                called_evt, returned_evt = self._anchor_background_pair(result)
                 yield called_evt
                 yield returned_evt
 
@@ -659,6 +659,37 @@ class LlmAgent:
                 )
         return messages
 
+    def _anchor_background_pair(
+        self, pair: Tuple[AgentToolCalled, AgentToolReturned]
+    ) -> Tuple[AgentToolCalled, AgentToolReturned]:
+        """Append a drained background tool event pair to local history.
+
+        History is appended at drain time rather than when the background tool
+        yielded the result. A result can arrive while an LLM generation for the
+        current turn is still in flight; appending at yield time would place the
+        pair BEFORE the text that generation streams afterwards, so the merged
+        history would end with the agent's own speech and the loopback reaction
+        call would be skipped by the "conversation cannot end with assistant
+        message" validation — silently dropping the tool result. Anchoring at
+        drain time guarantees the pair is the last thing in history when the
+        reaction LLM call that immediately follows builds its messages.
+
+        Both appends happen synchronously before the events are yielded
+        downstream, so a cancellation delivered at the yield cannot leave a
+        dequeued pair missing from history.
+
+        Args:
+            pair: The (AgentToolCalled, AgentToolReturned) pair popped from the
+                background event queue.
+
+        Returns:
+            The same pair, for convenient unpacking at the call site.
+        """
+        called_evt, returned_evt = pair
+        self.history._append_local(called_evt)
+        self.history._append_local(returned_evt)
+        return pair
+
     def _execute_backgroundable_tool(
         self,
         normalized_func: Callable[..., AsyncIterable[Any]],
@@ -675,9 +706,10 @@ class LlmAgent:
         - AgentToolReturned with the same tool_call_id
 
         The source is subscribed to the background queue, which shields it
-        from cancellation. Events are tagged with the CURRENT event_id at
-        yield time so background tool results appear at the end of history
-        when yielded after a new process() call has started.
+        from cancellation. Events are only queued here — they enter local
+        history when a generation loop drains them (see
+        _anchor_background_pair), so they land after anything the agent
+        streamed while the result was waiting in the queue.
 
         responding_to is set to the triggering_event_id (captured at subscription
         time) so background results reference the event that originally triggered
@@ -692,8 +724,6 @@ class LlmAgent:
                     called, returned = _construct_tool_events(call_id, tc_name, tool_args, value)
                     called.responding_to = triggering_event_id
                     returned.responding_to = triggering_event_id
-                    self.history._append_local(called)
-                    self.history._append_local(returned)
                     yield (called, returned)
                     n += 1
             except Exception as e:
@@ -701,8 +731,6 @@ class LlmAgent:
                 called, returned = _construct_tool_events(f"{tc_id}-{n}", tc_name, tool_args, f"error: {e}")
                 called.responding_to = triggering_event_id
                 returned.responding_to = triggering_event_id
-                self.history._append_local(called)
-                self.history._append_local(returned)
                 yield (called, returned)
 
         self._get_background_event_queue().subscribe(generate_events())

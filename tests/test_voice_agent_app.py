@@ -1179,7 +1179,12 @@ class TestEndCallAndTransferCallMapping:
 
     def test_transfer_call_interruptible_false(self):
         """AgentTransferCall(interruptible=False) maps to TransferOutput(interruptible=False)."""
-        result = self._map(AgentTransferCall(target_phone_number="+14155551234", interruptible=False))
+        result = self._map(
+            AgentTransferCall(
+                target_phone_number="+14155551234",
+                interruptible=False,
+            )
+        )
         assert isinstance(result, TransferOutput)
         assert result.target_phone_number == "+14155551234"
         assert result.interruptible is False
@@ -1189,6 +1194,24 @@ class TestEndCallAndTransferCallMapping:
         result = self._map(AgentTransferCall(target_phone_number="+14155551234"))
         assert isinstance(result, TransferOutput)
         assert result.interruptible is True
+
+    def test_sip_transfer_forwards_sip_uri(self):
+        result = self._map(AgentTransferCall(target_sip_uri="sip:7500@pbx.example.com"))
+        assert isinstance(result, TransferOutput)
+        assert result.target_phone_number is None
+        assert result.target_sip_uri == "sip:7500@pbx.example.com"
+
+    def test_phone_transfer_is_typed_for_the_harness(self):
+        result = self._map(AgentTransferCall(target_phone_number="+14155551234"))
+        assert isinstance(result, TransferOutput)
+        assert result.transfer_destination.type == "phone"
+        assert result.transfer_destination.value == "+14155551234"
+
+    def test_sip_transfer_is_typed_for_the_harness(self):
+        result = self._map(AgentTransferCall(target_sip_uri="sip:7500@pbx.example.com"))
+        assert isinstance(result, TransferOutput)
+        assert result.transfer_destination.type == "sip_uri"
+        assert result.transfer_destination.value == "sip:7500@pbx.example.com"
 
 
 # ============================================================
@@ -1441,3 +1464,42 @@ class TestCreateChatSessionErrorAttribution:
         # carries the agent-code attribution.
         assert response.status_code == 403
         assert response.headers.get("X-Cartesia-Error-Source") == "agent-code"
+
+
+class TestResponseEnd:
+    """A response_end message follows every agent task so the harness can close the TTS turn."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("cancelled", [False, True])
+    async def test_response_end_follows_the_tasks_messages(self, cancelled):
+        ws = create_mock_websocket()
+        agent_spoke = asyncio.Event()
+
+        async def agent(env_, event):
+            if not isinstance(event, CallStarted):
+                return
+            yield AgentSendText(text="hello there")
+            agent_spoke.set()
+            if cancelled:
+                await asyncio.Event().wait()  # Blocks until the user turn cancels the task.
+                yield AgentSendText(text="never sent")
+
+        call_count = 0
+
+        async def receive_messages():
+            nonlocal call_count
+            call_count += 1
+            await agent_spoke.wait()
+            if cancelled and call_count == 1:
+                return {"type": "user_state", "value": "speaking"}
+            raise WebSocketDisconnect()
+
+        ws.receive_json = receive_messages
+
+        runner = ConversationRunner(ws, agent, env)
+        await runner.run()
+
+        sent = [c[0][0] for c in ws.send_json.call_args_list]
+        assert [m["type"] for m in sent] == ["message", "response_end"]
+        assert sent[0]["content"] == "hello there"
+        assert sent[1]["responding_to"] == sent[0]["responding_to"] == runner.history[0].event_id

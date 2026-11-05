@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Literal, Optional, Union
 import uuid
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 def _generate_event_id() -> str:
@@ -57,9 +57,16 @@ class AgentEndCall(BaseModel):
 
 class AgentTransferCall(BaseModel):
     type: Literal["agent_transfer_call"] = "agent_transfer_call"
-    target_phone_number: str
+    target_phone_number: Optional[str] = None
+    target_sip_uri: Optional[str] = None
     responding_to: Optional[str] = None
     interruptible: bool = True
+
+    @model_validator(mode="after")
+    def has_exactly_one_destination(self) -> "AgentTransferCall":
+        if (self.target_phone_number is None) == (self.target_sip_uri is None):
+            raise ValueError("AgentTransferCall requires exactly one transfer destination")
+        return self
 
 
 class AgentSendDtmf(BaseModel):
