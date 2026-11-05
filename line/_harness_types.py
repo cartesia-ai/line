@@ -153,6 +153,9 @@ class TTSConfig(BaseModel):
     voice_id: Optional[str] = None
     pronunciation_dict_id: Optional[str] = None
     language: Optional[str] = None
+    # Free-form on the wire so the harness never rejects a value from a newer SDK;
+    # the canonical vocabulary is "auto", "off", or a locale code.
+    normalization: Optional[str] = None
 
 
 class STTConfig(BaseModel):
