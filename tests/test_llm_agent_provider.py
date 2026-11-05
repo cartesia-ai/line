@@ -770,6 +770,13 @@ class TestGeminiReplace:
         assert s.args == '{"a": 1, "b": 2, "c": 3}'
         assert s.depth == 0
 
+    def test_trailing_whitespace_does_not_replace_complete_arguments(self):
+        s1 = _feed_tool_args(None, '{"city": "Tokyo"}')
+        s2 = _feed_tool_args(s1, " \n\t")
+
+        assert s2.args == '{"city": "Tokyo"}'
+        assert s2.depth == 0
+
 
 class TestNestedObjects:
     def test_nested_braces_incremental(self):

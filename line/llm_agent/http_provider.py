@@ -270,8 +270,12 @@ def _feed_tool_args(state: Optional[_ArgState], fragment: str) -> _ArgState:
 
     We distinguish these by tracking unquoted brace depth. When depth reaches 0
     the JSON object is complete; any subsequent fragment is a Gemini-style resend
-    and replaces rather than concatenates.
+    and replaces rather than concatenates. Whitespace-only fragments are ignored
+    so they cannot overwrite a complete argument object.
     """
+    if state is not None and state.depth == 0 and state.args and not fragment.strip():
+        return state
+
     if state is None or (state.depth == 0 and state.args):
         # First fragment, or previous args were complete (Gemini resend)
         args = fragment
