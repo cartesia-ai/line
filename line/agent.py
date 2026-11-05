@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from typing import AsyncIterable, Callable, Optional, Protocol, Sequence, Union
 
+from line._dtmf import _DtmfInput
 from line.events import InputEvent, OutputEvent
 from line.knowledge_base import KnowledgeBase
 
@@ -46,6 +47,7 @@ class AgentEnv:
         self.agent_id = agent_id
         self.agent_token = agent_token
         self.base_url = base_url
+        self._dtmf = _DtmfInput()
 
     def knowledge_base(self) -> KnowledgeBase:
         """Return a KnowledgeBase client scoped to the calling agent."""
