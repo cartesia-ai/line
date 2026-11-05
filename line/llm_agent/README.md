@@ -462,6 +462,40 @@ async def search_database(ctx, query: Annotated[str, "Search query"]) -> str:
 
 Background tools continue running even if the user interrupts. The result will be included in the next generation once complete.
 
+### Recording Results Without a Response
+
+Use `ToolResult(value, run_llm=False)` to add a tool result to conversation history
+without requesting another LLM completion. This works with a return value or an
+async generator yield, in both foreground and background tools.
+
+```python
+from typing import Annotated
+from line.llm_agent import ToolResult, loopback_tool
+
+@loopback_tool(is_background=True)
+async def verify_submission(ctx, submission_id: Annotated[str, "The submission to verify"]):
+    """Verify a submission and report the outcome."""
+    yield ToolResult({"status": "in_progress"}, run_llm=False)
+    result = await verify_with_backend(submission_id)
+    yield result
+```
+
+Implement `verify_with_backend` in your application. Here, a caller's next turn
+can see that verification is running without an extra acknowledgment completion.
+The final plain result requests an LLM response, even if the caller stays silent.
+
+`ToolResult` has two fields: `value`, the model-facing payload, and `run_llm`, which
+defaults to `True`. Only `value` appears in history and tool-result events. Plain
+values keep their existing behavior, including dictionaries with a `run_llm` key.
+Silent updates do not consume the LLM tool-iteration budget.
+
+The flag applies to one result. It does not suppress responses triggered by other
+tools or the user, change cancellation behavior, or mark the tool as complete.
+Foreground tools still wait for execution to finish before the next completion;
+background tools continue across speech interruptions. As with all tool results,
+the agent's default history includes these updates; an explicit `history=`
+override is responsible for supplying its own context.
+
 ## Events
 
 **Input Events** (agent receives):

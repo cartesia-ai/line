@@ -50,6 +50,7 @@ from line.llm_agent.tools.utils import (
     ParameterInfo,
     PassthroughToolFn,
     ToolEnv,
+    ToolResult,
     ToolType,
 )
 
@@ -83,6 +84,7 @@ __all__ = [
     "http_server_tool",
     # Tool types
     "ToolEnv",
+    "ToolResult",
     "LoopbackToolFn",
     "PassthroughToolFn",
     "HandoffToolFn",

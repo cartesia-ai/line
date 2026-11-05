@@ -82,9 +82,13 @@ def loopback_tool(
 
     If is_background=True:
     1) the tool runs asynchronously without blocking the LLM/other tool calls,
-        triggering a new completion on each yielded value
+        triggering a new completion on each yielded value by default
     2) the tool is not cancelled on interruption, any yielded values are
         incorporated into the conversation history for future completions.
+
+    Return or yield ToolResult(value, run_llm=False) to record a result without
+    requesting a completion. This works for foreground and background tools.
+    Plain values and ToolResult(value) request a completion as usual.
 
     Example:
     @loopback_tool(is_background=True)
