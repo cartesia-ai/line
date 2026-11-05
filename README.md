@@ -453,6 +453,7 @@ Line leverages [LiteLLM](https://github.com/BerriAI/litellm) to support 100+ LLM
 |-------------|-------------|
 | [Exa Web Research](./example_integrations/exa) | Real-time web search |
 | [Browserbase](./example_integrations/browserbase) | Fill web forms via voice |
+| [FlashData research](./example_integrations/flashdata) | Google and YouTube evidence through authenticated MCP |
 
 ## Documentation
 

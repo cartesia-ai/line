@@ -1,0 +1,16 @@
+[project]
+name = "flashdata-voice-research"
+version = "0.1.0"
+description = "Source-linked Google and YouTube research with Cartesia Line and FlashData"
+requires-python = ">=3.10"
+dependencies = [
+    "cartesia-line==0.2.19",
+    "mcp==1.30.0",
+    "httpx==0.28.1",
+]
+
+[dependency-groups]
+dev = ["pytest>=8", "pytest-asyncio>=0.24"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
