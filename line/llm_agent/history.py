@@ -10,6 +10,7 @@ from line.events import (
     AgentDtmfSent,
     AgentEndCall,
     AgentHandedOff,
+    AgentSendCustom,
     AgentSendDtmf,
     AgentSendText,
     AgentTextSent,
@@ -501,8 +502,11 @@ def _to_history_event(event: object) -> Optional[HistoryEvent]:
         ),
     ):
         return event
-    # Non-history OutputEvents are filtered out
-    elif isinstance(event, (AgentTransferCall, LogMetric, LogMessage, AgentUpdateCall)):
+    # Non-history OutputEvents are filtered out. AgentSendCustom is a side channel
+    # to the harness (arbitrary metadata); it has no InputEvent counterpart and the
+    # LLM already sees the surrounding tool call/result pair, so it is not part of
+    # the model-visible history.
+    elif isinstance(event, (AgentTransferCall, LogMetric, LogMessage, AgentUpdateCall, AgentSendCustom)):
         return None
     else:
         raise ValueError(f"Unknown event type in history: {type(event).__name__}")
