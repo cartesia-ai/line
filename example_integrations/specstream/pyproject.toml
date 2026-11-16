@@ -1,0 +1,14 @@
+[project]
+name = "specstream-web-research"
+version = "0.1.0"
+description = "A web research voice agent using SpecStream API and Cartesia Line SDK"
+requires-python = ">=3.10"
+dependencies = [
+    "cartesia-line==0.2.19",
+    "aiohttp>=3.8.0",
+    "loguru>=0.7.3",
+    "python-dotenv>=1.0.0",
+]
+
+[project.scripts]
+specstream-research = "main:app.run"
